@@ -208,6 +208,17 @@ below.*
    referring to history in the changelog are fine).
 10. Full suite plus the regression test green; pyright (standard mode) clean.
 
+### Other consumers: sbem-ui
+
+sbem-ui (`MITSustainableDesignLab/globi-toolkit`, `apps/sbem-ui`) follows the
+epinterface version GLOBi pins and shares the component database. It uses only
+the pydantic component models, the composer (`construct_graph`,
+`construct_composer_model`, `ComponentNameConstructor`), `ComponentLibrary`,
+`PrismaSettings`, the schedule component models (`DayComponent`,
+`WeekComponent`, `YearComponent`) and `SemanticModelFields`. It never calls
+`add_to_idf`, `Model.build`/`run`/`simulate` or anything returning an archetypal
+object, so it needs no change beyond moving to 2.0 alongside GLOBi.
+
 ## Constraints
 
 - Python `>=3.10,<3.13` (idfkit supports `>=3.10`).
