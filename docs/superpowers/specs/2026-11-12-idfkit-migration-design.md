@@ -1,7 +1,7 @@
 # Replace archetypal/eppy/geomeppy with idfkit
 
 Date: 2026-11-12
-Status: draft, awaiting approval
+Status: awaiting approval
 
 ## Intent
 
@@ -131,11 +131,35 @@ Store as small parquet/CSV fixtures under `tests/data/regression/`, plus a
 script (`scripts/capture_regression_baseline.py`) that regenerates them, so
 the capture is reproducible and reviewable.
 
-After the migration, the test compares against the fixtures: labels and shapes
-exactly; values with `rtol=1e-3` and a small `atol` for near-zero entries
-(builder's call on exact atol). If a configuration cannot meet tolerance, the
-difference must be explained (e.g. a known geomeppy vs idfkit surface-ordering
-difference that does not change physics) and approved before loosening it.
+Also save, per configuration, a geometry summary: floor area, volume, and
+wall/roof/window gross area per zone, plus total window area.
+
+After the migration, the test compares against the fixtures:
+
+- **Labels and shapes: exact.** This includes zone names (see "Zone names").
+- **Geometry summary: exact** (to float tolerance, `rtol=1e-9`). Areas and
+  volumes are the physics; idfkit may split or order surfaces differently, but
+  the totals per zone must not change.
+- **Energy, peak, overheating and hourly values: `rtol=1e-3`**, with a small
+  `atol` for near-zero entries (builder's call on exact atol).
+
+If a configuration misses the 0.1% tolerance while the geometry summary
+matches, the PR description explains the cause (e.g. a different surface split
+from `intersect_and_match`), and the user signs off on that explanation in PR
+review. Tolerances are not loosened without that sign-off. Reproducing
+geomeppy's surfaces vertex for vertex is explicitly *not* required.
+
+## Zone names
+
+Zone names stay exactly as today (geomeppy's scheme, e.g. "Block … Storey 0"
+with core/perimeter suffixes, and "Attic"), and in the same order in the
+document. They reach GLOBi as the "Group" level of hourly parquet outputs and as
+overheating zone labels, so changing them would break continuity with results
+GLOBi has already stored. After building zones with idfkit, epinterface renames
+them to its own scheme with `doc.rename(...)` (which updates references). This
+is epinterface's naming convention, not an eppy compatibility layer. Code that
+matches on zone names today (`geometry.py` basement suffix, `sbem/builder.py`
+`zone_name_contains`) keeps working unchanged.
 
 EnergyPlus version: baselines are captured with one EnergyPlus version (the
 newest one in the CI matrix that archetypal 2.18.10 supports, currently 25.2.0)
@@ -171,13 +195,15 @@ below.*
    idfkit's field names (snake_case per epJSON schema) as idfkit recommends.
 6. **Geometry** (`geometry.py`): replace geomeppy `add_block` with
    `idfkit.zoning.create_block` (or lower-level builders where `ShoeboxGeometry`'s
-   basement, attic/gable and core/perimeter rules need them); `intersect_match`
+   basement, attic/gable and core/perimeter rules need them; idfkit has no
+   below-ground storeys, so the basement is built explicitly), then rename
+   zones to today's names (see "Zone names"); `intersect_match`
    → `idfkit.surface_matching.intersect_and_match`; `set_wwr`,
    `add_shading_block`, `set_default_constructions`, `bounding_box`,
    `scale_building`, `rotate_building`, `translate_building` → idfkit
    equivalents; `Polygon3D`/`Vector2D` from geomeppy → `idfkit.geometry`
-   (`Polygon3D`, `Vector3D`) or plain tuples/shapely. Surface names will
-   change: every place that matches on geomeppy-generated names (e.g.
+   (`Polygon3D`, `Vector3D`) or plain tuples/shapely. Surface names may
+   change (zone names do not): every place that matches on geomeppy-generated surface names (e.g.
    `builder.py:177`, "Project Wall") must match on idfkit's names or, better,
    on surface type/boundary condition. `tests/test_geometry.py` and
    `tests/test_neighbor_shading_geometry.py` are the guard here.
@@ -234,7 +260,9 @@ object, so it needs no change beyond moving to 2.0 alongside GLOBi.
 - Major version bump to 2.0.0.
 - `ModelRunResults.sql` kept as an attribute but now idfkit's `SQLResult`,
   rather than removed.
-- Regression tolerance `rtol=1e-3`; baselines captured against a single
+- Regression tolerance `rtol=1e-3` for results; geometry summary exact; misses
+  explained in the PR and signed off by the user (agreed). Zone names kept
+  (agreed). Baselines captured against a single
   EnergyPlus version, test skipped on others.
 - `ddy_interface_bayes.py` deleted; `climate_studio/` migrated, not deleted.
 - Year/Week/Day schedule objects may be emitted by an epinterface-owned
