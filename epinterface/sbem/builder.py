@@ -844,7 +844,7 @@ class Model(BaseWeather, validate_assignment=True):
         epw_path, ddy_path = self.fetch_weather(config.weather_dir)
         ep_version = energyplus_settings.version_tuple
         ep_version_str = version_string(ep_version)
-        desired_meters = DESIRED_METERS_FOR_VERSION[ep_version[0]]
+        desired_meters = DESIRED_METERS_FOR_VERSION[energyplus_settings.supported_major]
         output_meters = (
             [
                 {

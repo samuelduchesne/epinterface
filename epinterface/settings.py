@@ -22,16 +22,41 @@ def _normalize_energyplus_version(value: str) -> str:
     return ".".join(parts[:3])  # Take at most major.minor.patch
 
 
+# Majors with per-version meter/table definitions in epinterface.analysis,
+# newest first.
+SUPPORTED_ENERGYPLUS_MAJORS: tuple[int, ...] = (25, 24, 23, 22)
+
+
+class UnsupportedEnergyPlusVersionError(ValueError):
+    """Raised when an EnergyPlus major version has no per-version definitions."""
+
+
+def require_supported_major(major: int, version: str | None = None) -> int:
+    """Return `major` if supported, otherwise raise UnsupportedEnergyPlusVersionError."""
+    if major not in SUPPORTED_ENERGYPLUS_MAJORS:
+        msg = (
+            f"EnergyPlus version {version or major} is not supported; "
+            f"supported major versions are {sorted(SUPPORTED_ENERGYPLUS_MAJORS)}."
+        )
+        raise UnsupportedEnergyPlusVersionError(msg)
+    return major
+
+
 class EnergyPlusVersionNotSetError(ValueError):
     """Raised when an EnergyPlus version is required but none is configured."""
 
 
 def _get_installed_energyplus_version() -> str | None:
-    """Get the version of the discovered EnergyPlus installation as X.Y.Z."""
-    try:
-        return version_string(find_energyplus().version)
-    except EnergyPlusNotFoundError:
-        return None
+    """Get the newest installed EnergyPlus version (X.Y.Z) of a supported major."""
+    for major in SUPPORTED_ENERGYPLUS_MAJORS:
+        for minor in range(9, -1, -1):
+            try:
+                return version_string(
+                    find_energyplus(version=f"{major}.{minor}").version
+                )
+            except EnergyPlusNotFoundError:
+                continue
+    return None
 
 
 class EnergyPlusSettings(BaseSettings):
@@ -60,6 +85,11 @@ class EnergyPlusSettings(BaseSettings):
             return (major, minor, patch)
         msg = "No EnergyPlus version specified."
         raise EnergyPlusVersionNotSetError(msg)
+
+    @property
+    def supported_major(self) -> int:
+        """Get the configured EnergyPlus major version, checked to be supported."""
+        return require_supported_major(self.version_tuple[0], self.energyplus_version)
 
     @field_validator("energyplus_version", mode="before")
     @classmethod

@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 from archetypal.idfclass.sql import Sql
 
+from epinterface.settings import require_supported_major
+
 kWh_per_GJ = 277.778
 GJ_per_J = 1e-9
 
@@ -98,6 +100,7 @@ def standard_results_postprocess(
     Returns:
         series: The postprocessed results (Energy and Peak, with Aggregation and Meter index levels).
     """
+    require_supported_major(ep_version_major)
     desired_meters = DESIRED_METERS_FOR_VERSION[ep_version_major]
     raw_hourly = sql.timeseries_by_name(desired_meters, "Hourly")
     raw_monthly = sql.timeseries_by_name(desired_meters, "Monthly")
@@ -195,7 +198,8 @@ def standard_results_postprocess(
         raise ValueError(msg)
 
     energy_dfs = (
-        pd.concat(
+        pd
+        .concat(
             [raw_monthly, end_use_df, utilities_df],
             axis=1,
             keys=["Raw", "End Uses", "Utilities"],
