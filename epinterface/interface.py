@@ -1,23 +1,21 @@
 """Interface for EnergyPlus IDF objects."""
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from logging import getLogger
 from typing import Annotated, Any, ClassVar, Literal
 
 import numpy as np
-from archetypal.idfclass import IDF
-from archetypal.schedule import Schedule
+from idfkit import IDFDocument, IDFObject
 from pydantic import (
     BaseModel,
     BeforeValidator,
     Field,
-    ValidationError,
     computed_field,
     field_validator,
     model_validator,
 )
 
-from epinterface.settings import energyplus_settings
+from epinterface.schedules import HOURS_PER_YEAR, add_values_schedule
 
 try:
     from typing import Self
@@ -27,48 +25,119 @@ except ImportError:
 logger = getLogger(__name__)
 
 
+# idfkit names fields after the schema; the classes below keep their long-standing
+# (EnergyPlus-IDD style) names. Where the two differ beyond case, the candidates
+# are tried in order and the first one the document's schema knows is used.
+_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
+    "Zone_or_ZoneList_Name": (
+        "zone_or_zonelist_or_space_or_spacelist_name",
+        "zone_or_zonelist_name",
+    ),
+    "Watts_per_Zone_Floor_Area": ("watts_per_floor_area", "watts_per_zone_floor_area"),
+    "EndUse_Subcategory": ("end_use_subcategory", "enduse_subcategory"),
+    "UFactor": ("u_factor",),
+    **{
+        f"{day}_ScheduleDay_Name": (f"{day.lower()}_schedule_day_name",)
+        for day in (
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+            "Sunday",
+            "Holiday",
+            "SummerDesignDay",
+            "WinterDesignDay",
+            "CustomDay1",
+            "CustomDay2",
+        )
+    },
+}
+
+
+def _idf_field_names(
+    doc: IDFDocument, obj_type: str, names: Iterable[str]
+) -> dict[str, str]:
+    """Map class field names to the field names idfkit uses for `obj_type`."""
+    known = set(doc.schema.get_all_field_names(obj_type)) if doc.schema else set()
+    mapping: dict[str, str] = {}
+    for name in names:
+        candidates = (*_FIELD_ALIASES.get(name, ()), name.lower())
+        mapping[name] = next((c for c in candidates if c in known), name.lower())
+    return mapping
+
+
+def _add_object(
+    doc: IDFDocument, obj_type: str, data: dict[str, Any], **extra_fields: Any
+) -> IDFObject:
+    """Write one object; unset (None) fields are left blank.
+
+    A type EnergyPlus allows only once (e.g. `Timestep`) replaces the object
+    already in the document, so the result holds a single, current definition.
+    """
+    data = {k: v for k, v in data.items() if v is not None}
+    name = data.pop("Name", "")
+    mapping = _idf_field_names(doc, obj_type, data)
+    fields = {mapping[k]: v for k, v in data.items()} | extra_fields
+    obj_schema = doc.schema.get_object_schema(obj_type) if doc.schema else None
+    if obj_schema and obj_schema.get("maxProperties") == 1:
+        for existing in list(doc[obj_type]):
+            doc.removeidfobject(existing)
+    return doc.add(obj_type, name, fields)
+
+
 class BaseObj(BaseModel):
     """Base class for EnergyPlus IDF objects.
 
     The class should be inherited by all EnergyPlus IDF objects. It provides
-    methods to add and extract objects from an IDF object.
+    methods to add and extract objects from an IDF document.
     """
 
     key: ClassVar[str]
 
-    def add(self, idf: IDF):
-        """Add the object to the IDF object.
+    def add(self, doc: IDFDocument):
+        """Add the object to the IDF document.
 
         Args:
-            idf (IDF): The IDF object to add the object to.
+            doc (IDFDocument): The IDF document to add the object to.
 
         Returns:
-            idf (IDF): The updated IDF object.
+            doc (IDFDocument): The updated IDF document.
         """
-        idf.newidfobject(self.key, **self.model_dump())
-        return idf
+        _add_object(doc, self.key, self.model_dump())
+        return doc
 
     @classmethod
-    def extract(cls, idf: IDF) -> Sequence[Self]:
-        """Extract objects from an IDF object.
+    def _from_idf_object(cls, doc: IDFDocument, obj: IDFObject) -> Self:
+        """Build an instance from an idfkit object."""
+        fields = [f for f in cls.model_fields if f != "Name"]
+        values = obj.to_dict()
+        data: dict[str, Any] = {}
+        if "Name" in cls.model_fields:
+            data["Name"] = obj.name
+        for field, idf_name in _idf_field_names(doc, cls.key, fields).items():
+            if values.get(idf_name) not in (None, ""):
+                data[field] = values[idf_name]
+        return cls(**data)
+
+    @classmethod
+    def extract(cls, doc: IDFDocument) -> Sequence[Self]:
+        """Extract objects from an IDF document.
 
         Args:
-            idf (IDF): The IDF object to extract objects from.
+            doc (IDFDocument): The IDF document to extract objects from.
 
         Returns:
-            objs (list[BaseObj]): A list of objects extracted from the IDF object.
+            objs (list[BaseObj]): A list of objects extracted from the IDF document.
         """
-        objs = idf.idfobjects[cls.key]
-        try:
-            return [cls(**obj) for obj in objs]
-        except ValidationError:
-            return [cls(**obj.to_dict()) for obj in objs]
+        return [cls._from_idf_object(doc, obj) for obj in doc[cls.key]]
 
 
 class ScheduleTypeLimits(BaseObj, extra="ignore"):
     """ScheduleTypeLimits object."""
 
-    key: ClassVar[str] = "SCHEDULETYPELIMITS"
+    key: ClassVar[str] = "ScheduleTypeLimits"
     Name: str
     Lower_Limit_Value: float | None = None
     Upper_Limit_Value: float | None = None
@@ -97,7 +166,7 @@ class ScheduleTypeLimits(BaseObj, extra="ignore"):
 class SimulationControl(BaseObj, extra="ignore"):
     """SimulationControl object."""
 
-    key: ClassVar[str] = "SIMULATIONCONTROL"
+    key: ClassVar[str] = "SimulationControl"
     Do_Zone_Sizing_Calculation: Literal["Yes", "No"] = "Yes"
     Do_System_Sizing_Calculation: Literal["Yes", "No"] = "Yes"
     Do_Plant_Sizing_Calculation: Literal["Yes", "No"] = "Yes"
@@ -110,7 +179,7 @@ class SimulationControl(BaseObj, extra="ignore"):
 class RunPeriod(BaseObj, extra="ignore"):
     """RunPeriod object."""
 
-    key: ClassVar[str] = "RUNPERIOD"
+    key: ClassVar[str] = "RunPeriod"
     Name: str
     Begin_Month: int
     Begin_Day_of_Month: int
@@ -137,14 +206,14 @@ class RunPeriod(BaseObj, extra="ignore"):
 class Timestep(BaseObj, extra="ignore"):
     """Timestep object."""
 
-    key: ClassVar[str] = "TIMESTEP"
+    key: ClassVar[str] = "Timestep"
     Number_of_Timesteps_per_Hour: int = 6
 
 
 class SizingParameters(BaseObj, extra="ignore"):
     """SizingParameters object."""
 
-    key: ClassVar[str] = "SIZING:PARAMETERS"
+    key: ClassVar[str] = "Sizing:Parameters"
     Heating_Sizing_Factor: float
     Cooling_Sizing_Factor: float
 
@@ -152,7 +221,7 @@ class SizingParameters(BaseObj, extra="ignore"):
 class SiteGroundTemperature(BaseObj, extra="ignore"):
     """GroundTemperature object."""
 
-    key: ClassVar[str] = "SITE:GROUNDTEMPERATURE:BUILDINGSURFACE"
+    key: ClassVar[str] = "Site:GroundTemperature:BuildingSurface"
     January_Ground_Temperature: float
     February_Ground_Temperature: float
     March_Ground_Temperature: float
@@ -197,7 +266,7 @@ class SiteGroundTemperature(BaseObj, extra="ignore"):
 class InternalMass(BaseObj, extra="ignore"):
     """InternalMass object."""
 
-    key: ClassVar[str] = "INTERNALMASS"
+    key: ClassVar[str] = "InternalMass"
     Name: str
     Zone_or_ZoneList_Name: str
     Construction_Name: str
@@ -320,7 +389,7 @@ class DefaultMaterialLibrary(BaseModel):
 class Material(BaseObj, BaseMaterial, extra="ignore"):
     """Material object."""
 
-    key: ClassVar[str] = "MATERIAL"
+    key: ClassVar[str] = "Material"
     Name: str
     Thickness: float
 
@@ -347,7 +416,7 @@ class Material(BaseObj, BaseMaterial, extra="ignore"):
 class SimpleGlazingMaterial(BaseObj, extra="ignore"):
     """SimpleGlazingMaterial object."""
 
-    key: ClassVar[str] = "WINDOWMATERIAL:SIMPLEGLAZINGSYSTEM"
+    key: ClassVar[str] = "WindowMaterial:SimpleGlazingSystem"
     Name: str
     UFactor: float
     Solar_Heat_Gain_Coefficient: float
@@ -357,7 +426,7 @@ class SimpleGlazingMaterial(BaseObj, extra="ignore"):
 class AirGapMaterial(BaseObj, extra="ignore"):
     """AirGapMaterial object."""
 
-    key: ClassVar[str] = "MATERIAL:AIRGAP"
+    key: ClassVar[str] = "Material:AirGap"
     Name: str
     Thermal_Resistance: float
 
@@ -365,7 +434,7 @@ class AirGapMaterial(BaseObj, extra="ignore"):
 class NoMassMaterial(BaseObj, extra="ignore"):
     """NoMassMaterial object."""
 
-    key: ClassVar[str] = "MATERIAL:NOMASS"
+    key: ClassVar[str] = "Material:NoMass"
     Name: str
     Roughness: str
     Thermal_Resistance: float
@@ -374,7 +443,7 @@ class NoMassMaterial(BaseObj, extra="ignore"):
 class Construction(BaseObj, extra="ignore"):
     """Construction object."""
 
-    key: ClassVar[str] = "CONSTRUCTION"
+    key: ClassVar[str] = "Construction"
     name: str
     layers: Sequence[Material | AirGapMaterial | SimpleGlazingMaterial | NoMassMaterial]
 
@@ -407,107 +476,62 @@ class Construction(BaseObj, extra="ignore"):
         )
 
     @classmethod
-    def extract(cls, idf: IDF):
-        """Extract objects from an IDF object.
+    def extract(cls, doc: IDFDocument):
+        """Extract constructions (and their layer materials) from an IDF document.
 
         Args:
-            idf (IDF): The IDF object to extract objects from.
+            doc (IDFDocument): The IDF document to extract objects from.
 
         Returns:
-            constructions (list[Construction]): A list of objects extracted from the IDF object.
+            constructions (list[Construction]): A list of objects extracted from the IDF document.
         """
-        constructions = idf.idfobjects["CONSTRUCTION"]
+        layer_types = (Material, AirGapMaterial, SimpleGlazingMaterial, NoMassMaterial)
         res: list[Construction] = []
-        for construction in constructions:
-            const_dict = construction.to_dict()
+        for construction in doc["Construction"]:
             layer_names = [
-                const_dict[key]
-                for key in [
-                    "Outside_Layer",
-                    "Layer_2",
-                    "Layer_3",
-                    "Layer_4",
-                    "Layer_5",
-                    "Layer_6",
-                    "Layer_7",
-                    "Layer_8",
-                    "Layer_9",
-                    "Layer_10",
-                ]
-                if key in const_dict
+                name
+                for field, name in construction.to_dict().items()
+                if field != "name" and isinstance(name, str) and name
             ]
-
-            layer_names = [n for n in layer_names if n != "" and n]
-            material_defs = [
-                idf.getobject("MATERIAL", name) for name in layer_names
-            ]  # TODO: handle air layers
-            airgap_material_defs = [
-                idf.getobject("MATERIAL:AIRGAP", name) for name in layer_names
-            ]
-            simple_glazing_material_defs = [
-                idf.getobject("WINDOWMATERIAL:SIMPLEGLAZINGSYSTEM", name)
-                for name in layer_names
-            ]
-            no_mass_material_defs = [
-                idf.getobject("MATERIAL:NOMASS", name) for name in layer_names
-            ]
-            materials = [Material(**m.to_dict()) if m else None for m in material_defs]
-            airgap_materials = [
-                AirGapMaterial(**m.to_dict()) if m else None
-                for m in airgap_material_defs
-            ]
-            simple_glazing_materials = [
-                SimpleGlazingMaterial(**m.to_dict()) if m else None
-                for m in simple_glazing_material_defs
-            ]
-            nomass_materials = [
-                NoMassMaterial(**m.to_dict()) if m else None
-                for m in no_mass_material_defs
-            ]
-
-            layers = [
-                m if m else (n if n else (o if o else p))
-                for m, n, o, p in zip(
-                    materials,
-                    airgap_materials,
-                    simple_glazing_materials,
-                    nomass_materials,
-                    strict=False,
-                )
-            ]
-
-            valid_layers = [layer for layer in layers if layer is not None]
-            if len(valid_layers) != len(layers):
+            layers: list[
+                Material | AirGapMaterial | SimpleGlazingMaterial | NoMassMaterial
+            ] = []
+            for layer_name in layer_names:
+                for layer_type in layer_types:
+                    material = doc[layer_type.key].get(layer_name)
+                    if material is not None:
+                        layers.append(layer_type._from_idf_object(doc, material))
+                        break
+            if len(layers) != len(layer_names):
                 logger.warning(
-                    f"Construction {construction.Name} has missing layers. "
-                    f"Expected {len(layers)} layers, got {len(valid_layers)}."
+                    f"Construction {construction.name} has missing layers. "
+                    f"Expected {len(layer_names)} layers, got {len(layers)}."
                     f"Skipping construction extraction."
                 )
                 continue
-            construction = cls(name=construction.Name, layers=valid_layers)
-            res.append(construction)
+            res.append(cls(name=construction.name, layers=layers))
         return res
 
-    def add(self, idf: IDF):
-        """Add the object to the IDF object.
+    def add(self, doc: IDFDocument):
+        """Add the object to the IDF document.
 
         Args:
-            idf (IDF): The IDF object to add the object to.
+            doc (IDFDocument): The IDF document to add the object to.
 
         Returns:
-            idf (IDF): The updated IDF object.
+            doc (IDFDocument): The updated IDF document.
         """
         for layer in self.layers:
-            idf = layer.add(idf)
-        idf.newidfobject(
+            doc = layer.add(doc)
+        doc.add(
             self.key,
-            Name=self.name,
-            **{
-                (f"Layer_{i + 1}" if i != 0 else "Outside_Layer"): layer.Name
+            self.name,
+            {
+                (f"layer_{i + 1}" if i != 0 else "outside_layer"): layer.Name
                 for i, layer in enumerate(self.layers)
             },
         )
-        return idf
+        return doc
 
 
 IdealLoadsLimitType = Literal[
@@ -572,17 +596,17 @@ class HVACTemplateThermostat(BaseModel):
     Cooling_Setpoint_Schedule_Name: str | None = None
     Constant_Cooling_Setpoint: float | None = 24
 
-    def add(self, idf: IDF):
-        """Add the object to the IDF object.
+    def add(self, doc: IDFDocument):
+        """Add the object to the IDF document.
 
         Args:
-            idf (IDF): The IDF object to add the object to.
+            doc (IDFDocument): The IDF document to add the object to.
 
         Returns:
-            idf (IDF): The updated IDF object
+            doc (IDFDocument): The updated IDF document
         """
-        idf.newidfobject("HVACTEMPLATE:THERMOSTAT", **self.model_dump())
-        return idf
+        _add_object(doc, "HVACTemplate:Thermostat", self.model_dump())
+        return doc
 
 
 class HVACTemplateZoneIdealLoadsAirSystem(BaseModel):
@@ -619,35 +643,27 @@ class HVACTemplateZoneIdealLoadsAirSystem(BaseModel):
     Sensible_Heat_Recovery_Effectiveness: float = 0.7
     Latent_Heat_Recovery_Effectiveness: float = 0.65
 
-    def add(self, idf: IDF):
-        """Add the object to the IDF object.
+    def add(self, doc: IDFDocument):
+        """Add the object to the IDF document.
 
         Args:
-            idf (IDF): The IDF object to add the object to.
+            doc (IDFDocument): The IDF document to add the object to.
 
         Returns:
-            idf (IDF): The updated IDF object
+            doc (IDFDocument): The updated IDF document
         """
-        idf.newidfobject("HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM", **self.model_dump())
-        return idf
+        _add_object(doc, "HVACTemplate:Zone:IdealLoadsAirSystem", self.model_dump())
+        return doc
 
 
 DesignLevelCalculationMethodType = Literal["Watts/Area", "Watts/Person", "Watts"]
-
-
-def _energyplus_version_gte(major: float) -> bool:
-    """Return True if configured EnergyPlus version is >= major (e.g. 24.0)."""
-    try:
-        return energyplus_settings.version_tuple[0] >= major
-    except (ValueError, IndexError):
-        return False
 
 
 # TODO: add water mains?
 class WaterUseEquipment(BaseObj, extra="ignore"):
     """WaterUseEquipment object."""
 
-    key: ClassVar[str] = "WATERUSE:EQUIPMENT"
+    key: ClassVar[str] = "WaterUse:Equipment"
     Name: str
     EndUse_Subcategory: str | None = None
     Peak_Flow_Rate: float
@@ -663,7 +679,7 @@ class WaterUseEquipment(BaseObj, extra="ignore"):
 class ElectricEquipment(BaseObj, extra="ignore"):
     """ElectricEquipment object."""
 
-    key: ClassVar[str] = "ELECTRICEQUIPMENT"
+    key: ClassVar[str] = "ElectricEquipment"
     Name: str
     Zone_or_ZoneList_Name: str
     Schedule_Name: str
@@ -676,18 +692,11 @@ class ElectricEquipment(BaseObj, extra="ignore"):
     Fraction_Lost: float = 0
     EndUse_Subcategory: str | None = None
 
-    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
-        """Dump model to dict; use Watts_per_Floor_Area alias when EnergyPlus >= 24.0."""
-        data = super().model_dump(**kwargs)
-        if _energyplus_version_gte(24.0) and "Watts_per_Zone_Floor_Area" in data:
-            data["Watts_per_Floor_Area"] = data.pop("Watts_per_Zone_Floor_Area")
-        return data
-
 
 class Lights(BaseObj, extra="ignore"):
     """Lights object."""
 
-    key: ClassVar[str] = "LIGHTS"
+    key: ClassVar[str] = "Lights"
     Name: str
     Zone_or_ZoneList_Name: str
     Schedule_Name: str
@@ -700,13 +709,6 @@ class Lights(BaseObj, extra="ignore"):
     Fraction_Visible: float = 0.18
     Fraction_Replaceable: float | None = 1
     EndUse_Subcategory: str | None = None
-
-    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
-        """Dump model to dict; use Watts_per_Floor_Area alias when EnergyPlus >= 24.0."""
-        data = super().model_dump(**kwargs)
-        if _energyplus_version_gte(24.0) and "Watts_per_Zone_Floor_Area" in data:
-            data["Watts_per_Floor_Area"] = data.pop("Watts_per_Zone_Floor_Area")
-        return data
 
 
 InfDesignFlowRateCalculationMethodType = Literal[
@@ -726,7 +728,7 @@ VentilationType = Literal["Natural", "Exhaust", "Intake", "Balanced"]
 class ZoneVentilationWindAndStackOpenArea(BaseObj, extra="ignore"):
     """ZoneVentilationWindAndStackOpenArea object."""
 
-    key: ClassVar[str] = "ZONEVENTILATION:WINDANDSTACKOPENAREA"
+    key: ClassVar[str] = "ZoneVentilation:WindandStackOpenArea"
     Name: str
     Zone_or_Space_Name: str
     Opening_Area: float
@@ -751,7 +753,7 @@ class ZoneVentilationWindAndStackOpenArea(BaseObj, extra="ignore"):
 class ZoneInfiltrationDesignFlowRate(BaseObj, extra="ignore"):
     """ZoneInfiltrationDesignFlowRate object."""
 
-    key: ClassVar[str] = "ZONEINFILTRATION:DESIGNFLOWRATE"
+    key: ClassVar[str] = "ZoneInfiltration:DesignFlowRate"
     Name: str
     Zone_or_ZoneList_Name: str
     Schedule_Name: str
@@ -777,7 +779,7 @@ NumberOfPeopleCalculationMethodType = Literal["People", "People/Area", "Area/Per
 class People(BaseObj, extra="ignore"):
     """People object."""
 
-    key: ClassVar[str] = "PEOPLE"
+    key: ClassVar[str] = "People"
     Name: str
     Zone_or_ZoneList_Name: str
     Number_of_People_Schedule_Name: str
@@ -805,7 +807,7 @@ class People(BaseObj, extra="ignore"):
 class ScheduleDayHourly(BaseObj, extra="ignore"):
     """ScheduleDayHourly object."""
 
-    key: ClassVar[str] = "SCHEDULE:DAY:HOURLY"
+    key: ClassVar[str] = "Schedule:Day:Hourly"
     Name: str
     Schedule_Type_Limits_Name: str
     Hour_1: float
@@ -837,7 +839,7 @@ class ScheduleDayHourly(BaseObj, extra="ignore"):
 class ScheduleWeekDaily(BaseObj, extra="ignore"):
     """ScheduleWeekDaily object."""
 
-    key: ClassVar[str] = "SCHEDULE:WEEK:DAILY"
+    key: ClassVar[str] = "Schedule:Week:Daily"
     Name: str
     Monday_ScheduleDay_Name: str
     Tuesday_ScheduleDay_Name: str
@@ -880,7 +882,7 @@ class ScheduleWeekDaily(BaseObj, extra="ignore"):
 class ScheduleYear(BaseObj, extra="ignore"):
     """ScheduleYear object."""
 
-    key: ClassVar[str] = "SCHEDULE:YEAR"
+    key: ClassVar[str] = "Schedule:Year"
     Name: str
     Schedule_Type_Limits_Name: str
 
@@ -956,6 +958,35 @@ class ScheduleYear(BaseObj, extra="ignore"):
     End_Month_12: int | None = None
     End_Day_12: int | None = None
 
+    def add(self, doc: IDFDocument):
+        """Add the object to the IDF document.
+
+        Args:
+            doc (IDFDocument): The IDF document to add the object to.
+
+        Returns:
+            doc (IDFDocument): The updated IDF document.
+        """
+        data = self.model_dump()
+        weeks = [
+            {
+                "schedule_week_name": data[f"ScheduleWeek_Name_{i}"],
+                "start_month": data[f"Start_Month_{i}"],
+                "start_day": data[f"Start_Day_{i}"],
+                "end_month": data[f"End_Month_{i}"],
+                "end_day": data[f"End_Day_{i}"],
+            }
+            for i in range(1, 13)
+            if data[f"ScheduleWeek_Name_{i}"] is not None
+        ]
+        doc.add(
+            self.key,
+            self.Name,
+            schedule_type_limits_name=self.Schedule_Type_Limits_Name,
+            schedule_weeks=weeks,
+        )
+        return doc
+
 
 class ZoneList(BaseModel, extra="ignore"):
     """ZoneList object."""
@@ -963,30 +994,31 @@ class ZoneList(BaseModel, extra="ignore"):
     Name: str
     Names: list[str]
 
-    def add(self, idf: IDF):
-        """Add the object to the IDF object.
+    def add(self, doc: IDFDocument):
+        """Add the object to the IDF document.
 
         Args:
-            idf (IDF): The IDF object to add the object to.
+            doc (IDFDocument): The IDF document to add the object to.
 
         Returns:
-            idf (IDF): The updated IDF object.
+            doc (IDFDocument): The updated IDF document.
         """
-        names = {
-            f"Zone_{i + 1}_Name": zone for i, zone in enumerate(self.Names) if zone
-        }
-        idf.newidfobject("ZONELIST", Name=self.Name, **names)
-        return idf
+        doc.add(
+            "ZoneList",
+            self.Name,
+            zones=[{"zone_name": zone} for zone in self.Names if zone],
+        )
+        return doc
 
 
-def add_default_sim_controls(idf: IDF) -> IDF:
+def add_default_sim_controls(doc: IDFDocument) -> IDFDocument:
     """Helper to add default simulation controls to the IDF model.
 
     Args:
-        idf (IDF): The IDF model to add the simulation controls to.
+        doc (IDFDocument): The IDF model to add the simulation controls to.
 
     Returns:
-        IDF: The IDF model with the added simulation controls.
+        IDFDocument: The IDF model with the added simulation controls.
     """
     # Configure simulation
     sim_control = SimulationControl(
@@ -998,7 +1030,7 @@ def add_default_sim_controls(idf: IDF) -> IDF:
         Do_HVAC_Sizing_Simulation_for_Sizing_Periods="Yes",
         Maximum_Number_of_HVAC_Sizing_Simulation_Passes=2,
     )
-    sim_control.add(idf)
+    sim_control.add(doc)
 
     # Configure run period
     run_period = RunPeriod(
@@ -1013,81 +1045,64 @@ def add_default_sim_controls(idf: IDF) -> IDF:
         End_Day_of_Month=31,
         Day_of_Week_for_Start_Day="Sunday",
     )
-    run_period.add(idf)
+    run_period.add(doc)
 
     # configure timestep
     timestep = Timestep(
         Number_of_Timesteps_per_Hour=6,
     )
-    timestep.add(idf)
+    timestep.add(doc)
 
     sizing = SizingParameters(
         Heating_Sizing_Factor=1.15,
         Cooling_Sizing_Factor=1.15,
     )
-    sizing.add(idf)
+    sizing.add(doc)
 
-    return idf
+    return doc
 
 
-def add_default_schedules(idf: IDF) -> tuple[IDF, dict[str, Schedule]]:
+def add_constant_schedule(
+    doc: IDFDocument, name: str, value: float, type_limits: str = "Fraction"
+) -> IDFObject:
+    """Add a constant schedule as `Schedule:Year`/`Week:Daily`/`Day:Hourly` objects.
+
+    Args:
+        doc (IDFDocument): The IDF document to add the schedule to.
+        name (str): The name of the `Schedule:Year`.
+        value (float): The value held all year.
+        type_limits (str): The name of an existing `ScheduleTypeLimits`.
+
+    Returns:
+        IDFObject: The `Schedule:Year` object.
+    """
+    return add_values_schedule(doc, name, [value] * HOURS_PER_YEAR, type_limits)
+
+
+DEFAULT_CONSTANT_SCHEDULE_PAIRS = (
+    ("Always_On", "Always_Off"),
+    ("Always On", "Always Off"),
+    ("On", "Off"),
+    ("AllOn", "AllOff"),
+    ("AlwaysOn", "AlwaysOff"),
+)
+
+
+def add_default_schedules(doc: IDFDocument) -> tuple[IDFDocument, dict[str, IDFObject]]:
     """Helper to add default schedules to the IDF model.
 
     Args:
-        idf (IDF): The IDF model to add the schedules to.
+        doc (IDFDocument): The IDF model to add the schedules to.
 
     Returns:
-        idf (IDF): The IDF model with the added schedules.
-        scheds (dict[str, Schedule]): A dictionary of the added schedules.
+        doc (IDFDocument): The IDF model with the added schedules.
+        scheds (dict[str, IDFObject]): The added `Schedule:Year` objects by name.
     """
-    # create constant scheds
-    all_scheds: dict[str, Schedule] = {}
-    always_on_schedule = Schedule.constant_schedule(Name="Always_On", value=1)
-    always_off_schedule = Schedule.constant_schedule(Name="Always_Off", value=0)
-    all_scheds["Always_On"] = always_on_schedule
-    all_scheds["Always_Off"] = always_off_schedule
-    year, *_ = always_on_schedule.to_year_week_day()
-    year.to_epbunch(idf)
-    year, *_ = always_off_schedule.to_year_week_day()
-    year.to_epbunch(idf)
-
-    always_on_schedule = Schedule.constant_schedule(Name="Always On", value=1)
-    always_off_schedule = Schedule.constant_schedule(Name="Always Off", value=0)
-    all_scheds["Always On"] = always_on_schedule
-    all_scheds["Always Off"] = always_off_schedule
-    year, *_ = always_on_schedule.to_year_week_day()
-    year.to_epbunch(idf)
-    year, *_ = always_off_schedule.to_year_week_day()
-    year.to_epbunch(idf)
-
-    always_on_schedule = Schedule.constant_schedule(Name="On", value=1)
-    always_off_schedule = Schedule.constant_schedule(Name="Off", value=0)
-    all_scheds["On"] = always_on_schedule
-    all_scheds["Off"] = always_off_schedule
-    year, *_ = always_on_schedule.to_year_week_day()
-    year.to_epbunch(idf)
-    year, *_ = always_off_schedule.to_year_week_day()
-    year.to_epbunch(idf)
-
-    always_on_schedule = Schedule.constant_schedule(Name="AllOn", value=1)
-    always_off_schedule = Schedule.constant_schedule(Name="AllOff", value=0)
-    all_scheds["AllOn"] = always_on_schedule
-    all_scheds["AllOff"] = always_off_schedule
-    year, *_ = always_on_schedule.to_year_week_day()
-    year.to_epbunch(idf)
-    year, *_ = always_off_schedule.to_year_week_day()
-    year.to_epbunch(idf)
-
-    always_on_schedule = Schedule.constant_schedule(Name="AlwaysOn", value=1)
-    always_off_schedule = Schedule.constant_schedule(Name="AlwaysOff", value=0)
-    all_scheds["AlwaysOn"] = always_on_schedule
-    all_scheds["AlwaysOff"] = always_off_schedule
-    year, *_ = always_on_schedule.to_year_week_day()
-    year.to_epbunch(idf)
-    year, *_ = always_off_schedule.to_year_week_day()
-    year.to_epbunch(idf)
-
-    return idf, all_scheds
+    all_scheds: dict[str, IDFObject] = {}
+    for on_name, off_name in DEFAULT_CONSTANT_SCHEDULE_PAIRS:
+        all_scheds[on_name] = add_constant_schedule(doc, on_name, 1)
+        all_scheds[off_name] = add_constant_schedule(doc, off_name, 0)
+    return doc, all_scheds
 
 
 PROTECTED_SCHEDULE_NAMES = {
