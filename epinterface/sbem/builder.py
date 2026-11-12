@@ -19,6 +19,7 @@ import pandas as pd
 import yaml
 from archetypal.idfclass import IDF
 from archetypal.idfclass.sql import Sql
+from idfkit import version_string
 from ladybug.epw import EPW
 from numpy.typing import NDArray
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -841,8 +842,9 @@ class Model(BaseWeather, validate_assignment=True):
         target_base_filepath = config.output_dir / "Minimal.idf"
         shutil.copy(base_filepath, target_base_filepath)
         epw_path, ddy_path = self.fetch_weather(config.weather_dir)
-        ep_version = energyplus_settings.archetypal_energyplus_version
-        desired_meters = DESIRED_METERS_FOR_VERSION[ep_version.major]
+        ep_version = energyplus_settings.version_tuple
+        ep_version_str = version_string(ep_version)
+        desired_meters = DESIRED_METERS_FOR_VERSION[ep_version[0]]
         output_meters = (
             [
                 {
@@ -872,8 +874,8 @@ class Model(BaseWeather, validate_assignment=True):
         )
         idf = IDF(
             target_base_filepath.as_posix(),
-            as_version=ep_version.dot,
-            file_version=ep_version.dot,
+            as_version=ep_version_str,
+            file_version=ep_version_str,
             prep_outputs=output_meters,  # pyright: ignore [reportArgumentType]
             epw=epw_path.as_posix(),
             output_directory=config.output_dir.as_posix(),

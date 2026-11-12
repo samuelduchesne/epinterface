@@ -2,11 +2,8 @@
 
 from typing import Any
 
-from archetypal import EnergyPlusVersion
-from archetypal.eplus_interface.exceptions import (
-    EnergyPlusVersionError,
-    InvalidEnergyPlusVersion,
-)
+from idfkit import EnergyPlusNotFoundError, version_string
+from idfkit.simulation import find_energyplus
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -25,18 +22,22 @@ def _normalize_energyplus_version(value: str) -> str:
     return ".".join(parts[:3])  # Take at most major.minor.patch
 
 
-def _get_latest_energyplus_version() -> str | None:
-    """Get the latest EnergyPlus version."""
+class EnergyPlusVersionNotSetError(ValueError):
+    """Raised when an EnergyPlus version is required but none is configured."""
+
+
+def _get_installed_energyplus_version() -> str | None:
+    """Get the version of the discovered EnergyPlus installation as X.Y.Z."""
     try:
-        return EnergyPlusVersion.latest().dash
-    except EnergyPlusVersionError:
+        return version_string(find_energyplus().version)
+    except EnergyPlusNotFoundError:
         return None
 
 
 class EnergyPlusSettings(BaseSettings):
     """Settings for EnergyPlus version and configuration.
 
-    The EnergyPlus version is used when creating IDF objects via archetypal.idfclass.IDF.
+    The EnergyPlus version is used when creating IDF objects via idfkit.
     It determines which EnergyPlus schema/IDD version is used for parsing and validation.
     """
 
@@ -48,16 +49,17 @@ class EnergyPlusSettings(BaseSettings):
     )
 
     energyplus_version: str | None = Field(
-        default_factory=_get_latest_energyplus_version
+        default_factory=_get_installed_energyplus_version
     )
 
     @property
-    def archetypal_energyplus_version(self) -> EnergyPlusVersion:
-        """Get the Archetypal EnergyPlus version."""
+    def version_tuple(self) -> tuple[int, int, int]:
+        """Get the configured EnergyPlus version as (major, minor, patch)."""
         if self.energyplus_version:
-            return EnergyPlusVersion(self.energyplus_version)
+            major, minor, patch = (int(p) for p in self.energyplus_version.split("."))
+            return (major, minor, patch)
         msg = "No EnergyPlus version specified."
-        raise InvalidEnergyPlusVersion(msg)
+        raise EnergyPlusVersionNotSetError(msg)
 
     @field_validator("energyplus_version", mode="before")
     @classmethod

@@ -638,7 +638,7 @@ DesignLevelCalculationMethodType = Literal["Watts/Area", "Watts/Person", "Watts"
 def _energyplus_version_gte(major: float) -> bool:
     """Return True if configured EnergyPlus version is >= major (e.g. 24.0)."""
     try:
-        return energyplus_settings.archetypal_energyplus_version.major >= major
+        return energyplus_settings.version_tuple[0] >= major
     except (ValueError, IndexError):
         return False
 
