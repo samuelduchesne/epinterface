@@ -18,8 +18,8 @@ import numpy as np
 import pandas as pd
 import yaml
 from archetypal.idfclass import IDF
-from archetypal.idfclass.sql import Sql
 from idfkit import version_string
+from idfkit.simulation.parsers.sql import SQLResult
 from ladybug.epw import EPW
 from numpy.typing import NDArray
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -44,6 +44,7 @@ from epinterface.interface import (
     add_default_schedules,
     add_default_sim_controls,
 )
+from epinterface.results import timeseries_frame
 from epinterface.sbem.components.composer import (
     construct_composer_model,
     construct_graph,
@@ -1051,7 +1052,7 @@ class Model(BaseWeather, validate_assignment=True):
         self,
         config: SimulationPathConfig,
         post_geometry_callback: Callable[[IDF], IDF] | None = None,
-    ) -> tuple[IDF, Sql]:
+    ) -> tuple[IDF, SQLResult]:
         """Build and simualte the idf model.
 
         Args:
@@ -1060,11 +1061,14 @@ class Model(BaseWeather, validate_assignment=True):
 
         Returns:
             idf (IDF): The built energy model.
-            sql (Sql): The sql results file with simulation data.
+            sql (SQLResult): The sql results file with simulation data.
         """
         idf = self.build(config, post_geometry_callback)
         idf.simulate()
-        sql = Sql(idf.sql_file)
+        if idf.sql_file is None:
+            msg = "Simulation produced no SQLite results file."
+            raise FileNotFoundError(msg)
+        sql = SQLResult(idf.sql_file)
         return idf, sql
 
     def get_warnings(self, idf: IDF) -> str:
@@ -1084,7 +1088,7 @@ class Model(BaseWeather, validate_assignment=True):
         return err_text
 
     def standard_results_postprocess(
-        self, sql: Sql, ep_version_major: int
+        self, sql: SQLResult, ep_version_major: int
     ) -> pd.Series:
         """Postprocess the sql file to get the standard results.
 
@@ -1093,7 +1097,7 @@ class Model(BaseWeather, validate_assignment=True):
         - Meter: ["Electricity", "Cooling", "Heating", "Domestic Hot Water"], ["Electricity", "Propane", ...]
 
         Args:
-            sql (Sql): The sql file to postprocess.
+            sql (SQLResult): The sql file to postprocess.
             ep_version_major (int): The major version of EnergyPlus.
 
         Returns:
@@ -1295,7 +1299,7 @@ class ModelRunResults:
     """The results of a model run."""
 
     idf: IDF
-    sql: Sql
+    sql: SQLResult
     energy_and_peak: pd.Series
     err_text: str
     output_dir: Path | None
@@ -1308,11 +1312,9 @@ class ModelRunResults:
             names (Sequence[str]): The EnergyPlus output variable/meter names.
 
         Returns:
-            pd.DataFrame: The hourly timeseries, one column per (name, key).
+            pd.DataFrame: A plain pandas DataFrame of the hourly timeseries, one column per (name, key).
         """
-        raw = self.sql.timeseries_by_name(list(names), reporting_frequency="Hourly")
-        # archetypal returns an EnergyDataFrame subclass; hand back a plain frame.
-        return pd.DataFrame(raw.to_numpy(), index=raw.index, columns=raw.columns)
+        return timeseries_frame(self.sql, names, "Hourly")
 
 
 if __name__ == "__main__":

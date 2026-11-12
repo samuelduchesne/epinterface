@@ -4,8 +4,9 @@ from typing import cast
 
 import numpy as np
 import pandas as pd
-from archetypal.idfclass.sql import Sql
+from idfkit.simulation.parsers.sql import SQLResult
 
+from epinterface.results import tabular_frame, timeseries_frame
 from epinterface.settings import require_supported_major
 
 kWh_per_GJ = 277.778
@@ -67,7 +68,7 @@ TABULAR_DATA_COLUMNS_FOR_VERSION = {
 
 
 def standard_results_postprocess(
-    sql: Sql,
+    sql: SQLResult,
     *,
     normalizing_floor_area: float,
     heat_cop: float,
@@ -102,9 +103,9 @@ def standard_results_postprocess(
     """
     require_supported_major(ep_version_major)
     desired_meters = DESIRED_METERS_FOR_VERSION[ep_version_major]
-    raw_hourly = sql.timeseries_by_name(desired_meters, "Hourly")
-    raw_monthly = sql.timeseries_by_name(desired_meters, "Monthly")
-    raw_df = sql.tabular_data_by_name(ANNUAL_SUMMARY_REPORT, END_USES_TABLE)
+    raw_hourly = timeseries_frame(sql, desired_meters, "Hourly")
+    raw_monthly = timeseries_frame(sql, desired_meters, "Monthly")
+    raw_df = tabular_frame(sql, ANNUAL_SUMMARY_REPORT, END_USES_TABLE)
 
     raw_df_relevant = (
         raw_df[[*TABULAR_DATA_COLUMNS_FOR_VERSION[ep_version_major]]].droplevel(
