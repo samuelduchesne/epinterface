@@ -7,7 +7,7 @@ import os
 import shutil
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -1298,6 +1298,19 @@ class ModelRunResults:
     err_text: str
     output_dir: Path | None
     overheating_results: OverheatingAnalysisResults | None = None
+
+    def hourly_timeseries(self, names: Sequence[str]) -> pd.DataFrame:
+        """Get hourly timeseries for the named output variables or meters.
+
+        Args:
+            names (Sequence[str]): The EnergyPlus output variable/meter names.
+
+        Returns:
+            pd.DataFrame: The hourly timeseries, one column per (name, key).
+        """
+        raw = self.sql.timeseries_by_name(list(names), reporting_frequency="Hourly")
+        # archetypal returns an EnergyDataFrame subclass; hand back a plain frame.
+        return pd.DataFrame(raw.to_numpy(), index=raw.index, columns=raw.columns)
 
 
 if __name__ == "__main__":
