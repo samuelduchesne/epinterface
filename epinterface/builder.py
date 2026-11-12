@@ -26,6 +26,7 @@ from epinterface.interface import (
     ZoneInfiltrationDesignFlowRate,
     ZoneList,
     add_constant_schedule,
+    ensure_fraction_type_limits,
 )
 from epinterface.schedules import HOURS_PER_YEAR, add_values_schedule
 from epinterface.settings import energyplus_settings
@@ -208,7 +209,10 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
             schedules.Occupancy.values.tolist(),
             type_limits="Fraction",
         )
-        ScheduleTypeLimits(Name="any number").add(idf)
+        ensure_fraction_type_limits(idf)
+        ScheduleTypeLimits(
+            Name="any number", Numeric_Type="Continuous", Unit_Type="Dimensionless"
+        ).add(idf)
         acti_year = add_values_schedule(
             idf,
             "Activity_Schedule",

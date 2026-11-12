@@ -31,6 +31,7 @@ from epinterface.interface import (
     add_constant_schedule,
     add_default_schedules,
     add_default_sim_controls,
+    ensure_fraction_type_limits,
     stucco,
 )
 
@@ -328,6 +329,7 @@ def test_constant_schedule_uses_archetypal_object_names(doc):
     """A constant schedule is a Year/Week/Day chain with the legacy names."""
     year = add_constant_schedule(doc, "Always_On", 1)
     assert year.schedule_type_limits_name == "Fraction"
+    _assert_fraction_limits(doc)
     assert doc["Schedule:Week:Daily"]["w_Always_On_00"] is not None
     assert doc["Schedule:Day:Hourly"]["d_Always_On_00"].hour_12 == 1
     values = idfkit.schedules.values(year, year=2018, document=doc)
@@ -338,6 +340,7 @@ def test_add_default_schedules_names(doc):
     """The ten protected on/off schedules exist with their values."""
     returned, scheds = add_default_schedules(doc)
     assert returned is doc
+    _assert_fraction_limits(doc)
     assert set(scheds) == {
         "Always_On",
         "Always_Off",
@@ -355,3 +358,44 @@ def test_add_default_schedules_names(doc):
         expected = 0 if "ff" in name else 1
         values = np.asarray(idfkit.schedules.values(sched, year=2018, document=doc))
         assert np.all(values == expected)
+
+
+def _assert_fraction_limits(doc):
+    limits = doc["ScheduleTypeLimits"]["Fraction"]
+    assert len(doc["ScheduleTypeLimits"]) == 1
+    assert (limits.lower_limit_value, limits.upper_limit_value) == (0, 1)
+    assert limits.numeric_type == "Continuous"
+    assert limits.unit_type == "Dimensionless"
+
+
+def test_ensure_fraction_type_limits_is_idempotent(doc):
+    """Asking twice yields the one object."""
+    first = ensure_fraction_type_limits(doc)
+    assert ensure_fraction_type_limits(doc) is first
+    assert len(doc["ScheduleTypeLimits"]) == 1
+
+
+def test_constructions_share_a_layer_material(doc):
+    """A second construction reusing a layer does not duplicate the material."""
+    Construction(name="A", layers=[stucco.as_layer(0.03)]).add(doc)
+    Construction(name="B", layers=[stucco.as_layer(0.03), stucco.as_layer(0.05)]).add(
+        doc
+    )
+    assert len(doc["Material"]) == 2
+    assert doc["Construction"]["B"].outside_layer == "Stucco_0.03m"
+    assert doc["Construction"]["B"].layer_2 == "Stucco_0.05m"
+
+
+def test_same_name_different_fields_replaces(doc):
+    """Re-adding a name with new values replaces the object, as archetypal did."""
+    Construction(name="A", layers=[stucco.as_layer(0.03)]).add(doc)
+    Construction(name="A", layers=[stucco.as_layer(0.05)]).add(doc)
+    assert len(doc["Construction"]) == 1
+    assert doc["Construction"]["A"].outside_layer == "Stucco_0.05m"
+    SimpleGlazingMaterial(
+        Name="G", UFactor=2, Solar_Heat_Gain_Coefficient=0.5, Visible_Transmittance=0.6
+    ).add(doc)
+    SimpleGlazingMaterial(
+        Name="G", UFactor=3, Solar_Heat_Gain_Coefficient=0.5, Visible_Transmittance=0.6
+    ).add(doc)
+    assert doc["WindowMaterial:SimpleGlazingSystem"]["G"].u_factor == 3

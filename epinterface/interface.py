@@ -5,7 +5,7 @@ from logging import getLogger
 from typing import Annotated, Any, ClassVar, Literal
 
 import numpy as np
-from idfkit import IDFDocument, IDFObject
+from idfkit import IDFDocument, IDFObject, create_schedule_type_limits
 from pydantic import (
     BaseModel,
     BeforeValidator,
@@ -75,6 +75,9 @@ def _add_object(
 
     A type EnergyPlus allows only once (e.g. `Timestep`) replaces the object
     already in the document, so the result holds a single, current definition.
+    An object whose type and name already exist (e.g. a material shared by
+    several constructions) is returned as is when its fields are identical and
+    replaced otherwise.
     """
     data = {k: v for k, v in data.items() if v is not None}
     name = data.pop("Name", "")
@@ -84,6 +87,15 @@ def _add_object(
     if obj_schema and obj_schema.get("maxProperties") == 1:
         for existing in list(doc[obj_type]):
             doc.removeidfobject(existing)
+    elif name and (existing := doc[obj_type].get(name)) is not None:
+        stored = {
+            k: v
+            for k, v in existing.to_dict().items()
+            if k != "name" and v not in (None, "")
+        }
+        if stored == {k: v for k, v in fields.items() if v not in (None, "")}:
+            return existing
+        doc.removeidfobject(existing)
     return doc.add(obj_type, name, fields)
 
 
@@ -523,12 +535,15 @@ class Construction(BaseObj, extra="ignore"):
         """
         for layer in self.layers:
             doc = layer.add(doc)
-        doc.add(
+        _add_object(
+            doc,
             self.key,
-            self.name,
             {
-                (f"layer_{i + 1}" if i != 0 else "outside_layer"): layer.Name
-                for i, layer in enumerate(self.layers)
+                "Name": self.name,
+                **{
+                    (f"layer_{i + 1}" if i != 0 else "outside_layer"): layer.Name
+                    for i, layer in enumerate(self.layers)
+                },
             },
         )
         return doc
@@ -979,10 +994,13 @@ class ScheduleYear(BaseObj, extra="ignore"):
             for i in range(1, 13)
             if data[f"ScheduleWeek_Name_{i}"] is not None
         ]
-        doc.add(
+        _add_object(
+            doc,
             self.key,
-            self.Name,
-            schedule_type_limits_name=self.Schedule_Type_Limits_Name,
+            {
+                "Name": self.Name,
+                "Schedule_Type_Limits_Name": self.Schedule_Type_Limits_Name,
+            },
             schedule_weeks=weeks,
         )
         return doc
@@ -1003,9 +1021,10 @@ class ZoneList(BaseModel, extra="ignore"):
         Returns:
             doc (IDFDocument): The updated IDF document.
         """
-        doc.add(
+        _add_object(
+            doc,
             "ZoneList",
-            self.Name,
+            {"Name": self.Name},
             zones=[{"zone_name": zone} for zone in self.Names if zone],
         )
         return doc
@@ -1062,6 +1081,18 @@ def add_default_sim_controls(doc: IDFDocument) -> IDFDocument:
     return doc
 
 
+def ensure_fraction_type_limits(doc: IDFDocument) -> IDFObject:
+    """Return the `Fraction` ScheduleTypeLimits, creating it (0 to 1) if missing.
+
+    archetypal wrote this object together with every schedule that used it.
+    """
+    if "Fraction" in doc["ScheduleTypeLimits"]:
+        return doc["ScheduleTypeLimits"]["Fraction"]
+    return create_schedule_type_limits(
+        doc, "Fraction", 0, 1, "Continuous", "Dimensionless"
+    )
+
+
 def add_constant_schedule(
     doc: IDFDocument, name: str, value: float, type_limits: str = "Fraction"
 ) -> IDFObject:
@@ -1076,6 +1107,8 @@ def add_constant_schedule(
     Returns:
         IDFObject: The `Schedule:Year` object.
     """
+    if type_limits == "Fraction":
+        ensure_fraction_type_limits(doc)
     return add_values_schedule(doc, name, [value] * HOURS_PER_YEAR, type_limits)
 
 
