@@ -6,10 +6,11 @@ in `GEOMETRY_SURFACE_CASES` with it, and writes a name-independent description
 of every surface (see `tests.regression.summary.surface_records`) to
 `tests/data/regression/geometry_surfaces.json`.
 
-It needs archetypal and geomeppy installed and the git history available.
+It is kept as provenance for the committed fixture and is not part of the test
+suite. archetypal is no longer a dependency of epinterface (2.0.0), so run it
+ad hoc with a temporary pin, with the git history available:
 
-Usage:
-    EPINTERFACE_ENERGYPLUS_VERSION=25.2.0 uv run python scripts/capture_geometry_surfaces.py
+    EPINTERFACE_ENERGYPLUS_VERSION=25.2.0 uv run --with archetypal==2.18.10 python scripts/capture_geometry_surfaces.py
 """
 
 import importlib.util

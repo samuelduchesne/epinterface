@@ -118,65 +118,6 @@ def _year_field_values(obj):
     ])
 
 
-def _archetypal_field_values(epbunch):
-    """Name and field values of an archetypal (eppy) object."""
-    return _normalize(epbunch.fieldvalues[1:])
-
-
-@pytest.fixture
-def idf(tmp_path):
-    """An archetypal IDF of the minimal model, for the comparison below (remove in Task 10)."""
-    from archetypal.idfclass import IDF
-
-    from epinterface.data import EnergyPlusArtifactDir
-    from epinterface.settings import energyplus_settings
-
-    target = tmp_path / "Minimal.idf"
-    target.write_text((EnergyPlusArtifactDir / "Minimal.idf").read_text())
-    return IDF(
-        target.as_posix(),
-        as_version=energyplus_settings.energyplus_version,  # pyright: ignore [reportArgumentType]
-        file_version=energyplus_settings.energyplus_version,
-        prep_outputs=True,
-        output_directory=tmp_path.as_posix(),
-    )
-
-
-def test_add_values_schedule_matches_archetypal(doc, idf):
-    """Day/Week/Year objects match archetypal's to_year_week_day field-for-field."""
-    # remove in Task 10 with archetypal
-    from archetypal.schedule import Schedule
-
-    rng = np.random.default_rng(3)
-    for name, vals in {
-        "wk": _weekday_varying(rng),
-        "seasonal": np.where(
-            (np.arange(8760) // 24) % 100 < 50, _weekday_varying(rng), 0.25
-        ),
-    }.items():
-        sched = Schedule.from_values(name, vals, Type="Fraction")
-        year, _weeks, _days = sched.to_year_week_day()
-        year.to_epbunch(idf)
-        mine = add_values_schedule(doc, name, vals, "Fraction")
-
-        for kind in ("Day:Hourly", "Week:Daily"):
-            theirs = idf.idfobjects[f"SCHEDULE:{kind}".upper()]
-            theirs = [o for o in theirs if o.Name.split("_")[1:-1] == [name]]
-            ours = [
-                o for o in doc[f"Schedule:{kind}"] if o.name.split("_")[1:-1] == [name]
-            ]
-            assert theirs, kind
-            assert len(ours) == len(theirs), kind
-            for t, o in zip(
-                sorted(theirs, key=lambda x: x.Name),
-                sorted(ours, key=lambda x: x.name),
-                strict=True,
-            ):
-                assert _field_values(o) == _archetypal_field_values(t)
-        theirs_year = idf.idfobjects["SCHEDULE:YEAR"][-1]
-        assert _year_field_values(mine) == _archetypal_field_values(theirs_year)
-
-
 def test_add_values_schedule_constant_matches_baseline_structure(doc):
     """A constant series yields the one day / week / block seen in built.idf."""
     baseline = idfkit.load_idf(

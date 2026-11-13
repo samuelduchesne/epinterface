@@ -5,4 +5,4 @@
 [![Commit activity](https://img.shields.io/github/commit-activity/m/szvsw/epinterface)](https://img.shields.io/github/commit-activity/m/szvsw/epinterface)
 [![License](https://img.shields.io/github/license/szvsw/epinterface)](https://img.shields.io/github/license/szvsw/epinterface)
 
-This is a repository for dynamically generating energy models within Python, relying on Archetypal and Eppy for most of its functionality.
+Dynamically generate EnergyPlus models in Python with idfkit.

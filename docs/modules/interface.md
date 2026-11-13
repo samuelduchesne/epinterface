@@ -1,5 +1,5 @@
 # EnergyPlus Interface
 
-This is a thin wrapper around Eppy for some opinionated control.
+This is a thin wrapper around idfkit for some opinionated control.
 
 ::: epinterface.interface

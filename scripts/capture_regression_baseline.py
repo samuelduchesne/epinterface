@@ -1,7 +1,11 @@
 """Capture the regression baseline fixtures (run under archetypal, EnergyPlus 25.2.0).
 
-Usage:
-    EPINTERFACE_ENERGYPLUS_VERSION=25.2.0 uv run python scripts/capture_regression_baseline.py
+It is kept as provenance for the committed fixtures and is not part of the test
+suite. It needs the pre-migration stack: archetypal is no longer a dependency of
+epinterface (2.0.0), and this script calls the pre-2.0 epinterface API, so run
+it from a checkout of commit b4f9f6a (the last one that still builds with archetypal) with a temporary pin:
+
+    EPINTERFACE_ENERGYPLUS_VERSION=25.2.0 uv run --with archetypal==2.18.10 python scripts/capture_regression_baseline.py
 """
 
 import json
