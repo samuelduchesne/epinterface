@@ -1,21 +1,45 @@
 """Geometry utilities for the UBEM construction."""
 
+import re
 import warnings
 from collections.abc import Sequence
 from typing import Literal, cast
 
 import numpy as np
-from archetypal.idfclass import IDF
-from geomeppy.geom.vectors import Vector2D
-from idfkit import IDFDocument, calculate_surface_area
+from idfkit import (
+    IDFDocument,
+    IDFObject,
+    MatchOptions,
+    Polygon3D,
+    Vector3D,
+    add_shading_block,
+    bounding_box,
+    calculate_surface_area,
+    intersect_and_match,
+    rotate_building,
+    scale_building,
+    set_default_constructions,
+    translate_building,
+)
+from idfkit.geometry import get_surface_coords, set_surface_coords
+from idfkit.zoning import ZoningScheme, create_block
 from numpy.typing import ArrayLike
 from pydantic import BaseModel, Field
 from shapely import LineString, Polygon, from_wkt
 from shapely.affinity import translate
 
 
+def _total_floor_area(doc: IDFDocument) -> float:
+    """Sum the areas of all floor surfaces in the document [m2]."""
+    return sum(
+        calculate_surface_area(srf)
+        for srf in doc["BuildingSurface:Detailed"]
+        if (srf.surface_type or "").lower() == "floor"
+    )
+
+
 def match_idf_to_building_and_neighbors(
-    idf: IDF,
+    doc: IDFDocument,
     building: Polygon | str,
     neighbor_polys: Sequence[Polygon | str | None],
     neighbor_floors: Sequence[float | int | None],
@@ -24,11 +48,11 @@ def match_idf_to_building_and_neighbors(
     target_long_length: float,
     rotation_angle: float,
     allow_no_height: bool = False,
-) -> IDF:
+) -> IDFDocument:
     """Match an IDF model to a building and neighbors by scaling and rotating the IDF model and adding shading blocks for neighbors.
 
     Args:
-        idf (IDF): The IDF model to match.
+        doc (IDFDocument): The IDF document to match.
         building (Polygon | str): The building to match.
         neighbor_polys (list[Polygon | str | None]): The neighbors to inject as shading.
         neighbor_floors (list[float | int | None]): The counts of the neighbors.
@@ -39,7 +63,7 @@ def match_idf_to_building_and_neighbors(
         allow_no_height (bool): Whether to allow no height for neighbors.
 
     Returns:
-        idf (IDF): The matched IDF model.
+        doc (IDFDocument): The matched IDF document.
     """
     building_geo = (
         cast(Polygon, from_wkt(building)) if isinstance(building, str) else building
@@ -55,29 +79,25 @@ def match_idf_to_building_and_neighbors(
     translated_neighbors = [
         (translate(n, xoff=-centroid.x, yoff=-centroid.y), h) for n, h in neighbor_geos
     ]
-    idf_lengths = {(e.p1 - e.p2).length for e in idf.bounding_box().edges}
-    idf_x_coords = [e.p1.x for e in idf.bounding_box().edges]
-    x_span = max(idf_x_coords) - min(idf_x_coords)
-    idf_y_coords = [e.p1.y for e in idf.bounding_box().edges]
-    y_span = max(idf_y_coords) - min(idf_y_coords)
+    bbox = bounding_box(doc)
+    if bbox is None:
+        msg = "The IDF document has no building surfaces to match."
+        raise ValueError(msg)
+    (x_min, y_min), (x_max, y_max) = bbox
+    x_span = x_max - x_min
+    y_span = y_max - y_min
     # TODO: better handling for boxes that aren't [(0,0),...]
     if x_span < y_span:
         raise NotImplementedError(
             "This function assumes that the long edge is the x-axis, which is not the case."
         )
-    x_min = min(idf_x_coords)
-    y_min = min(idf_y_coords)
     if abs(x_min) > 1e-3 or abs(y_min) > 1e-3:
         raise NotImplementedError(
             "This function assumes that the building has the lowerleft corner at the origin, which is not the case."
         )
-    if len(idf_lengths) > 2:
-        raise NotImplementedError(
-            "The IDF model is not a rectangle, which is not yet supported."
-        )
 
-    long_length = max(idf_lengths)
-    short_length = min(idf_lengths)
+    long_length = x_span
+    short_length = y_span
 
     if not np.isclose(long_length, target_long_length):
         warnings.warn(
@@ -89,26 +109,34 @@ def match_idf_to_building_and_neighbors(
             f"Short length mismatch: {short_length} != {target_short_length}, perim zones may be distorted",
             stacklevel=2,
         )
-    idf.scale(target_long_length / long_length, anchor=Vector2D(0, 0), axes="x")
-    idf.scale(target_short_length / short_length, anchor=Vector2D(0, 0), axes="y")
-    idf.translate((
-        -target_long_length / 2,
-        -target_short_length / 2,
-        0,
-    ))  # This translation makes an assumption that the source building is at [(0,0),(0,w),...]
-    idf.rotate(rotation_angle * 180 / np.pi)
+    scale_building(
+        doc,
+        (target_long_length / long_length, target_short_length / short_length, 1.0),
+        anchor=Vector3D(0, 0, 0),
+    )
+    # This translation makes an assumption that the source building is at [(0,0),(0,w),...]
+    translate_building(
+        doc, Vector3D(-target_long_length / 2, -target_short_length / 2, 0)
+    )
+    rotate_building(doc, rotation_angle * 180 / np.pi)
     for i, (geom, height) in enumerate(translated_neighbors):
         if not height and not allow_no_height:
             height = 3.5 * 2
         if np.isnan(height):
             height = 3.5 * 2
         if height != 0:
-            idf.add_shading_block(
-                name=f"shading_{i}",
-                coordinates=[Vector2D(*coord) for coord in geom.exterior.coords[:-1]],
-                height=height,
-            )
-    return idf
+            footprint = [(x, y) for x, y in geom.exterior.coords[:-1]]
+            _add_shading_walls(doc, f"shading_{i}", footprint, height)
+    return doc
+
+
+def _add_shading_walls(
+    doc: IDFDocument, name: str, footprint: list[tuple[float, float]], height: float
+) -> None:
+    """Add the walls of a shading block (geomeppy added no top cap)."""
+    for obj in add_shading_block(doc, name=name, footprint=footprint, height=height):
+        if obj.name == f"{name} Top":
+            doc.removeidfobject(obj)
 
 
 def compute_shading_mask(
@@ -457,286 +485,93 @@ class ShoeboxGeometry(BaseModel):
         else:
             return 1
 
-    def add(self, idf: IDF) -> IDF:  # noqa: C901
-        """Constructs a simple shoebox geometry in the IDF model.
+    def add(self, doc: IDFDocument) -> IDFDocument:
+        """Constructs a simple shoebox geometry in the IDF document.
 
-        Takes advantage of the geomeppy methods to do so.
+        Zones are built with idfkit's `create_block`; the result reproduces the
+        geometry, zone names and zone order of the geomeppy implementation it
+        replaces.
 
         Can create gables, basements, and various zoning strategies.
 
         Args:
-            idf: The IDF model to add the geometry to.
+            doc: The IDF document to add the geometry to.
 
         Returns:
-            The IDF model with the added geometry.
+            The IDF document with the added geometry.
         """
-        lower_left_corner = (self.x, self.y)
-        lower_right_corner = (self.x + self.w, self.y)
-        upper_right_corner = (self.x + self.w, self.y + self.d)
-        upper_left_corner = (self.x, self.y + self.d)
-        bottom_plane = [
-            lower_left_corner,
-            lower_right_corner,
-            upper_right_corner,
-            upper_left_corner,
+        footprint = [
+            (self.x, self.y),
+            (self.x + self.w, self.y),
+            (self.x + self.w, self.y + self.d),
+            (self.x, self.y + self.d),
         ]
-        idf.add_block(
+        storey_count = self.num_stories + self.basement_storey_count
+        created = create_block(
+            doc,
             name="shoebox",
-            coordinates=bottom_plane,
-            height=self.zones_height
-            + (self.h if self.basement and self.zoning == "core/perim" else 0),
-            num_stories=self.num_stories + self.basement_storey_count,
-            zoning=self.zoning,
-            perim_depth=self.perim_depth,
-            below_ground_stories=self.basement_storey_count,
-            below_ground_storey_height=self.h,
+            footprint=footprint,
+            floor_to_floor=self.h,
+            num_stories=storey_count,
+            zoning=ZoningScheme.CORE_PERIMETER
+            if self.zoning == "core/perim"
+            else ZoningScheme.BY_STOREY,
+            perimeter_depth=self.perim_depth,
         )
-        if self.basement and self.zoning == "core/perim":
-            idf.translate((0, 0, -self.h))
+        zones = [obj for obj in created if obj.obj_type == "Zone"]
+        surfaces = [
+            obj for obj in created if obj.obj_type == "BuildingSurface:Detailed"
+        ]
+        if len(zones) != storey_count * self.zones_per_storey:
+            msg = (
+                f"Expected {storey_count * self.zones_per_storey} zones but found "
+                f"{len(zones)}; the perimeter depth may be too large for the footprint."
+            )
+            raise ValueError(msg)
 
-        if self.roof_height:
-            # we need to convert the old roof surfaces to ceilings;
-            # additionally, we will track them so that we can create the
-            # corresponding floor surfaces for the attic in a manner
-            # that avoids having to subdivide surfaces with intersect/match
-            old_roof_srfs = []
-            for srf in idf.idfobjects["BUILDINGSURFACE:DETAILED"]:
-                if srf.Surface_Type.lower() == "roof":
-                    srf.Surface_Type = "ceiling"
-                    old_roof_srfs.append(srf)
-            if len(old_roof_srfs) not in [1, 5]:
-                msg = "Too many roof surfaces were found; expected 1 (by_storey) or 5 "
-                f" (core/perim), but found {len(old_roof_srfs)}."
+        if self.basement:
+            # idfkit builds no below-ground storeys: the lowest storey becomes the
+            # basement by moving the block down one storey and burying its walls.
+            self._bury_lowest_storey(zones[: self.zones_per_storey], surfaces)
+
+        attic_floors = self._add_attic(doc, surfaces) if self.roof_height else []
+
+        # create_block's surfaces already share exact vertices; a fine snapping
+        # grid keeps them exact (the default 0.1 mm grid shifts diagonal walls).
+        report = intersect_and_match(doc, MatchOptions(snap_tol=1e-9))
+        if report.surfaces_split or report.fragments_created:
+            msg = (
+                "Surface matching unexpectedly split the shoebox surfaces "
+                f"({report.surfaces_split} split, {report.fragments_created} created)."
+            )
+            raise ValueError(msg)
+        for floor in attic_floors:
+            if floor.outside_boundary_condition.lower() != "surface":
+                msg = f"Attic floor {floor.name} was not matched to a ceiling below."
                 raise ValueError(msg)
 
-            # create the zone
-            idf.newidfobject("ZONE", Name="Attic")
+        self._rename_like_geomeppy(doc, zones, surfaces, attic_floors)
 
-            # we always want the centerline of a gable to be paralle to the longer
-            # edge
-            centerline_parallel_to = "w" if self.w > self.d else "d"
-
-            # the centerline is the midpoint of the shorter edge
-            # since it is parallel to the longer edge
-            roof_centerline = (
-                (self.x + self.w / 2)
-                if centerline_parallel_to == "d"
-                else (self.y + self.d / 2)
-            )
-
-            if centerline_parallel_to == "d":
-                # this gable goes from the left edge of the building to
-                # the midpoint on the x-axis
-                # it starts in the "upper left" corner in plan
-                # and goes counter clockwise to the "lower left" corner
-                # then to the roof centerline (and up in the z-axis)
-                vert_0 = (self.x, self.y + self.d, self.zones_height)
-                vert_1 = (self.x, self.y, self.zones_height)
-                vert_2 = (roof_centerline, self.y, self.total_height_with_gabling)
-                vert_3 = (
-                    roof_centerline,
-                    self.y + self.d,
-                    self.total_height_with_gabling,
-                )
-            else:
-                # this gable goes from the middle of the left edge at the top of the
-                # gable and goes counter clockwise down to the lower left corner
-                # then the lower right corner, and then back up.
-                vert_0 = (self.x, roof_centerline, self.total_height_with_gabling)
-                vert_1 = (self.x, self.y, self.zones_height)
-                vert_2 = (self.x + self.w, self.y, self.zones_height)
-                vert_3 = (
-                    self.x + self.w,
-                    roof_centerline,
-                    self.total_height_with_gabling,
-                )
-
-            idf.newidfobject(
-                "BUILDINGSURFACE:DETAILED",
-                Name="Gable1",
-                Surface_Type="Roof",
-                Number_of_Vertices=4,
-                View_Factor_to_Ground=0,
-                Vertex_1_Xcoordinate=vert_0[0],
-                Vertex_1_Ycoordinate=vert_0[1],
-                Vertex_1_Zcoordinate=vert_0[2],
-                Vertex_2_Xcoordinate=vert_1[0],
-                Vertex_2_Ycoordinate=vert_1[1],
-                Vertex_2_Zcoordinate=vert_1[2],
-                Vertex_3_Xcoordinate=vert_2[0],
-                Vertex_3_Ycoordinate=vert_2[1],
-                Vertex_3_Zcoordinate=vert_2[2],
-                Vertex_4_Xcoordinate=vert_3[0],
-                Vertex_4_Ycoordinate=vert_3[1],
-                Vertex_4_Zcoordinate=vert_3[2],
-                Zone_Name="Attic",
-            )
-
-            if centerline_parallel_to == "d":
-                vert_0 = (self.x + self.w, self.y, self.zones_height)
-                vert_1 = (self.x + self.w, self.y + self.d, self.zones_height)
-                vert_2 = (
-                    roof_centerline,
-                    self.y + self.d,
-                    self.total_height_with_gabling,
-                )
-                vert_3 = (
-                    roof_centerline,
-                    self.y,
-                    self.total_height_with_gabling,
-                )
-            else:
-                vert_0 = (self.x, roof_centerline, self.total_height_with_gabling)
-                vert_1 = (
-                    self.x + self.w,
-                    roof_centerline,
-                    self.total_height_with_gabling,
-                )
-                vert_2 = (
-                    self.x + self.w,
-                    self.y + self.d,
-                    self.zones_height,
-                )
-                vert_3 = (
-                    self.x,
-                    self.y + self.d,
-                    self.zones_height,
-                )
-
-            idf.newidfobject(
-                "BUILDINGSURFACE:DETAILED",
-                Name="Gable2",
-                Surface_Type="Roof",
-                Number_of_Vertices=4,
-                View_Factor_to_Ground=0,
-                Vertex_1_Xcoordinate=vert_0[0],
-                Vertex_1_Ycoordinate=vert_0[1],
-                Vertex_1_Zcoordinate=vert_0[2],
-                Vertex_2_Xcoordinate=vert_1[0],
-                Vertex_2_Ycoordinate=vert_1[1],
-                Vertex_2_Zcoordinate=vert_1[2],
-                Vertex_3_Xcoordinate=vert_2[0],
-                Vertex_3_Ycoordinate=vert_2[1],
-                Vertex_3_Zcoordinate=vert_2[2],
-                Vertex_4_Xcoordinate=vert_3[0],
-                Vertex_4_Ycoordinate=vert_3[1],
-                Vertex_4_Zcoordinate=vert_3[2],
-                Zone_Name="Attic",
-            )
-
-            # make triangular endcaps
-            if centerline_parallel_to == "d":
-                vert_0 = (self.x, self.y, self.zones_height)
-                vert_1 = (self.x + self.w, self.y, self.zones_height)
-                vert_2 = (roof_centerline, self.y, self.total_height_with_gabling)
-            else:
-                vert_0 = (self.x, self.y, self.zones_height)
-                vert_1 = (self.x, roof_centerline, self.total_height_with_gabling)
-                vert_2 = (self.x, self.y + self.d, self.zones_height)
-
-            idf.newidfobject(
-                "BUILDINGSURFACE:DETAILED",
-                Name="Endcap1",
-                Surface_Type="Wall",
-                Number_of_Vertices=3,
-                Vertex_1_Xcoordinate=vert_0[0],
-                Vertex_1_Ycoordinate=vert_0[1],
-                Vertex_1_Zcoordinate=vert_0[2],
-                Vertex_2_Xcoordinate=vert_1[0],
-                Vertex_2_Ycoordinate=vert_1[1],
-                Vertex_2_Zcoordinate=vert_1[2],
-                Vertex_3_Xcoordinate=vert_2[0],
-                Vertex_3_Ycoordinate=vert_2[1],
-                Vertex_3_Zcoordinate=vert_2[2],
-                Zone_Name="Attic",
-            )
-
-            if centerline_parallel_to == "d":
-                vert_0 = (self.x + self.w, self.y + self.d, self.zones_height)
-                vert_1 = (self.x, self.y + self.d, self.zones_height)
-                vert_2 = (
-                    roof_centerline,
-                    self.y + self.d,
-                    self.total_height_with_gabling,
-                )
-            else:
-                vert_0 = (self.x + self.w, self.y, self.zones_height)
-                vert_1 = (self.x + self.w, self.y + self.d, self.zones_height)
-                vert_2 = (
-                    self.x + self.w,
-                    roof_centerline,
-                    self.total_height_with_gabling,
-                )
-
-            idf.newidfobject(
-                "BUILDINGSURFACE:DETAILED",
-                Name="Endcap2",
-                Surface_Type="Wall",
-                Number_of_Vertices=3,
-                Vertex_1_Xcoordinate=vert_0[0],
-                Vertex_1_Ycoordinate=vert_0[1],
-                Vertex_1_Zcoordinate=vert_0[2],
-                Vertex_2_Xcoordinate=vert_1[0],
-                Vertex_2_Ycoordinate=vert_1[1],
-                Vertex_2_Zcoordinate=vert_1[2],
-                Vertex_3_Xcoordinate=vert_2[0],
-                Vertex_3_Ycoordinate=vert_2[1],
-                Vertex_3_Zcoordinate=vert_2[2],
-                Zone_Name="Attic",
-            )
-
-            # We will create identical floor surfaces for the attic to match
-            # the zone below.  While we could just add a single plane and let
-            # the `intersect_match` handle it, this is more robust; the geomeppy
-            # method occasionally results in numerical floating point errors where
-            # very small overhang area is created with an outside boundary
-            # condition.
-            # we use a vertex order of 1, 4, 3, 2 to match the orientation of the
-            # roof surfaces below it, i.e. CCW vs CW.
-            for i, srf in enumerate(old_roof_srfs):
-                idf.newidfobject(
-                    "BUILDINGSURFACE:DETAILED",
-                    Name=f"attic_bottom_plane_{i}",
-                    Surface_Type="Floor",
-                    Number_of_Vertices=4,
-                    Vertex_1_Xcoordinate=srf.Vertex_1_Xcoordinate,
-                    Vertex_1_Ycoordinate=srf.Vertex_1_Ycoordinate,
-                    Vertex_1_Zcoordinate=srf.Vertex_1_Zcoordinate,
-                    Vertex_2_Xcoordinate=srf.Vertex_4_Xcoordinate,
-                    Vertex_2_Ycoordinate=srf.Vertex_4_Ycoordinate,
-                    Vertex_2_Zcoordinate=srf.Vertex_4_Zcoordinate,
-                    Vertex_3_Xcoordinate=srf.Vertex_3_Xcoordinate,
-                    Vertex_3_Ycoordinate=srf.Vertex_3_Ycoordinate,
-                    Vertex_3_Zcoordinate=srf.Vertex_3_Zcoordinate,
-                    Vertex_4_Xcoordinate=srf.Vertex_2_Xcoordinate,
-                    Vertex_4_Ycoordinate=srf.Vertex_2_Ycoordinate,
-                    Vertex_4_Zcoordinate=srf.Vertex_2_Zcoordinate,
-                    Zone_Name="Attic",
-                )
-
-        idf.intersect_match()
-
-        idf.set_default_constructions()
+        set_default_constructions(doc)
 
         # Handle Windows
-        window_walls = [
-            w
-            for w in idf.idfobjects["BUILDINGSURFACE:DETAILED"]
-            if w.Outside_Boundary_Condition.lower() == "outdoors"
-            and "attic" not in w.Zone_Name.lower()
-            and (
-                not w.Zone_Name.lower().endswith(self.basement_suffix.lower())
-                if self.basement
-                else True
-            )
-            and w.Surface_Type.lower() == "wall"
-        ]
-        idf.set_wwr(
-            wwr=self.wwr,
-            construction="Project External Window",
-            force=True,
-            surfaces=window_walls,
-        )
+        if self.wwr:
+            window_walls = [
+                w
+                for w in doc["BuildingSurface:Detailed"]
+                if (w.outside_boundary_condition or "").lower() == "outdoors"
+                and "attic" not in (w.zone_name or "").lower()
+                and (
+                    not (w.zone_name or "")
+                    .lower()
+                    .endswith(self.basement_suffix.lower())
+                    if self.basement
+                    else True
+                )
+                and (w.surface_type or "").lower() == "wall"
+            ]
+            for wall in window_walls:
+                _add_window(doc, wall, self.wwr)
 
         if self.scene_context:
             mask_polys, neighbor_floors = prepare_neighbor_shading_for_idf(
@@ -748,9 +583,9 @@ class ShoeboxGeometry(BaseModel):
                 outward_offset=2,
                 f2f_height=self.h,
             )
-            original_building_area = idf.total_building_area
-            idf = match_idf_to_building_and_neighbors(
-                idf,
+            original_building_area = _total_floor_area(doc)
+            doc = match_idf_to_building_and_neighbors(
+                doc,
                 building=self.scene_context.building,
                 neighbor_polys=mask_polys,
                 neighbor_floors=neighbor_floors,
@@ -760,12 +595,325 @@ class ShoeboxGeometry(BaseModel):
                 rotation_angle=self.scene_context.orientation,
                 allow_no_height=True,
             )
-            new_building_area = idf.total_building_area
+            new_building_area = _total_floor_area(doc)
             if not np.isclose(original_building_area, new_building_area):
                 msg = f"Total building area mismatch after matching to building and neighbors: {original_building_area} != {new_building_area}"
                 raise ValueError(msg)
 
-        return idf
+        return doc
+
+    def _bury_lowest_storey(
+        self, basement_zones: list[IDFObject], surfaces: list[IDFObject]
+    ) -> None:
+        """Move the block down one storey and put its lowest storey in the ground."""
+        offset = Vector3D(0, 0, -self.h)
+        for srf in surfaces:
+            set_surface_coords(
+                srf, cast(Polygon3D, get_surface_coords(srf)).translate(offset)
+            )
+        basement_zone_names = {zone.name for zone in basement_zones}
+        for srf in surfaces:
+            if (
+                srf.zone_name in basement_zone_names
+                and srf.outside_boundary_condition.lower() == "outdoors"
+            ):
+                srf.outside_boundary_condition = "Ground"
+                srf.sun_exposure = "NoSun"
+                srf.wind_exposure = "NoWind"
+
+    def _add_attic(
+        self, doc: IDFDocument, surfaces: list[IDFObject]
+    ) -> list[IDFObject]:
+        """Add a gabled attic zone on top of the block.
+
+        The block's roofs become ceilings, and the attic gets one floor per
+        ceiling with the same footprint so that matching pairs them one to one.
+
+        Returns:
+            The attic floor surfaces.
+        """
+        # we need to convert the old roof surfaces to ceilings;
+        # additionally, we will track them so that we can create the
+        # corresponding floor surfaces for the attic in a manner
+        # that avoids having to subdivide surfaces with intersect/match
+        old_roof_srfs = [srf for srf in surfaces if srf.surface_type.lower() == "roof"]
+        if len(old_roof_srfs) not in [1, 5]:
+            msg = (
+                "Too many roof surfaces were found; expected 1 (by_storey) or 5 "
+                f" (core/perim), but found {len(old_roof_srfs)}."
+            )
+            raise ValueError(msg)
+        for srf in old_roof_srfs:
+            srf.surface_type = "Ceiling"
+
+        # create the zone
+        doc.add("Zone", "Attic")
+
+        # we always want the centerline of a gable to be paralle to the longer
+        # edge
+        centerline_parallel_to = "w" if self.w > self.d else "d"
+
+        # the centerline is the midpoint of the shorter edge
+        # since it is parallel to the longer edge
+        roof_centerline = (
+            (self.x + self.w / 2)
+            if centerline_parallel_to == "d"
+            else (self.y + self.d / 2)
+        )
+        x0, x1 = self.x, self.x + self.w
+        y0, y1 = self.y, self.y + self.d
+        z_eave, z_ridge = self.zones_height, self.total_height_with_gabling
+
+        if centerline_parallel_to == "d":
+            # the gables run from the left and right edges of the building to the
+            # ridge at the midpoint of the x-axis; each starts at the eave and
+            # goes counter clockwise, then up to the ridge.
+            gable1 = [
+                (x0, y1, z_eave),
+                (x0, y0, z_eave),
+                (roof_centerline, y0, z_ridge),
+                (roof_centerline, y1, z_ridge),
+            ]
+            gable2 = [
+                (x1, y0, z_eave),
+                (x1, y1, z_eave),
+                (roof_centerline, y1, z_ridge),
+                (roof_centerline, y0, z_ridge),
+            ]
+            # triangular endcaps
+            endcap1 = [
+                (x0, y0, z_eave),
+                (x1, y0, z_eave),
+                (roof_centerline, y0, z_ridge),
+            ]
+            endcap2 = [
+                (x1, y1, z_eave),
+                (x0, y1, z_eave),
+                (roof_centerline, y1, z_ridge),
+            ]
+        else:
+            # the gables run from the ridge at the middle of the left edge counter
+            # clockwise down to the eave and back up.
+            gable1 = [
+                (x0, roof_centerline, z_ridge),
+                (x0, y0, z_eave),
+                (x1, y0, z_eave),
+                (x1, roof_centerline, z_ridge),
+            ]
+            gable2 = [
+                (x0, roof_centerline, z_ridge),
+                (x1, roof_centerline, z_ridge),
+                (x1, y1, z_eave),
+                (x0, y1, z_eave),
+            ]
+            # triangular endcaps
+            endcap1 = [
+                (x0, y0, z_eave),
+                (x0, roof_centerline, z_ridge),
+                (x0, y1, z_eave),
+            ]
+            endcap2 = [
+                (x1, y0, z_eave),
+                (x1, y1, z_eave),
+                (x1, roof_centerline, z_ridge),
+            ]
+
+        for name, surface_type, vertices in (
+            ("Gable1", "Roof", gable1),
+            ("Gable2", "Roof", gable2),
+            ("Endcap1", "Wall", endcap1),
+            ("Endcap2", "Wall", endcap2),
+        ):
+            srf = doc.add(
+                "BuildingSurface:Detailed",
+                name,
+                surface_type=surface_type,
+                construction_name="",
+                zone_name="Attic",
+                outside_boundary_condition="Outdoors",
+                sun_exposure="SunExposed",
+                wind_exposure="WindExposed",
+                # like create_block's surfaces: no construction or vertices yet
+                validate=False,
+            )
+            set_surface_coords(srf, Polygon3D.from_tuples(vertices))
+
+        # We will create identical floor surfaces for the attic to match
+        # the zone below.  While we could just add a single plane and let
+        # the surface matching handle it, this is more robust; it avoids
+        # numerical floating point errors where a very small overhang area
+        # is created with an outside boundary condition.
+        # we use a vertex order of 1, 4, 3, 2 to match the orientation of the
+        # roof surfaces below it, i.e. CCW vs CW.
+        attic_floors = []
+        for i, srf in enumerate(old_roof_srfs):
+            v = cast(Polygon3D, get_surface_coords(srf)).vertices
+            floor = doc.add(
+                "BuildingSurface:Detailed",
+                f"attic_bottom_plane_{i}",
+                surface_type="Floor",
+                construction_name="",
+                zone_name="Attic",
+                outside_boundary_condition="Outdoors",
+                sun_exposure="NoSun",
+                wind_exposure="NoWind",
+                validate=False,
+            )
+            set_surface_coords(floor, Polygon3D([v[0], v[3], v[2], v[1]]))
+            attic_floors.append(floor)
+        return attic_floors
+
+    def _rename_like_geomeppy(
+        self,
+        doc: IDFDocument,
+        zones: list[IDFObject],
+        surfaces: list[IDFObject],
+        attic_floors: list[IDFObject],
+    ) -> None:
+        """Give the block's zones and surfaces geomeppy's names, in geomeppy's zone order.
+
+        Surface names keep the zone name in them, which the construction
+        handlers rely on (e.g. the basement suffix and "attic").
+
+        `create_block` lists zones storey by storey while geomeppy listed
+        core/perim zones zone by zone. The zone objects hold nothing but their
+        name, so they are reordered by pointing each surface at its geomeppy
+        zone name and then naming the zone objects in geomeppy's order.
+        """
+        zones_per_storey = self.zones_per_storey
+        index_of = {zone.name: k for k, zone in enumerate(zones)}
+        new_zone_names = [
+            _geomeppy_zone_name(
+                k // zones_per_storey, k % zones_per_storey, self.zoning, self.basement
+            )
+            for k in range(len(zones))
+        ]
+        for srf in surfaces:
+            k = index_of[srf.zone_name]
+            is_perimeter = self.zoning == "core/perim" and k % zones_per_storey < 4
+            new_name = _geomeppy_surface_name(
+                new_zone_names[k],
+                srf.name.removeprefix(f"{srf.zone_name} "),
+                is_perimeter,
+            )
+            if srf.outside_boundary_condition.lower() == "surface":
+                new_name += "_1"
+            doc.rename("BuildingSurface:Detailed", srf.name, new_name)
+            srf.zone_name = new_zone_names[k]
+        for floor in attic_floors:
+            # geomeppy's surface matching suffixed every matched surface with _1
+            doc.rename("BuildingSurface:Detailed", floor.name, f"{floor.name}_1")
+
+        ordered_names = [
+            new_zone_names[k]
+            for k in sorted(
+                range(len(zones)),
+                key=lambda k: (k % zones_per_storey, k // zones_per_storey),
+            )
+        ]
+        for zone, new_name in zip(zones, ordered_names, strict=True):
+            doc.rename("Zone", zone.name, new_name)
+
+
+_CORE_PERIM_ZONE_NAMES = (
+    "Perimeter_Zone_1",
+    "Perimeter_Zone_2",
+    "Perimeter_Zone_3",
+    "Perimeter_Zone_4",
+    "Core_Zone",
+)
+
+
+def _geomeppy_zone_name(
+    storey: int, zone_index: int, zoning: ZoningType, basement: bool
+) -> str:
+    """Name a block zone the way geomeppy's `add_block` did.
+
+    Args:
+        storey: Storey index counted from 0 at the lowest storey (the basement, if any).
+        zone_index: Index of the zone in its storey, in `create_block`'s order:
+            the perimeter zones along the footprint edges starting from the
+            south edge, then the core.
+        zoning: The zoning type.
+        basement: Whether the lowest storey is a basement.
+
+    Returns:
+        The zone name.
+    """
+    if zoning == "by_storey":
+        # geomeppy numbered below-ground storeys from -1
+        return f"Block shoebox Storey {storey - (1 if basement else 0)}"
+    # with core/perim the basement was an ordinary storey moved down one storey
+    return f"Block {_CORE_PERIM_ZONE_NAMES[zone_index]} Storey {storey}"
+
+
+def _geomeppy_surface_name(zone_name: str, suffix: str, is_perimeter: bool) -> str:
+    """Name a block surface the way geomeppy's `add_block` did, before matching.
+
+    Args:
+        zone_name: The (geomeppy) name of the surface's zone.
+        suffix: The surface name `create_block` gave, without the zone name,
+            e.g. "Wall 2", "Floor", "Ceiling" or "Roof".
+        is_perimeter: Whether the zone is a core/perim perimeter zone; geomeppy
+            numbered their walls from the inner corner, one ahead of idfkit.
+
+    Returns:
+        The surface name.
+    """
+    match = re.fullmatch(r"Wall (\d+)", suffix)
+    if match is None:
+        return f"{zone_name} {suffix} 0001"
+    number = int(match.group(1))
+    if is_perimeter:
+        number = number % 4 + 1
+    return f"{zone_name} Wall {number:04d}"
+
+
+def _add_window(
+    doc: IDFDocument,
+    wall: IDFObject,
+    wwr: float,
+    construction: str = "Project External Window",
+) -> IDFObject:
+    """Add geomeppy's ribbon window to a wall.
+
+    The window is the wall shrunk about its vertex average: by the
+    window-to-wall ratio vertically and by 0.999 horizontally, which keeps it
+    0.05% inside the wall edges.
+
+    Args:
+        doc: The IDF document.
+        wall: The wall to add the window to.
+        wwr: The window-to-wall ratio.
+        construction: The window construction name.
+
+    Returns:
+        The window surface.
+    """
+    vertices = cast(Polygon3D, get_surface_coords(wall)).vertices
+    average_x = sum([v.x for v in vertices]) / len(vertices)
+    average_y = sum([v.y for v in vertices]) / len(vertices)
+    average_z = sum([v.z for v in vertices]) / len(vertices)
+    window_vertices = [
+        (
+            ((v.x - average_x) * 0.999) + average_x,
+            ((v.y - average_y) * 0.999) + average_y,
+            ((v.z - average_z) * wwr) + average_z,
+        )
+        for v in vertices
+    ]
+    fields = {
+        "surface_type": "Window",
+        "construction_name": construction,
+        "building_surface_name": wall.name,
+        "view_factor_to_ground": "Autocalculate",
+        "number_of_vertices": len(window_vertices),
+    } | {
+        f"vertex_{i}_{axis}_coordinate": value
+        for i, vertex in enumerate(window_vertices, 1)
+        for axis, value in zip("xyz", vertex, strict=True)
+    }
+    return doc.add("FenestrationSurface:Detailed", f"{wall.name} window", fields)
 
 
 def get_zone_floor_area(doc: IDFDocument, zone_name: str) -> float:
@@ -797,79 +945,6 @@ def get_zone_floor_area(doc: IDFDocument, zone_name: str) -> float:
         raise ValueError(f"NO_AREA:{zone_name}")
 
     return area
-
-
-def get_zone_glazed_area_alt(idf: IDF, zone_name: str) -> float:
-    """Calculate the total area of windows for a specific zone in the IDF model.
-
-    Args:
-        idf (IDF): The IDF model.
-        zone_name (str): The name of the zone to calculate the window area for.
-
-    Returns:
-        float: The total area of windows in the specified zone.
-    """
-    total_window_area = 0.0
-    total_windows = 0
-
-    for window in idf.idfobjects["FENESTRATIONSURFACE:DETAILED"]:
-        parent_srf = idf.getobject(
-            "BUILDINGSURFACE:DETAILED", window.Building_Surface_Name
-        )
-        if parent_srf is None:
-            msg = f"BUILDINGSURFACE:DETAILED:{window.Building_Surface_Name} not found"
-            raise ValueError(msg)
-        if (
-            parent_srf.Zone_Name.lower() == zone_name.lower()
-            and window.Surface_Type.lower() == "window"
-        ):
-            vertices = [
-                (
-                    window.Vertex_1_Xcoordinate,
-                    window.Vertex_1_Ycoordinate,
-                    window.Vertex_1_Zcoordinate,
-                ),
-                (
-                    window.Vertex_2_Xcoordinate,
-                    window.Vertex_2_Ycoordinate,
-                    window.Vertex_2_Zcoordinate,
-                ),
-                (
-                    window.Vertex_3_Xcoordinate,
-                    window.Vertex_3_Ycoordinate,
-                    window.Vertex_3_Zcoordinate,
-                ),
-                (
-                    window.Vertex_4_Xcoordinate,
-                    window.Vertex_4_Ycoordinate,
-                    window.Vertex_4_Zcoordinate,
-                ),
-            ]
-            # Assuming the window is a quadrilateral, calculate its area
-            # This is a simplified calculation assuming the window is a rectangle
-            width = (
-                (vertices[1][0] - vertices[0][0]) ** 2
-                + (vertices[1][1] - vertices[0][1]) ** 2
-                + (vertices[1][2] - vertices[0][2]) ** 2
-            ) ** 0.5
-            height = (
-                (vertices[2][0] - vertices[1][0]) ** 2
-                + (vertices[2][1] - vertices[1][1]) ** 2
-                + (vertices[2][2] - vertices[1][2]) ** 2
-            ) ** 0.5
-            area = width * height
-            total_window_area += area
-            total_windows += 1
-
-    if total_windows not in [0, 1, 4]:
-        msg = f"TOO_MANY_WINDOWS:{zone_name}:{total_windows}"
-        raise ValueError(msg)
-
-    alt_window_area = get_zone_glazed_area_alt(idf, zone_name)
-    if not np.allclose(total_window_area, alt_window_area):
-        msg = f"GLAZED_AREA_MISMATCH:{zone_name}:{total_window_area}:{alt_window_area}"
-        raise ValueError(msg)
-    return total_window_area
 
 
 def get_zone_glazed_area(doc: IDFDocument, zone_name: str) -> float:

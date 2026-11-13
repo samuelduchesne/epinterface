@@ -4,24 +4,17 @@ import itertools
 
 import numpy as np
 import pytest
-from archetypal.idfclass import IDF
+from idfkit.geometry import get_surface_coords
 from shapely import Polygon
 
-from epinterface.data import DefaultEPWPath, DefaultMinimalIDFPath
 from epinterface.geometry import ShoeboxGeometry, match_idf_to_building_and_neighbors
-from epinterface.settings import energyplus_settings
 
 
-@pytest.fixture(scope="function")
-def minimal_idf():
-    """Fixture to create a fresh instance of the minimal IDF before each test."""
-    idf = IDF(
-        DefaultMinimalIDFPath.as_posix(),
-        epw=DefaultEPWPath.as_posix(),
-        as_version=energyplus_settings.energyplus_version,
-        file_version=energyplus_settings.energyplus_version,
-    )
-    yield idf
+def _vertices(srf):
+    """The vertices of a surface."""
+    coords = get_surface_coords(srf)
+    assert coords is not None
+    return coords.vertices
 
 
 # Full factorial parameter combinations
@@ -44,10 +37,9 @@ parameter_combinations = list(
     parameter_combinations,
 )
 def test_height_of_building_surfaces(
-    minimal_idf, floor_2_floor_height, num_floors, zoning, basement, roof_height
+    doc, floor_2_floor_height, num_floors, zoning, basement, roof_height
 ):
     """Test that the height of any BUILDINGSURFACE:DETAILED object matches the expected floor-to-floor height * number of floors."""
-    idf = minimal_idf
     expected_max_height = floor_2_floor_height * num_floors + (roof_height or 0)
     expected_min_height = 0 if not basement else -floor_2_floor_height
 
@@ -64,15 +56,10 @@ def test_height_of_building_surfaces(
         wwr=0.15,
         roof_height=roof_height,
     )
-    idf = geom.add(idf)
+    doc = geom.add(doc)
 
-    # Extract Z-coordinates from BUILDINGSURFACE:DETAILED objects
-    z_coords = []
-    for obj in idf.idfobjects["BUILDINGSURFACE:DETAILED"]:
-        for i in range(1, 5):
-            z_coord = getattr(obj, f"Vertex_{i}_Zcoordinate")
-            if z_coord != "":  # sometimes we have triangles
-                z_coords.append(float(z_coord))
+    # Extract Z-coordinates from BuildingSurface:Detailed objects
+    z_coords = [v.z for obj in doc["BuildingSurface:Detailed"] for v in _vertices(obj)]
 
     # Calculate the maximum Z-coordinate value
     max_height = max(z_coords)
@@ -108,7 +95,7 @@ parameter_combinations = list(
     parameter_combinations,
 )
 def test_num_window_srfs(
-    minimal_idf, floor_2_floor_height, num_floors, zoning, basement, roof_height
+    doc, floor_2_floor_height, num_floors, zoning, basement, roof_height
 ):
     """Test that the number of windows matches the expected number of windows."""
     expected_num_windows = 4 * num_floors
@@ -126,9 +113,9 @@ def test_num_window_srfs(
         roof_height=roof_height,
     )
 
-    idf = geom.add(minimal_idf)
+    doc = geom.add(doc)
 
-    n_windows = len(idf.idfobjects["FENESTRATIONSURFACE:DETAILED"])
+    n_windows = len(doc["FenestrationSurface:Detailed"])
 
     assert n_windows == expected_num_windows, f"Expected {expected_num_windows} windows"
 
@@ -152,7 +139,7 @@ parameter_combinations = list(
     parameter_combinations,
 )
 def test_num_zones(
-    minimal_idf, floor_2_floor_height, num_floors, zoning, basement, roof_height
+    doc, floor_2_floor_height, num_floors, zoning, basement, roof_height
 ):
     """Test that the number of zones matches the expected number of zones."""
     floor_ct = num_floors + (1 if basement else 0)
@@ -174,15 +161,15 @@ def test_num_zones(
         roof_height=roof_height,
     )
 
-    idf = geom.add(minimal_idf)
+    doc = geom.add(doc)
 
-    n_zones = len(idf.idfobjects["ZONE"])
+    n_zones = len(doc["Zone"])
 
     assert n_zones == expected_num_zones, (
         f"Expected {expected_num_zones} zones, found {n_zones}."
     )
 
-    zone_names = [zone.Name for zone in idf.idfobjects["ZONE"]]
+    zone_names = [zone.name for zone in doc["Zone"]]
     zones_with_attic_in_name = [zone for zone in zone_names if "attic" in zone.lower()]
     expected_attic_ct = 1 if roof_height is not None else 0
     assert len(zones_with_attic_in_name) == (expected_attic_ct), (
@@ -220,7 +207,7 @@ parameter_combinations = list(
     parameter_combinations,
 )
 def test_num_roof_srfs(
-    minimal_idf, floor_2_floor_height, num_floors, zoning, basement, roof_height
+    doc, floor_2_floor_height, num_floors, zoning, basement, roof_height
 ):
     """Test that the number of roof surfaces matches the expected number of roof surfaces."""
     expected_num_rf_srfs = (
@@ -240,12 +227,12 @@ def test_num_roof_srfs(
         roof_height=roof_height,
     )
 
-    idf = geom.add(minimal_idf)
+    doc = geom.add(doc)
 
     n_rf_srfs = len([
         srf
-        for srf in idf.idfobjects["BUILDINGSURFACE:DETAILED"]
-        if srf.Surface_Type.lower() == "roof"
+        for srf in doc["BuildingSurface:Detailed"]
+        if (srf.surface_type or "").lower() == "roof"
     ])
 
     assert expected_num_rf_srfs == n_rf_srfs, (
@@ -272,7 +259,7 @@ parameter_combinations = list(
     parameter_combinations,
 )
 def test_num_wall_srfs(
-    minimal_idf, floor_2_floor_height, num_floors, zoning, basement, roof_height
+    doc, floor_2_floor_height, num_floors, zoning, basement, roof_height
 ):
     """Test that the number of roof surfaces matches the expected number of roof surfaces."""
     expected_number_of_wall_srfs = 4 * (num_floors + (1 if basement else 0)) + (
@@ -300,34 +287,34 @@ def test_num_wall_srfs(
         roof_height=roof_height,
     )
 
-    idf = geom.add(minimal_idf)
+    doc = geom.add(doc)
 
     n_wall_srfs = len([
         srf
-        for srf in idf.idfobjects["BUILDINGSURFACE:DETAILED"]
-        if srf.Surface_Type.lower() == "wall"
-        and srf.Outside_Boundary_Condition.lower() != "surface"
+        for srf in doc["BuildingSurface:Detailed"]
+        if (srf.surface_type or "").lower() == "wall"
+        and (srf.outside_boundary_condition or "").lower() != "surface"
     ])
 
     n_partition_srfs = len([
         srf
-        for srf in idf.idfobjects["BUILDINGSURFACE:DETAILED"]
-        if srf.Surface_Type.lower() == "wall"
-        and srf.Outside_Boundary_Condition.lower() == "surface"
+        for srf in doc["BuildingSurface:Detailed"]
+        if (srf.surface_type or "").lower() == "wall"
+        and (srf.outside_boundary_condition or "").lower() == "surface"
     ])
 
     n_gnd_wall_srfs = len([
         srf
-        for srf in idf.idfobjects["BUILDINGSURFACE:DETAILED"]
-        if srf.Outside_Boundary_Condition.lower() == "ground"
-        and srf.Surface_Type.lower() == "wall"
+        for srf in doc["BuildingSurface:Detailed"]
+        if (srf.outside_boundary_condition or "").lower() == "ground"
+        and (srf.surface_type or "").lower() == "wall"
     ])
 
     n_exposed_wall_srfs = len([
         srf
-        for srf in idf.idfobjects["BUILDINGSURFACE:DETAILED"]
-        if srf.Outside_Boundary_Condition.lower() == "outdoors"
-        and srf.Surface_Type.lower() == "wall"
+        for srf in doc["BuildingSurface:Detailed"]
+        if (srf.outside_boundary_condition or "").lower() == "outdoors"
+        and (srf.surface_type or "").lower() == "wall"
     ])
 
     assert expected_number_of_wall_srfs == n_wall_srfs, (
@@ -366,7 +353,7 @@ parameter_combinations = list(
     parameter_combinations,
 )
 def test_num_floor_sfs(
-    minimal_idf, floor_2_floor_height, num_floors, zoning, basement, roof_height
+    doc, floor_2_floor_height, num_floors, zoning, basement, roof_height
 ):
     """Test that the number of roof surfaces matches the expected number of roof surfaces."""
     expected_number_of_any_floor_srfs = (5 if zoning == "core/perim" else 1) * (
@@ -389,26 +376,26 @@ def test_num_floor_sfs(
         roof_height=roof_height,
     )
 
-    idf = geom.add(minimal_idf)
+    doc = geom.add(doc)
 
     n_floor_srfs = len([
         srf
-        for srf in idf.idfobjects["BUILDINGSURFACE:DETAILED"]
-        if srf.Surface_Type.lower() == "floor"
+        for srf in doc["BuildingSurface:Detailed"]
+        if (srf.surface_type or "").lower() == "floor"
     ])
 
     n_gnd_floor_srfs = len([
         srf
-        for srf in idf.idfobjects["BUILDINGSURFACE:DETAILED"]
-        if srf.Outside_Boundary_Condition.lower() == "ground"
-        and srf.Surface_Type.lower() == "floor"
+        for srf in doc["BuildingSurface:Detailed"]
+        if (srf.outside_boundary_condition or "").lower() == "ground"
+        and (srf.surface_type or "").lower() == "floor"
     ])
 
     n_non_gnd_floor_srfs = len([
         srf
-        for srf in idf.idfobjects["BUILDINGSURFACE:DETAILED"]
-        if srf.Outside_Boundary_Condition.lower() == "surface"
-        and srf.Surface_Type.lower() == "floor"
+        for srf in doc["BuildingSurface:Detailed"]
+        if (srf.outside_boundary_condition or "").lower() == "surface"
+        and (srf.surface_type or "").lower() == "floor"
     ])
 
     assert expected_number_of_any_floor_srfs == n_floor_srfs, (
@@ -443,7 +430,7 @@ parameter_combinations = list(
     parameter_combinations,
 )
 def test_num_ceil_sfs(
-    minimal_idf, floor_2_floor_height, num_floors, zoning, basement, roof_height
+    doc, floor_2_floor_height, num_floors, zoning, basement, roof_height
 ):
     """Test that the number of roof surfaces matches the expected number of roof surfaces."""
     expected_number_ceiling_srfs = (
@@ -462,12 +449,12 @@ def test_num_ceil_sfs(
         roof_height=roof_height,
     )
 
-    idf = geom.add(minimal_idf)
+    doc = geom.add(doc)
 
     n_ceiling_srfs = len([
         srf
-        for srf in idf.idfobjects["BUILDINGSURFACE:DETAILED"]
-        if srf.Surface_Type.lower() == "ceiling"
+        for srf in doc["BuildingSurface:Detailed"]
+        if (srf.surface_type or "").lower() == "ceiling"
     ])
 
     assert expected_number_ceiling_srfs == n_ceiling_srfs, (
@@ -486,10 +473,9 @@ target_length = [9, 11]
     list(itertools.product(widths, depths, rotation_angle, target_length)),
 )
 def test_match_idf_to_geometry_neighbors(
-    minimal_idf, width, depth, rotation_angle, target_length
+    doc, width, depth, rotation_angle, target_length
 ):
     """Test that the geometry is correctly matched to the building and neighbors."""
-    idf = minimal_idf
     # make the shoebox geometry
     target_short_length = target_length - 2
     target_long_length = target_length
@@ -505,7 +491,7 @@ def test_match_idf_to_geometry_neighbors(
         wwr=0.15,
         roof_height=None,
     )
-    idf = geom.add(idf)
+    doc = geom.add(doc)
 
     neighbors: list[Polygon | str | None] = [
         Polygon(
@@ -534,8 +520,8 @@ def test_match_idf_to_geometry_neighbors(
 
     if width < depth:
         with pytest.raises(NotImplementedError):
-            idf = match_idf_to_building_and_neighbors(
-                idf=idf,
+            doc = match_idf_to_building_and_neighbors(
+                doc=doc,
                 building=building,
                 neighbor_polys=neighbors,
                 neighbor_f2f_height=3.5,
@@ -545,8 +531,8 @@ def test_match_idf_to_geometry_neighbors(
                 rotation_angle=rotation_angle,
             )
     else:
-        idf = match_idf_to_building_and_neighbors(
-            idf=idf,
+        doc = match_idf_to_building_and_neighbors(
+            doc=doc,
             building=building,
             neighbor_polys=neighbors,
             neighbor_f2f_height=3.5,
@@ -556,16 +542,11 @@ def test_match_idf_to_geometry_neighbors(
             rotation_angle=rotation_angle,
         )
         # get a list of the shading surfaces
-        shading_surfaces = idf.idfobjects["SHADING:SITE:DETAILED"]
+        shading_surfaces = doc["Shading:Site:Detailed"]
 
         assert len(shading_surfaces) == 8
         # get the z coordinates of the surfaces
-        z_coordinates = (
-            [float(srf.Vertex_1_Zcoordinate) for srf in shading_surfaces]
-            + [float(srf.Vertex_2_Zcoordinate) for srf in shading_surfaces]
-            + [float(srf.Vertex_3_Zcoordinate) for srf in shading_surfaces]
-            + [float(srf.Vertex_4_Zcoordinate) for srf in shading_surfaces]
-        )
+        z_coordinates = [v.z for srf in shading_surfaces for v in _vertices(srf)]
         # get the unique z coordinates
         unique_z_coordinates = set(z_coordinates)
         unique_z = np.array(sorted(unique_z_coordinates))
@@ -576,22 +557,14 @@ def test_match_idf_to_geometry_neighbors(
 
         assert len(unique_z_coordinates) == 3
 
-        building_surfaces = idf.idfobjects["BUILDINGSURFACE:DETAILED"]
-        x_coords = (
-            [float(srf.Vertex_1_Xcoordinate) for srf in building_surfaces]
-            + [float(srf.Vertex_2_Xcoordinate) for srf in building_surfaces]
-            + [float(srf.Vertex_3_Xcoordinate) for srf in building_surfaces]
-            + [float(srf.Vertex_4_Xcoordinate) for srf in building_surfaces]
-        )
+        building_vertices = [
+            v for srf in doc["BuildingSurface:Detailed"] for v in _vertices(srf)
+        ]
+        x_coords = [v.x for v in building_vertices]
         x_max = max(x_coords)
         x_min = min(x_coords)
 
-        y_coords = (
-            [float(srf.Vertex_1_Ycoordinate) for srf in building_surfaces]
-            + [float(srf.Vertex_2_Ycoordinate) for srf in building_surfaces]
-            + [float(srf.Vertex_3_Ycoordinate) for srf in building_surfaces]
-            + [float(srf.Vertex_4_Ycoordinate) for srf in building_surfaces]
-        )
+        y_coords = [v.y for v in building_vertices]
         y_max = max(y_coords)
         y_min = min(y_coords)
         # compute where (x,y) moves to after a rotation around the origin by c degrees counterclockwise
