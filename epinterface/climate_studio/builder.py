@@ -171,24 +171,24 @@ class Model(BaseWeather, validate_assignment=True):
         config.output_dir.mkdir(parents=True, exist_ok=True)
         _epw_path, ddy_path = self.fetch_weather(config.weather_dir)
         ep_version = energyplus_settings.version_tuple
-        idf = minimal_document(ep_version)
+        doc = minimal_document(ep_version)
         add_output_objects(
-            idf, DESIRED_METERS_FOR_VERSION[energyplus_settings.supported_major]
+            doc, DESIRED_METERS_FOR_VERSION[energyplus_settings.supported_major]
         )
         ddy = load_idf(str(ddy_path), version=ep_version)
         # Sizing periods run in this order; winter first, as on the sbem path.
         ddy_spec = DDYSizingSpec(
             match=False, conditions_types=["Winter Extreme", "Summer Extreme"]
         )
-        ddy_spec.inject_ddy(idf, ddy)
+        ddy_spec.inject_ddy(doc, ddy)
 
-        idf = add_default_sim_controls(idf)
+        doc = add_default_sim_controls(doc)
         # The default schedules (AlwaysOn, AllOff, ...) are written here and
         # take precedence over library schedules of the same name.
-        idf, _scheds = add_default_schedules(idf)
+        doc, _scheds = add_default_schedules(doc)
 
         add_site_ground_temperature(
-            idf,
+            doc,
             [
                 18.3,
                 18.2,
@@ -241,65 +241,65 @@ class Model(BaseWeather, validate_assignment=True):
             ],
         )
 
-        idf = self.geometry.add(idf)
+        doc = self.geometry.add(doc)
 
         # construct zone lists
-        idf, conditioned_zone_list, all_zones_list = self.add_zone_lists(idf)
+        doc, conditioned_zone_list, all_zones_list = self.add_zone_lists(doc)
 
         # TODO: Handle separately ventilated attic/basement?
-        idf = self.add_space_use(idf, self.space_use, conditioned_zone_list)
-        idf = self.add_envelope(idf, self.envelope, all_zones_list)
+        doc = self.add_space_use(doc, self.space_use, conditioned_zone_list)
+        doc = self.add_envelope(doc, self.envelope, all_zones_list)
 
-        return idf
+        return doc
 
     def add_hot_water_to_zone_list(
-        self, idf: IDFDocument, space_use: ZoneUse, zone_list: IDFObject
+        self, doc: IDFDocument, space_use: ZoneUse, zone_list: IDFObject
     ) -> IDFDocument:
         """Add the hot water to the zone list.
 
         Args:
-            idf (IDFDocument): The IDF model to add the hot water to.
+            doc (IDFDocument): The IDF model to add the hot water to.
             space_use (ZoneUse): The zone use template.
             zone_list (IDFObject): The `ZoneList` of the zones to add the hot water to.
 
         Returns:
-            idf (IDFDocument): The IDF model with the added hot water.
+            doc (IDFDocument): The IDF model with the added hot water.
         """
         for zone_name in zone_list_names(zone_list):
-            idf = self.add_hot_water_to_zone(idf, space_use, zone_name)
-        return idf
+            doc = self.add_hot_water_to_zone(doc, space_use, zone_name)
+        return doc
 
     def add_hot_water_to_zone(
-        self, idf: IDFDocument, space_use: ZoneUse, zone_name: str
+        self, doc: IDFDocument, space_use: ZoneUse, zone_name: str
     ) -> IDFDocument:
         """Add the hot water to the zone.
 
         Args:
-            idf (IDFDocument): The IDF model to add the hot water to.
+            doc (IDFDocument): The IDF model to add the hot water to.
             space_use (ZoneUse): The zone use template.
             zone_name (str): The name of the zone to add the hot water to.
 
         Returns:
-            idf (IDFDocument): The IDF model with the added hot water.
+            doc (IDFDocument): The IDF model with the added hot water.
         """
-        zone = idf["Zone"].get(zone_name)
+        zone = doc["Zone"].get(zone_name)
         if zone is None:
             raise ValueError(f"NO_ZONE:{zone_name}")
-        area = get_zone_floor_area(idf, zone.name)
+        area = get_zone_floor_area(doc, zone.name)
         ppl_density = space_use.Loads.PeopleDensity
         total_ppl = ppl_density * area
-        idf = space_use.HotWater.add_water_to_idf_zone(idf, zone.name, total_ppl)
-        return idf
+        doc = space_use.HotWater.add_water_to_idf_zone(doc, zone.name, total_ppl)
+        return doc
 
     def add_envelope(
-        self, idf: IDFDocument, envelope: ZoneEnvelope, inf_zone_list: IDFObject
+        self, doc: IDFDocument, envelope: ZoneEnvelope, inf_zone_list: IDFObject
     ) -> IDFDocument:
         """Add the envelope to the IDF model.
 
         Takes care of both the constructions and infiltration and windows.
 
         Args:
-            idf (IDFDocument): The IDF model to add the envelope to.
+            doc (IDFDocument): The IDF model to add the envelope to.
             envelope (ZoneEnvelope): The envelope template.
             inf_zone_list (IDFObject): The `ZoneList` of the zones to add the infiltration to.
 
@@ -314,24 +314,24 @@ class Model(BaseWeather, validate_assignment=True):
         _foundation_settings = envelope.Foundation
         # TODO: other settings
 
-        self.add_srf_constructions(idf, constructions, window_def)
-        self.add_infiltration(idf, infiltration, inf_zone_list)
+        self.add_srf_constructions(doc, constructions, window_def)
+        self.add_infiltration(doc, infiltration, inf_zone_list)
 
         sch_names = self.envelope.schedule_names
-        idf = self.add_schedules_by_name(idf, sch_names)
+        doc = self.add_schedules_by_name(doc, sch_names)
 
-        return idf
+        return doc
 
     def add_srf_constructions(
         self,
-        idf: IDFDocument,
+        doc: IDFDocument,
         constructions: ZoneConstruction,
         window_def: WindowDefinition | None,
     ) -> IDFDocument:
         """Assigns the constructions to the surfaces in the model.
 
         Args:
-            idf (IDFDocument): The IDF model to select the surfaces from.
+            doc (IDFDocument): The IDF model to select the surfaces from.
             constructions (ZoneConstruction): The construction template.
             window_def (WindowDefinition): The window definition template.
 
@@ -354,13 +354,13 @@ class Model(BaseWeather, validate_assignment=True):
             raise ClimateStudioBuilderNotImplementedError("InternalMassIsOn")
 
         handlers = SurfaceHandlers.Default()
-        idf = handlers.handle_envelope(idf, self.lib, constructions, window_def)
+        doc = handlers.handle_envelope(doc, self.lib, constructions, window_def)
 
-        return idf
+        return doc
 
     def add_zone_lists(
         self,
-        idf: IDFDocument,
+        doc: IDFDocument,
     ):
         """Add the zone lists to the IDF model.
 
@@ -369,17 +369,17 @@ class Model(BaseWeather, validate_assignment=True):
         as well as a separate list for all zones.
 
         Args:
-            idf (IDFDocument): The IDF model to add the zone lists to.
+            doc (IDFDocument): The IDF model to add the zone lists to.
 
         Returns:
-            idf (IDFDocument): The IDF model with the added zone lists
+            doc (IDFDocument): The IDF model with the added zone lists
             conditioned_zone_list (IDFObject): The `ZoneList` of conditioned zones
             all_zones_list (IDFObject): The `ZoneList` of all zones
         """
-        all_zone_names = [zone.name for zone in idf["Zone"]]
+        all_zone_names = [zone.name for zone in doc["Zone"]]
         conditioned_zone_names = [
             zone.name
-            for zone in idf["Zone"]
+            for zone in doc["Zone"]
             if "attic" not in zone.name.lower()
             and (
                 not zone.name.lower().endswith(self.geometry.basement_suffix.lower())
@@ -398,48 +398,48 @@ class Model(BaseWeather, validate_assignment=True):
             raise ValueError(msg)
 
         conditioned_zone_list = add_zone_list(
-            idf, "Conditioned_Zones", conditioned_zone_names
+            doc, "Conditioned_Zones", conditioned_zone_names
         )
-        all_zones_list = add_zone_list(idf, "All_Zones", all_zone_names)
-        return idf, conditioned_zone_list, all_zones_list
+        all_zones_list = add_zone_list(doc, "All_Zones", all_zone_names)
+        return doc, conditioned_zone_list, all_zones_list
 
     def add_infiltration(
-        self, idf: IDFDocument, infiltration: ZoneInfiltration, zone_list: IDFObject
+        self, doc: IDFDocument, infiltration: ZoneInfiltration, zone_list: IDFObject
     ):
         """Add the infiltration to the IDF model.
 
         Args:
-            idf (IDFDocument): The IDF model to add the infiltration to.
+            doc (IDFDocument): The IDF model to add the infiltration to.
             infiltration: The infiltration object.
             zone_list (IDFObject): The `ZoneList` of the zones to add the infiltration to.
 
         Returns:
-            idf (IDFDocument): The IDF model with the added infiltration.
+            doc (IDFDocument): The IDF model with the added infiltration.
         """
-        idf = infiltration.add_infiltration_to_idf_zone(idf, zone_list.name)
-        # idf = self.add_schedules_by_name(idf, infiltration.schedule_names)
-        return idf
+        doc = infiltration.add_infiltration_to_idf_zone(doc, zone_list.name)
+        # doc = self.add_schedules_by_name(doc, infiltration.schedule_names)
+        return doc
 
     def add_space_use(
-        self, idf: IDFDocument, space_use: ZoneUse, zone_list: IDFObject
+        self, doc: IDFDocument, space_use: ZoneUse, zone_list: IDFObject
     ) -> IDFDocument:
         """Add the space use to the IDF model.
 
         Args:
-            idf (IDFDocument): The IDF model to add the space use to.
+            doc (IDFDocument): The IDF model to add the space use to.
             space_use (ZoneUse): The zone use template.
             zone_list (IDFObject): The `ZoneList` of the zones to add the space use to.
 
         Returns:
             IDFDocument: The IDF model with the added space use.
         """
-        idf = space_use.add_space_use_to_idf_zone(idf, zone_list)
-        idf = self.add_hot_water_to_zone_list(idf, space_use, zone_list)
-        idf = self.add_schedules_by_name(idf, space_use.schedule_names)
-        return idf
+        doc = space_use.add_space_use_to_idf_zone(doc, zone_list)
+        doc = self.add_hot_water_to_zone_list(doc, space_use, zone_list)
+        doc = self.add_schedules_by_name(doc, space_use.schedule_names)
+        return doc
 
     def add_schedules_by_name(
-        self, idf: IDFDocument, schedule_names: set[str]
+        self, doc: IDFDocument, schedule_names: set[str]
     ) -> IDFDocument:
         """Add library schedules to the IDF model by name.
 
@@ -447,15 +447,15 @@ class Model(BaseWeather, validate_assignment=True):
         model and are not looked up in the library.
 
         Args:
-            idf (IDFDocument): The IDF model to add the schedules to.
+            doc (IDFDocument): The IDF model to add the schedules to.
             schedule_names (set[str]): The names of the schedules to add.
 
         Returns:
             IDFDocument: The IDF model with the added schedules.
         """
         for name in sorted(schedule_names - PROTECTED_SCHEDULE_NAMES):
-            self.lib.Schedules[name].add_to_idf(idf)
-        return idf
+            self.lib.Schedules[name].add_to_idf(doc)
+        return doc
 
     def simulate(
         self,

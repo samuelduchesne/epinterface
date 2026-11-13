@@ -81,4 +81,4 @@ def test_run_smoke_any_version(preseeded_readonly_db, tmp_path):
     assert list(r.energy_and_peak.index) == list(expected.index)
     assert (tmp_path / "eplus_simulation").is_dir()
     assert r.output_dir is not None
-    assert r.idf.version == energyplus_settings.version_tuple
+    assert r.doc.version == energyplus_settings.version_tuple

@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 import tempfile
+import warnings
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -1166,7 +1167,7 @@ class Model(BaseWeather, validate_assignment=True):
                 sql = detach_sql(sql)
 
             return ModelRunResults(
-                idf=doc,
+                doc=doc,
                 sql=sql,
                 energy_and_peak=results,
                 err_text=err_text,
@@ -1273,12 +1274,22 @@ def construct_zone_def(
 class ModelRunResults:
     """The results of a model run."""
 
-    idf: IDFDocument
+    doc: IDFDocument
     sql: SQLResult
     energy_and_peak: pd.Series
     err_text: str
     output_dir: Path | None
     overheating_results: OverheatingAnalysisResults | None = None
+
+    @property
+    def idf(self) -> IDFDocument:
+        """Deprecated alias of `doc`, the model's document."""
+        warnings.warn(
+            "ModelRunResults.idf is deprecated; use ModelRunResults.doc",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.doc
 
     def hourly_timeseries(self, names: Sequence[str]) -> pd.DataFrame:
         """Get hourly timeseries for the named output variables or meters.
@@ -1370,7 +1381,7 @@ if __name__ == "__main__":
             # post_geometry_callback=post_geometry_callback,
         )
         _idf, results, _err_text, _sql, _ = (
-            r.idf,
+            r.doc,
             r.energy_and_peak,
             r.err_text,
             r.sql,

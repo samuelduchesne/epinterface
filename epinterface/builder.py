@@ -65,14 +65,14 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
         )
 
         version = energyplus_settings.version_tuple
-        idf = minimal_document(version)
+        doc = minimal_document(version)
         ddy = load_idf(str(ddy_path), version=version)
         ddyspec = DDYSizingSpec(match=True)
-        ddyspec.inject_ddy(idf, ddy)
+        ddyspec.inject_ddy(doc, ddy)
 
         # Configure simulation
         add_or_replace(
-            idf,
+            doc,
             "SimulationControl",
             do_zone_sizing_calculation="Yes",
             do_system_sizing_calculation="Yes",
@@ -86,7 +86,7 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
 
         # Configure run period
         add_or_replace(
-            idf,
+            doc,
             "RunPeriod",
             "Year",
             begin_month=1,
@@ -102,7 +102,7 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
         )
 
         # configure timestep
-        add_or_replace(idf, "Timestep", number_of_timesteps_per_hour=self.timestep)
+        add_or_replace(doc, "Timestep", number_of_timesteps_per_hour=self.timestep)
 
         # create constant scheds
         for on_name, off_name in (
@@ -110,8 +110,8 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
             ("Always On", "Always Off"),
             ("On", "Off"),
         ):
-            add_constant_schedule(idf, on_name, 1)
-            add_constant_schedule(idf, off_name, 0)
+            add_constant_schedule(doc, on_name, 1)
+            add_constant_schedule(doc, off_name, 0)
         always_on_name = "On"
 
         # Handle Geometry
@@ -127,17 +127,17 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
             wwr=0.15,
             zoning="by_storey",
         )
-        idf = zone_dims.add(idf)
+        doc = zone_dims.add(doc)
 
         add_or_replace(
-            idf,
+            doc,
             "WindowMaterial:SimpleGlazingSystem",
             "DefaultGlazing",
             u_factor=self.WindowU,
             solar_heat_gain_coefficient=self.WindowSHGC,
             visible_transmittance=0.7,
         )
-        add_construction(idf, "Project External Window", ["DefaultGlazing"])
+        add_construction(doc, "Project External Window", ["DefaultGlazing"])
 
         # Handle Wall Constructions
         wall_layers = [
@@ -146,14 +146,14 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
             (material_lib.gypsum, 0.02),
         ]
         wall_construction = add_construction(
-            idf,
+            doc,
             "Project Wall",
             [
-                material.add_layer_to_idf(idf, thickness).name
+                material.add_layer_to_idf(doc, thickness).name
                 for material, thickness in wall_layers
             ],
         )
-        for surface in idf["BuildingSurface:Detailed"]:
+        for surface in doc["BuildingSurface:Detailed"]:
             if (surface.surface_type or "").lower() == "wall" and (
                 surface.outside_boundary_condition or ""
             ).lower() == "outdoors":
@@ -163,24 +163,24 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
 
         # Handle Zone List
         zone_names = [
-            zone.name for zone in idf["Zone"] if "attic" not in zone.name.lower()
+            zone.name for zone in doc["Zone"] if "attic" not in zone.name.lower()
         ]
-        zone_list = add_zone_list(idf, "Conditioned_Zones", zone_names)
+        zone_list = add_zone_list(doc, "Conditioned_Zones", zone_names)
 
         # Handle HVAC
         thermostat = add_or_replace(
-            idf,
+            doc,
             "HVACTemplate:Thermostat",
             "Thermostat",
             constant_heating_setpoint=self.HeatingSetpoint,
             constant_cooling_setpoint=self.CoolingSetpoint,
         )
-        for zone in idf["Zone"]:
+        for zone in doc["Zone"]:
             zone_name = zone.name
             if "attic" in zone_name.lower():
                 continue
             add_or_replace(
-                idf,
+                doc,
                 "HVACTemplate:Zone:IdealLoadsAirSystem",
                 "",
                 zone_name=zone_name,
@@ -209,27 +209,27 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
 
         # Handle People
         occ_sched = add_values_schedule(
-            idf,
+            doc,
             "Occupancy_sch",
             schedules.Occupancy.values.tolist(),
             type_limits="Fraction",
         )
-        ensure_fraction_type_limits(idf)
+        ensure_fraction_type_limits(doc)
         add_or_replace(
-            idf,
+            doc,
             "ScheduleTypeLimits",
             "any number",
             numeric_type="Continuous",
             unit_type="Dimensionless",
         )
         acti_year = add_values_schedule(
-            idf,
+            doc,
             "Activity_Schedule",
             [117.28] * HOURS_PER_YEAR,
             type_limits="any number",
         )
         add_or_replace(
-            idf,
+            doc,
             "People",
             "People",
             zone_or_zonelist_or_space_or_spacelist_name=zone_list.name,
@@ -244,7 +244,7 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
 
         # Handle Infiltration
         add_or_replace(
-            idf,
+            doc,
             "ZoneInfiltration:DesignFlowRate",
             "Infiltration",
             zone_or_zonelist_or_space_or_spacelist_name=zone_list.name,
@@ -259,18 +259,18 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
 
         def watts_per_area(obj_type: str) -> str:
             return field_name(
-                idf, obj_type, "watts_per_floor_area", "watts_per_zone_floor_area"
+                doc, obj_type, "watts_per_floor_area", "watts_per_zone_floor_area"
             )
 
         # Handle Equipment
         equip_sched = add_values_schedule(
-            idf,
+            doc,
             "Equipment_sch",
             schedules.Equipment.values.tolist(),
             type_limits="Fraction",
         )
         add_or_replace(
-            idf,
+            doc,
             "ElectricEquipment",
             "Equipment",
             zone_or_zonelist_or_space_or_spacelist_name=zone_list.name,
@@ -284,13 +284,13 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
 
         # Handle Lights
         lights_sched = add_values_schedule(
-            idf,
+            doc,
             "Lights_sch",
             schedules.Lights.values.tolist(),
             type_limits="Fraction",
         )
         add_or_replace(
-            idf,
+            doc,
             "Lights",
             "Lights",
             zone_or_zonelist_or_space_or_spacelist_name=zone_list.name,
@@ -307,4 +307,4 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
 
         # TODO: should we be using a slab processor?
 
-        return idf
+        return doc

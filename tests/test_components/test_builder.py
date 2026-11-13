@@ -66,7 +66,7 @@ def test_builder(preseeded_readonly_db: Prisma, sql_cleanup_spy: SQLCleanupSpy):
     hourly = r.hourly_timeseries(["Zone Mean Air Temperature"])
     assert hourly.shape[0] == 8760
     assert hourly.shape[1] > 0
-    assert r.idf.version == energyplus_settings.version_tuple
+    assert r.doc.version == energyplus_settings.version_tuple
     assert "EnergyPlus Completed Successfully" in r.err_text
 
 
@@ -224,3 +224,24 @@ _FLAT_MODEL_KWARGS = {
     "CoolingDistributionCOP": 1.0,
     "EPWURI": DefaultEPWZipPath,
 }
+
+
+def test_model_run_results_idf_is_a_deprecated_alias_of_doc():
+    """`ModelRunResults.idf` still returns the document, with a warning."""
+    import warnings
+
+    from epinterface.document import minimal_document
+    from epinterface.sbem.builder import ModelRunResults
+
+    doc = minimal_document(energyplus_settings.version_tuple)
+    results = ModelRunResults(
+        doc=doc,
+        sql=None,  # pyright: ignore[reportArgumentType]
+        energy_and_peak=None,  # pyright: ignore[reportArgumentType]
+        err_text="",
+        output_dir=None,
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        assert results.idf is doc
+    assert any(issubclass(w.category, DeprecationWarning) for w in caught)

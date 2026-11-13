@@ -12,13 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** [idfkit](https://pypi.org/project/idfkit/) replaces archetypal, eppy and geomeppy. Models are built,
   edited, simulated and read through idfkit's own API. archetypal, eppy and
   geomeppy are no longer dependencies.
-- **Breaking:** `ModelRunResults.idf` is now an idfkit `IDFDocument`, and
-  `ModelRunResults.sql` is now idfkit's `SQLResult` (it was archetypal's `Sql`).
+- **Breaking:** the model is now `ModelRunResults.doc`, an idfkit
+  `IDFDocument`, and `ModelRunResults.sql` is now idfkit's `SQLResult` (it was
+  archetypal's `Sql`). `ModelRunResults.idf` still returns the document but
+  warns that it is deprecated. Every parameter that takes an `IDFDocument` is
+  named `doc`.
 - **Breaking:** `Model.build()` returns an `IDFDocument`; `Model.simulate()`
   returns `(IDFDocument, SQLResult)`.
 - **Breaking:** `post_geometry_callback` is now
   `Callable[[IDFDocument], IDFDocument]`.
-- **Breaking:** every `add_to_idf(idf)` and similar method on the sbem
+- **Breaking:** every `add_to_idf` and similar method on the sbem
   components, the `epinterface/interface.py` classes, `epinterface/builder.py`,
   `epinterface/climate_studio/` and `epinterface/geometry.py` now takes an
   `IDFDocument` instead of an archetypal `IDF`.
