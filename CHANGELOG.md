@@ -26,6 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `EnergyPlusSettings.version_tuple`.
 - The default EnergyPlus version is the newest installed supported major
   version. Set `EPINTERFACE_ENERGYPLUS_VERSION` to pin one.
+- The base model is now built programmatically with idfkit for any supported
+  EnergyPlus version (`minimal_document`). The packaged `Minimal.idf`, its
+  `DefaultMinimalIDFPath`, and the IDFVersionUpdater transition step are gone,
+  so the first build in a process no longer spends about 37 s migrating the
+  file, and the EnergyPlus transition binaries are no longer needed.
 - Simulation outputs match the archetypal-based 1.x results on EnergyPlus
   25.2.0 within a relative tolerance of 1e-3 and an absolute tolerance of 1e-6;
   per-zone geometry matches within a relative tolerance of 1e-9 and an absolute

@@ -21,7 +21,10 @@ from pandas.testing import assert_frame_equal
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from epinterface.data import EnergyPlusArtifactDir  # noqa: E402
+# The archetypal-era base model: the original EnergyPlus 22.2 Minimal.idf, kept as a
+# test fixture now that epinterface builds its base document programmatically.
+MINIMAL_22_2 = ROOT / "tests" / "data" / "Minimal_22_2.idf"
+
 from epinterface.sbem.prisma.client import PrismaSettings  # noqa: E402
 from epinterface.sbem.prisma.seed_fns import (  # noqa: E402
     create_dhw_systems,
@@ -55,7 +58,7 @@ def _capture_geometry_baseline() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         for key, geometry in GEOMETRY_GRID.items():
             target = Path(temp_dir) / f"{key.replace('/', '_')}.idf"
-            shutil.copy(EnergyPlusArtifactDir / "Minimal.idf", target)
+            shutil.copy(MINIMAL_22_2, target)
             idf = IDF(
                 target.as_posix(),
                 as_version=energyplus_settings.energyplus_version,  # pyright: ignore [reportArgumentType]

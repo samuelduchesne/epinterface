@@ -72,7 +72,7 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
         )
 
         version = energyplus_settings.version_tuple
-        idf = minimal_document(version).copy()
+        idf = minimal_document(version)
         ddy = load_idf(str(ddy_path), version=version)
         ddyspec = DDYSizingSpec(match=True)
         ddyspec.inject_ddy(idf, ddy)

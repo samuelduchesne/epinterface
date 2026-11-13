@@ -862,7 +862,7 @@ class Model(BaseWeather, validate_assignment=True):
         config.output_dir.mkdir(parents=True, exist_ok=True)
         epw_path, ddy_path = self.fetch_weather(config.weather_dir)
         ep_version = energyplus_settings.version_tuple
-        doc = minimal_document(ep_version).copy()
+        doc = minimal_document(ep_version)
         add_output_objects(
             doc, DESIRED_METERS_FOR_VERSION[energyplus_settings.supported_major]
         )

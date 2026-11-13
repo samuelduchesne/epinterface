@@ -8,8 +8,7 @@ from pathlib import Path
 import pytest
 from idfkit import IDFDocument
 
-from epinterface.data import EnergyPlusArtifactDir
-from epinterface.document import load_base_document
+from epinterface.document import minimal_document
 from epinterface.geometry import ShoeboxGeometry
 from epinterface.sbem.prisma.client import PrismaSettings
 from epinterface.sbem.prisma.seed_fns import (
@@ -48,18 +47,10 @@ def preseeded_readonly_db():
             yield settings.db
 
 
-@pytest.fixture(scope="session")
-def _base_doc() -> IDFDocument:
-    """Load (and migrate) the minimal document once per session."""
-    return load_base_document(
-        EnergyPlusArtifactDir / "Minimal.idf", energyplus_settings.version_tuple
-    )
-
-
 @pytest.fixture(scope="function")
-def doc(_base_doc: IDFDocument) -> IDFDocument:
-    """A fresh copy of the minimal idfkit document at the configured version."""
-    return _base_doc.copy()
+def doc() -> IDFDocument:
+    """A fresh minimal idfkit document at the configured version."""
+    return minimal_document(energyplus_settings.version_tuple)
 
 
 @pytest.fixture(scope="function")

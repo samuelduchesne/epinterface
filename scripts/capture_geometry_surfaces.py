@@ -27,7 +27,10 @@ from archetypal.idfclass import IDF
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from epinterface.data import EnergyPlusArtifactDir  # noqa: E402
+# The archetypal-era base model: the original EnergyPlus 22.2 Minimal.idf, kept as a
+# test fixture now that epinterface builds its base document programmatically.
+MINIMAL_22_2 = ROOT / "tests" / "data" / "Minimal_22_2.idf"
+
 from epinterface.settings import energyplus_settings  # noqa: E402
 from tests.regression.configs import GEOMETRY_SURFACE_CASES  # noqa: E402
 from tests.regression.summary import surface_records  # noqa: E402
@@ -67,7 +70,7 @@ def main() -> None:
                 scene_context=old.SceneContext(**dict(scene)) if scene else None,
             )
             target = Path(temp_dir) / "shoebox.idf"
-            shutil.copy(EnergyPlusArtifactDir / "Minimal.idf", target)
+            shutil.copy(MINIMAL_22_2, target)
             idf = IDF(
                 target.as_posix(),
                 as_version=energyplus_settings.energyplus_version,  # pyright: ignore [reportArgumentType]
