@@ -15,9 +15,12 @@ _DESIGN_DAY_COMMON: dict[str, Any] = {
     "daylight_saving_time_indicator": "No",
 }
 
-# Field values of the objects the former packaged `Minimal.idf` held, keyed by
-# the field names idfkit uses in the newest schema. # `new_document` also pre-adds SimulationControl, which `Minimal.idf` never had:
-# it is removed, as the run configuration is the simulation's concern.
+# The objects of the former packaged `Minimal.idf`, with its values and the
+# field names of the newest idfkit schema. Fields an older schema lacks are
+# skipped only through the explicit `_FIELD_ADDED_IN` allowlist; any other
+# unknown field fails in `doc.add`.
+# `new_document` also pre-adds a SimulationControl, which is removed because the
+# migrated `Minimal.idf` never had one (parity with the former base model).
 _MINIMAL_OBJECTS: tuple[tuple[str, str, dict[str, Any]], ...] = (
     (
         "Building",
