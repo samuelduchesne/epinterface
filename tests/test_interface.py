@@ -1,81 +1,66 @@
-"""Tests for the legacy IDF object writers on idfkit documents."""
+"""Tests for the interface helpers, material library and literal types."""
 
 import idfkit
 import idfkit.schedules
 import numpy as np
 import pytest
+from pydantic import TypeAdapter
 
+from epinterface.document import add_construction
 from epinterface.interface import (
-    AirGapMaterial,
-    Construction,
-    ElectricEquipment,
-    HVACTemplateThermostat,
-    HVACTemplateZoneIdealLoadsAirSystem,
-    InternalMass,
-    Lights,
-    NoMassMaterial,
-    People,
-    RunPeriod,
-    ScheduleDayHourly,
-    ScheduleTypeLimits,
-    ScheduleWeekDaily,
-    ScheduleYear,
-    SimpleGlazingMaterial,
-    SimulationControl,
-    SiteGroundTemperature,
-    SizingParameters,
-    Timestep,
-    WaterUseEquipment,
-    ZoneInfiltrationDesignFlowRate,
-    ZoneList,
-    ZoneVentilationWindAndStackOpenArea,
+    DefaultMaterialLibrary,
+    HeatRecoveryTypeType,
+    IdealLoadsLimitType,
+    InfDesignFlowRateCalculationMethodType,
     add_constant_schedule,
     add_default_schedules,
     add_default_sim_controls,
+    add_site_ground_temperature,
+    add_zone_list,
     ensure_fraction_type_limits,
     stucco,
+    zone_list_names,
 )
-
-
-def test_add_returns_the_document(doc):
-    """Writers hand back the document they were given."""
-    assert ZoneList(Names=["A"], Name="L").add(doc) is doc
 
 
 def test_zone_list_writes_object(doc):
     """Zone names land in the extensible zones, blanks dropped."""
-    ZoneList(Names=["A", "B", ""], Name="L").add(doc)
-    assert [z.zone_name for z in doc["ZoneList"]["L"].zones] == ["A", "B"]
+    zone_list = add_zone_list(doc, "L", ["A", "B", ""])
+    assert doc["ZoneList"]["L"] is zone_list
+    assert [z.zone_name for z in zone_list.zones] == ["A", "B"]
+    assert zone_list_names(zone_list) == ["A", "B"]
 
 
-def test_simulation_control_run_period_timestep(doc):
-    """Nameless singleton objects are written with their fields."""
-    SimulationControl(Do_Plant_Sizing_Calculation="No").add(doc)
-    RunPeriod(
-        Name="Year",
-        Begin_Month=1,
-        Begin_Day_of_Month=1,
-        End_Month=12,
-        End_Day_of_Month=31,
-        Day_of_Week_for_Start_Day="Sunday",
-    ).add(doc)
-    Timestep(Number_of_Timesteps_per_Hour=4).add(doc)
+def test_add_default_sim_controls(doc):
+    """The default controls write all four objects with their values."""
+    assert add_default_sim_controls(doc) is doc
     control = doc["SimulationControl"].first()
     assert control.do_zone_sizing_calculation == "Yes"
     assert control.do_plant_sizing_calculation == "No"
+    assert control.maximum_number_of_hvac_sizing_simulation_passes == 2
     period = doc["RunPeriod"]["Year"]
+    assert (period.begin_month, period.begin_day_of_month) == (1, 1)
     assert (period.end_month, period.end_day_of_month) == (12, 31)
     assert period.day_of_week_for_start_day == "Sunday"
-    assert doc["Timestep"].first().number_of_timesteps_per_hour == 4
-
-
-def test_singleton_types_replace_existing_object(doc):
-    """Minimal.idf already has Sizing:Parameters and ground temperatures."""
-    SizingParameters(Heating_Sizing_Factor=1.3, Cooling_Sizing_Factor=1.4).add(doc)
-    SiteGroundTemperature.FromValues(list(range(12))).add(doc)
-    assert len(doc["Sizing:Parameters"]) == 1
+    assert period.apply_weekend_holiday_rule == "Yes"
+    assert period.use_weather_file_holidays_and_special_days == "No"
+    assert doc["Timestep"].first().number_of_timesteps_per_hour == 6
     sizing = doc["Sizing:Parameters"].first()
-    assert (sizing.heating_sizing_factor, sizing.cooling_sizing_factor) == (1.3, 1.4)
+    assert (sizing.heating_sizing_factor, sizing.cooling_sizing_factor) == (1.15, 1.15)
+
+
+def test_add_default_sim_controls_replaces_singletons(doc):
+    """Writing the controls twice keeps one of each object."""
+    add_default_sim_controls(doc)
+    add_default_sim_controls(doc)
+    for obj_type in ("SimulationControl", "Timestep", "Sizing:Parameters"):
+        assert len(doc[obj_type]) == 1
+    assert len(doc["RunPeriod"]) == 1
+
+
+def test_site_ground_temperature_replaces_existing_object(doc):
+    """The minimal document's ground temperatures are replaced, not duplicated."""
+    add_site_ground_temperature(doc, [float(v) for v in range(12)])
     assert len(doc["Site:GroundTemperature:BuildingSurface"]) == 1
     ground = doc["Site:GroundTemperature:BuildingSurface"].first()
     assert (ground.january_ground_temperature, ground.december_ground_temperature) == (
@@ -84,255 +69,70 @@ def test_singleton_types_replace_existing_object(doc):
     )
 
 
-def test_add_default_sim_controls(doc):
-    """The default controls write all four objects."""
-    assert add_default_sim_controls(doc) is doc
-    assert (
-        doc["SimulationControl"].first().maximum_number_of_hvac_sizing_simulation_passes
-        == 2
+def test_site_ground_temperature_writes_plain_numbers(doc):
+    """Numpy values are written as plain numbers."""
+    add_site_ground_temperature(doc, list(np.linspace(10.0, 21.0, 12)))
+    ground = doc["Site:GroundTemperature:BuildingSurface"].first()
+    assert type(ground.january_ground_temperature) is float
+    january = next(
+        line
+        for line in idfkit.write_idf(doc).splitlines()
+        if "January Ground Temperature" in line
     )
-    assert doc["RunPeriod"]["Year"].begin_month == 1
-    assert doc["Timestep"].first().number_of_timesteps_per_hour == 6
-    assert doc["Sizing:Parameters"].first().heating_sizing_factor == 1.15
+    assert january.split(",")[0].strip() == "10"
+
+
+@pytest.mark.parametrize("count", [11, 13])
+def test_site_ground_temperature_needs_12_values(doc, count):
+    """Anything but 12 monthly values is rejected."""
+    with pytest.raises(ValueError, match=f"GROUNDTEMP:EXPECTED_12:RECEIVED_{count}"):
+        add_site_ground_temperature(doc, [10.0] * count)
+
+
+def test_material_library_layer(doc):
+    """A library material is written as a Material of the given thickness."""
+    material = DefaultMaterialLibrary().stucco.add_layer_to_idf(doc, 0.03)
+    assert material.name == "Stucco_0.03m" == stucco.layer_name(0.03)
+    assert material.thickness == 0.03
+    assert material.conductivity == 0.721
+    assert material.density == 1865
+    assert material.specific_heat == 878
+    assert material.roughness == "MediumSmooth"
+    assert material.thermal_absorptance in (None, "")
 
 
 def test_construction_writes_layers_in_order(doc):
-    """Layers are written as materials and referenced outside-in."""
-    Construction(
-        name="Wall",
-        layers=[
-            stucco.as_layer(0.03),
-            AirGapMaterial(Name="Gap", Thermal_Resistance=0.18),
-            NoMassMaterial(Name="Skin", Roughness="Smooth", Thermal_Resistance=1.0),
+    """Layers are referenced outside-in."""
+    names = [
+        stucco.add_layer_to_idf(doc, 0.03).name,
+        DefaultMaterialLibrary().insulation.add_layer_to_idf(doc, 0.15).name,
+    ]
+    wall = add_construction(doc, "Wall", names)
+    assert [wall.outside_layer, wall.layer_2] == ["Stucco_0.03m", "Insulation_0.15m"]
+
+
+def test_constructions_share_a_layer_material(doc):
+    """A second construction reusing a layer does not duplicate the material."""
+    add_construction(doc, "A", [stucco.add_layer_to_idf(doc, 0.03).name])
+    add_construction(
+        doc,
+        "B",
+        [
+            stucco.add_layer_to_idf(doc, 0.03).name,
+            stucco.add_layer_to_idf(doc, 0.05).name,
         ],
-    ).add(doc)
-    wall = doc["Construction"]["Wall"]
-    assert [wall.outside_layer, wall.layer_2, wall.layer_3] == [
-        "Stucco_0.03m",
-        "Gap",
-        "Skin",
-    ]
-    material = doc["Material"]["Stucco_0.03m"]
-    assert material.thickness == 0.03
-    assert material.conductivity == 0.721
-    assert material.roughness == "MediumSmooth"
-    assert doc["Material:AirGap"]["Gap"].thermal_resistance == 0.18
-    assert doc["Material:NoMass"]["Skin"].roughness == "Smooth"
-
-
-def test_simple_glazing_material(doc):
-    """UFactor maps onto the schema's u_factor."""
-    SimpleGlazingMaterial(
-        Name="Glz",
-        UFactor=2.7,
-        Solar_Heat_Gain_Coefficient=0.6,
-        Visible_Transmittance=0.7,
-    ).add(doc)
-    glazing = doc["WindowMaterial:SimpleGlazingSystem"]["Glz"]
-    assert glazing.u_factor == 2.7
-    assert glazing.solar_heat_gain_coefficient == 0.6
-    assert glazing.visible_transmittance == 0.7
-
-
-def test_construction_extract_round_trips(doc):
-    """Constructions read back with their layer definitions."""
-    glazing = SimpleGlazingMaterial(
-        Name="Glz",
-        UFactor=2.7,
-        Solar_Heat_Gain_Coefficient=0.6,
-        Visible_Transmittance=0.7,
     )
-    original = Construction(name="Wall", layers=[stucco.as_layer(0.03)])
-    original.add(doc)
-    Construction(name="Window", layers=[glazing]).add(doc)
-    extracted = {c.name: c for c in Construction.extract(doc)}
-    assert extracted["Wall"].layers == original.layers
-    assert extracted["Window"].layers == [glazing]
-    assert extracted["Wall"].r_value == pytest.approx(original.r_value)
+    assert len(doc["Material"]) == 2
+    assert doc["Construction"]["B"].outside_layer == "Stucco_0.03m"
+    assert doc["Construction"]["B"].layer_2 == "Stucco_0.05m"
 
 
-def test_extract_reads_objects_back(doc):
-    """BaseObj.extract returns the class instances for every object of its type."""
-    lights = Lights(
-        Name="Lt",
-        Zone_or_ZoneList_Name="Z",
-        Schedule_Name="S",
-        Watts_per_Zone_Floor_Area=4.0,
-    )
-    lights.add(doc)
-    assert list(Lights.extract(doc)) == [lights]
-
-
-def test_internal_mass(doc):
-    """InternalMass writes its zone, construction and area."""
-    InternalMass(
-        Name="Mass", Zone_or_ZoneList_Name="Z", Construction_Name="C", Surface_Area=12.5
-    ).add(doc)
-    mass = doc["InternalMass"]["Mass"]
-    assert mass.construction_name == "C"
-    assert mass.surface_area == 12.5
-
-
-def test_people_writes_zone_and_density(doc):
-    """People maps the long zone field and sets the density."""
-    People(
-        Name="People",
-        Zone_or_ZoneList_Name="L",
-        Number_of_People_Schedule_Name="Occ",
-        Activity_Level_Schedule_Name="Act",
-        Number_of_People_Calculation_Method="People/Area",
-        People_per_Floor_Area=0.05,
-    ).add(doc)
-    people = doc["People"]["People"]
-    assert people.zone_or_zonelist_or_space_or_spacelist_name == "L"
-    assert people.number_of_people_schedule_name == "Occ"
-    assert people.activity_level_schedule_name == "Act"
-    assert people.people_per_floor_area == 0.05
-    assert people.number_of_people is None
-
-
-def test_lights_and_equipment_use_floor_area_field(doc):
-    """Watts/Area loads land in the version's floor-area field.
-
-    EnergyPlus >= 24 names it `watts_per_floor_area`; older versions
-    `watts_per_zone_floor_area`.
-    """
-    area_field = (
-        "watts_per_floor_area"
-        if doc.version >= (24, 0, 0)
-        else "watts_per_zone_floor_area"
-    )
-    Lights(
-        Name="Lt",
-        Zone_or_ZoneList_Name="L",
-        Schedule_Name="S",
-        Watts_per_Zone_Floor_Area=4,
-    ).add(doc)
-    ElectricEquipment(
-        Name="Eq",
-        Zone_or_ZoneList_Name="L",
-        Schedule_Name="S",
-        Watts_per_Zone_Floor_Area=9,
-    ).add(doc)
-    lights = doc["Lights"]["Lt"]
-    assert lights.zone_or_zonelist_or_space_or_spacelist_name == "L"
-    assert getattr(lights, area_field) == 4
-    assert lights.fraction_radiant == 0.42
-    equipment = doc["ElectricEquipment"]["Eq"]
-    assert getattr(equipment, area_field) == 9
-    assert equipment.fraction_radiant == 0.2
-
-
-def test_infiltration(doc):
-    """Infiltration writes the method and the coefficients."""
-    ZoneInfiltrationDesignFlowRate(
-        Name="Inf",
-        Zone_or_ZoneList_Name="L",
-        Schedule_Name="On",
-        Design_Flow_Rate_Calculation_Method="AirChanges/Hour",
-        Air_Changes_per_Hour=0.5,
-    ).add(doc)
-    inf = doc["ZoneInfiltration:DesignFlowRate"]["Inf"]
-    assert inf.design_flow_rate_calculation_method == "AirChanges/Hour"
-    assert inf.air_changes_per_hour == 0.5
-    assert inf.constant_term_coefficient == 1
-
-
-def test_ventilation_wind_and_stack(doc):
-    """The ventilation object keeps its name and open area."""
-    ZoneVentilationWindAndStackOpenArea(
-        Name="Vent",
-        Zone_or_Space_Name="Z",
-        Opening_Area=1.5,
-        Opening_Area_Fraction_Schedule_Name="On",
-        Height_Difference=2,
-    ).add(doc)
-    vent = doc["ZoneVentilation:WindandStackOpenArea"]["Vent"]
-    assert vent.opening_area == 1.5
-    assert vent.maximum_wind_speed == 40
-
-
-def test_water_use_equipment(doc):
-    """Water use equipment keeps its flow and schedule."""
-    WaterUseEquipment(
-        Name="DHW",
-        Peak_Flow_Rate=0.0001,
-        Flow_Rate_Fraction_Schedule_Name="On",
-        EndUse_Subcategory="Hot water",
-    ).add(doc)
-    water = doc["WaterUse:Equipment"]["DHW"]
-    assert water.peak_flow_rate == 0.0001
-    assert water.end_use_subcategory == "Hot water"
-
-
-def test_hvac_template_objects(doc):
-    """Thermostat and ideal loads templates write their setpoints and zone."""
-    thermostat = HVACTemplateThermostat(
-        Name="Tstat", Constant_Heating_Setpoint=19, Constant_Cooling_Setpoint=24
-    )
-    thermostat.add(doc)
-    HVACTemplateZoneIdealLoadsAirSystem(
-        Zone_Name="Z", Template_Thermostat_Name=thermostat.Name
-    ).add(doc)
-    stat = doc["HVACTemplate:Thermostat"]["Tstat"]
-    assert (stat.constant_heating_setpoint, stat.constant_cooling_setpoint) == (19, 24)
-    ideal = doc["HVACTemplate:Zone:IdealLoadsAirSystem"].first()
-    assert ideal.zone_name == "Z"
-    assert ideal.template_thermostat_name == "Tstat"
-    assert ideal.heat_recovery_type == "None"
-    assert ideal.maximum_heating_supply_air_temperature == 30
-
-
-def test_schedule_objects(doc):
-    """Type limits, day, week and year schedules reference each other."""
-    ScheduleTypeLimits(
-        Name="Lim", Lower_Limit_Value=0, Upper_Limit_Value=10, Numeric_Type="Continuous"
-    ).add(doc)
-    ScheduleDayHourly(
-        Name="Day",
-        Schedule_Type_Limits_Name="Lim",
-        **{f"Hour_{h}": h for h in range(1, 25)},
-    ).add(doc)
-    ScheduleWeekDaily(
-        Name="Week",
-        Monday_ScheduleDay_Name="Day",
-        Tuesday_ScheduleDay_Name="Day",
-        Wednesday_ScheduleDay_Name="Day",
-        Thursday_ScheduleDay_Name="Day",
-        Friday_ScheduleDay_Name="Day",
-        Saturday_ScheduleDay_Name="Day",
-        Sunday_ScheduleDay_Name="Day",
-    ).add(doc)
-    ScheduleYear(
-        Name="Year",
-        Schedule_Type_Limits_Name="Lim",
-        ScheduleWeek_Name_1="Week",
-        Start_Month_1=1,
-        Start_Day_1=1,
-        End_Month_1=6,
-        End_Day_1=30,
-        ScheduleWeek_Name_2="Week",
-        Start_Month_2=7,
-        Start_Day_2=1,
-        End_Month_2=12,
-        End_Day_2=31,
-    ).add(doc)
-    assert doc["ScheduleTypeLimits"]["Lim"].upper_limit_value == 10
-    day = doc["Schedule:Day:Hourly"]["Day"]
-    assert (day.hour_1, day.hour_24) == (1, 24)
-    week = doc["Schedule:Week:Daily"]["Week"]
-    assert week.monday_schedule_day_name == "Day"
-    assert week.summerdesignday_schedule_day_name == "Day"
-    assert week.holiday_schedule_day_name == "Day"
-    year = doc["Schedule:Year"]["Year"]
-    assert [(w["schedule_week_name"], w["end_month"]) for w in year.schedule_weeks] == [
-        ("Week", 6),
-        ("Week", 12),
-    ]
-    assert np.allclose(
-        idfkit.schedules.values(year, year=2018, document=doc),
-        np.tile(np.arange(1, 25), 365),
-    )
+def test_same_name_different_construction_replaces(doc):
+    """Re-adding a construction name with new layers replaces it, as archetypal did."""
+    add_construction(doc, "A", [stucco.add_layer_to_idf(doc, 0.03).name])
+    add_construction(doc, "A", [stucco.add_layer_to_idf(doc, 0.05).name])
+    assert len(doc["Construction"]) == 1
+    assert doc["Construction"]["A"].outside_layer == "Stucco_0.05m"
 
 
 def test_constant_schedule_uses_archetypal_object_names(doc):
@@ -385,27 +185,22 @@ def test_ensure_fraction_type_limits_is_idempotent(doc):
     assert len(doc["ScheduleTypeLimits"]) == 1
 
 
-def test_constructions_share_a_layer_material(doc):
-    """A second construction reusing a layer does not duplicate the material."""
-    Construction(name="A", layers=[stucco.as_layer(0.03)]).add(doc)
-    Construction(name="B", layers=[stucco.as_layer(0.03), stucco.as_layer(0.05)]).add(
-        doc
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("Sensible", "Sensible"), (None, "None"), (float("nan"), "None")],
+)
+def test_heat_recovery_type_reads_missing_as_none(value, expected):
+    """Missing heat recovery (None or NaN from a spreadsheet) means "None"."""
+    assert TypeAdapter(HeatRecoveryTypeType).validate_python(value) == expected
+
+
+def test_literal_types_validate():
+    """The literal types used by the domain models accept their values only."""
+    assert (
+        TypeAdapter(IdealLoadsLimitType).validate_python("LimitCapacity")
+        == "LimitCapacity"
     )
-    assert len(doc["Material"]) == 2
-    assert doc["Construction"]["B"].outside_layer == "Stucco_0.03m"
-    assert doc["Construction"]["B"].layer_2 == "Stucco_0.05m"
-
-
-def test_same_name_different_fields_replaces(doc):
-    """Re-adding a name with new values replaces the object, as archetypal did."""
-    Construction(name="A", layers=[stucco.as_layer(0.03)]).add(doc)
-    Construction(name="A", layers=[stucco.as_layer(0.05)]).add(doc)
-    assert len(doc["Construction"]) == 1
-    assert doc["Construction"]["A"].outside_layer == "Stucco_0.05m"
-    SimpleGlazingMaterial(
-        Name="G", UFactor=2, Solar_Heat_Gain_Coefficient=0.5, Visible_Transmittance=0.6
-    ).add(doc)
-    SimpleGlazingMaterial(
-        Name="G", UFactor=3, Solar_Heat_Gain_Coefficient=0.5, Visible_Transmittance=0.6
-    ).add(doc)
-    assert doc["WindowMaterial:SimpleGlazingSystem"]["G"].u_factor == 3
+    adapter = TypeAdapter(InfDesignFlowRateCalculationMethodType)
+    assert adapter.validate_python("AirChanges/Hour") == "AirChanges/Hour"
+    with pytest.raises(ValueError):
+        adapter.validate_python("Flow/Parsec")
