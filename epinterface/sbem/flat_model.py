@@ -3,7 +3,8 @@
 from collections.abc import Callable
 from pathlib import Path
 
-from archetypal import IDF
+from idfkit import IDFDocument, Vector3D, rotate_building
+from idfkit.geometry import get_surface_coords
 from pydantic import BaseModel, Field
 
 from epinterface.analysis.overheating import OverheatingAnalysisConfig
@@ -2084,7 +2085,7 @@ class FlatModel(BaseModel):
 
         return zone
 
-    def to_model(self) -> tuple[Model, Callable[[IDF], IDF]]:
+    def to_model(self) -> tuple[Model, Callable[[IDFDocument], IDFDocument]]:
         """Returns a tuple of a Model and a post-geometry callback."""
         zone = self.to_zone()
         # TODO: add in a shading mask
@@ -2102,9 +2103,9 @@ class FlatModel(BaseModel):
             basement=False,
         )
 
-        def post_geometry_callback(idf: IDF) -> IDF:
-            idf.rotate(self.Rotation)
-            return idf
+        def post_geometry_callback(doc: IDFDocument) -> IDFDocument:
+            rotate_building(doc, self.Rotation, anchor=_floor_plan_centre(doc))
+            return doc
 
         return (
             Model(
@@ -2138,6 +2139,20 @@ class FlatModel(BaseModel):
         )
 
         return r
+
+
+def _floor_plan_centre(doc: IDFDocument) -> Vector3D:
+    """The centre of the floors' x-y bounding box (geomeppy's rotation anchor)."""
+    points = [
+        vertex
+        for srf in doc["BuildingSurface:Detailed"]
+        if (srf.surface_type or "").lower() == "floor"
+        and (polygon := get_surface_coords(srf)) is not None
+        for vertex in polygon.vertices
+    ]
+    xs = [p.x for p in points]
+    ys = [p.y for p in points]
+    return Vector3D((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2, 0)
 
 
 if __name__ == "__main__":

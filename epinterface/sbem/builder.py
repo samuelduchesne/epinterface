@@ -4,12 +4,12 @@ import gc
 import io
 import logging
 import os
-import shutil
 import sys
 import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from functools import cache
 from pathlib import Path
 from typing import Literal, cast, get_args
 from uuid import uuid4
@@ -17,8 +17,9 @@ from uuid import uuid4
 import numpy as np
 import pandas as pd
 import yaml
-from archetypal.idfclass import IDF
-from idfkit import version_string
+from idfkit import IDFDocument, IDFObject, SimulationError, load_idf
+from idfkit.geometry import Polygon3D, get_surface_coords, set_surface_coords
+from idfkit.simulation import find_energyplus, simulate
 from idfkit.simulation.parsers.sql import SQLResult
 from ladybug.epw import EPW
 from numpy.typing import NDArray
@@ -36,6 +37,7 @@ from epinterface.analysis.overheating import (
 from epinterface.constants import assumed_constants, physical_constants
 from epinterface.data import EnergyPlusArtifactDir
 from epinterface.ddy_injector_bayes import DDYSizingSpec
+from epinterface.document import load_base_document
 from epinterface.geometry import ShoeboxGeometry, get_zone_floor_area
 from epinterface.interface import (
     InternalMass,
@@ -87,6 +89,126 @@ class SimulationPathConfig(BaseModel):
     )
 
 
+@cache
+def _minimal_document(version: tuple[int, int, int]) -> IDFDocument:
+    """The base model at `version`, migrated once per process (callers copy it)."""
+    return load_base_document(EnergyPlusArtifactDir / "Minimal.idf", version)
+
+
+# The outputs archetypal's `prep_outputs` added on top of the requested ones
+# (`add_umi_template_outputs`, `add_profile_gas_elect_outputs`). They are kept
+# so that a model requests the same outputs as before the idfkit migration.
+_UMI_TEMPLATE_VARIABLES = (
+    "Air System Outdoor Air Minimum Flow Fraction",
+    "Air System Total Cooling Energy",
+    "Air System Total Heating Energy",
+    "Heat Exchanger Latent Effectiveness",
+    "Heat Exchanger Sensible Effectiveness",
+    "Heat Exchanger Total Heating Rate",
+    "Water Heater Heating Energy",
+    "Zone Ideal Loads Zone Total Cooling Energy",
+    "Zone Ideal Loads Zone Total Heating Energy",
+    "Zone Thermostat Cooling Setpoint Temperature",
+    "Zone Thermostat Heating Setpoint Temperature",
+)
+_UMI_TEMPLATE_AND_PROFILE_METERS = (
+    "Baseboard:EnergyTransfer",
+    "Cooling:DistrictCooling",
+    "Cooling:Electricity",
+    "Cooling:EnergyTransfer",
+    "Cooling:Gas",
+    "CoolingCoils:EnergyTransfer",
+    "Fans:Electricity",
+    "HeatRejection:Electricity",
+    "HeatRejection:EnergyTransfer",
+    "Heating:DistrictHeating",
+    "Heating:Electricity",
+    "Heating:EnergyTransfer",
+    "Heating:Gas",
+    "HeatingCoils:EnergyTransfer",
+    "Pumps:Electricity",
+    "Refrigeration:Electricity",
+    "Refrigeration:EnergyTransfer",
+    "WaterSystems:EnergyTransfer",
+    "Electricity:Facility",
+    "Gas:Facility",
+    "WaterSystems:Electricity",
+)
+
+
+def _filter_like_archetypal(
+    items: Sequence[tuple[str, str]], wanted: Sequence[str]
+) -> list[tuple[str, str]]:
+    """Drop unwanted outputs the way the archetypal-based builder did.
+
+    It removed unwanted objects from the list it was iterating over, so the
+    object right after each removed one was never checked and always kept.
+    Reproducing that keeps the requested outputs (and the run's output
+    files) identical to the archetypal baseline.
+    """
+    kept: list[tuple[str, str]] = []
+    skip_next = False
+    for item in items:
+        if skip_next or item[0] in wanted:
+            kept.append(item)
+            skip_next = False
+        else:
+            skip_next = True
+    return kept
+
+
+def add_output_objects(doc: IDFDocument, desired_meters: Sequence[str]) -> None:
+    """Request the simulation outputs archetypal's `prep_outputs` requested.
+
+    The SQLite output (with tabular data), the HTML/CSV summary reports and the
+    schedule and variable dictionaries, then the desired meters (monthly and
+    hourly) and `AVAILABLE_HOURLY_VARIABLES` (hourly), filtered as before.
+
+    Args:
+        doc (IDFDocument): The document to add the outputs to (modified in place).
+        desired_meters (Sequence[str]): The meters the results postprocessing reads.
+    """
+    for obj_type, fields in (
+        ("OutputControl:Table:Style", {"column_separator": "CommaAndHTML"}),
+        ("Output:Table:SummaryReports", {"reports": [{"report_name": "AllSummary"}]}),
+        ("Output:SQLite", {"option_type": "SimpleAndTabular"}),
+    ):
+        for existing in list(doc[obj_type]):
+            doc.removeidfobject(existing)
+        doc.add(obj_type, "", fields)
+    doc.add("Output:Schedules", "", {"key_field": "Hourly"})
+    doc.add("Output:VariableDictionary", "", {"key_field": "IDF"})
+
+    variables = sorted({
+        (variable, "Hourly")
+        for variable in (*AVAILABLE_HOURLY_VARIABLES, *_UMI_TEMPLATE_VARIABLES)
+    })
+    meters = sorted(
+        {
+            (meter, frequency)
+            for meter in desired_meters
+            for frequency in ("Monthly", "Hourly")
+        }
+        | {(meter, "Monthly") for meter in _UMI_TEMPLATE_AND_PROFILE_METERS}
+    )
+    for variable, frequency in _filter_like_archetypal(
+        variables, AVAILABLE_HOURLY_VARIABLES
+    ):
+        doc.add(
+            "Output:Variable",
+            "",
+            {
+                "key_value": "*",
+                "variable_name": variable,
+                "reporting_frequency": frequency,
+            },
+        )
+    for meter, frequency in _filter_like_archetypal(meters, desired_meters):
+        doc.add(
+            "Output:Meter", "", {"key_name": meter, "reporting_frequency": frequency}
+        )
+
+
 class SurfaceHandler(BaseModel):
     """A handler for filtering and adding surfaces to a model."""
 
@@ -110,11 +232,11 @@ class SurfaceHandler(BaseModel):
 
     def assign_constructions_to_objs(
         self,
-        idf: IDF,
+        doc: IDFDocument,
         construction: ConstructionAssemblyComponent
         | GlazingConstructionSimpleComponent,
-    ) -> IDF:
-        """Adds a construction (and its materials) to an IDF and assigns it to matching surfaces.
+    ) -> IDFDocument:
+        """Adds a construction (and its materials) to a document and assigns it to matching surfaces.
 
         The basic idea is to look for certain idf objects that need a construction assigned to them,
         and then assign the construction to them by name.
@@ -122,7 +244,7 @@ class SurfaceHandler(BaseModel):
         Depending on the configuration of the surface handler, we will look for different types of IDF objects.
 
         Args:
-            idf (IDF): The IDF model to add the construction to.
+            doc (IDFDocument): The document to add the construction to.
             construction (ConstructionAssemblyComponent | GlazingConstructionComponent): The construction to add.
         """
         # This will identify what *type* of energy plus object we need to assign a particular construction to.
@@ -130,12 +252,12 @@ class SurfaceHandler(BaseModel):
         # e.g. opaque -> look for BUILDINGSURFACE:DETAILED
         # e.g. internal mass -> look for INTERNALMASS
         obj_type_key = (
-            "FENESTRATIONSURFACE:DETAILED"
+            "FenestrationSurface:Detailed"
             if self.surface_group == "glazing"
             else (
-                "INTERNALMASS"
+                "InternalMass"
                 if self.surface_group == "internal_mass"
-                else "BUILDINGSURFACE:DETAILED"
+                else "BuildingSurface:Detailed"
             )
         )
 
@@ -145,19 +267,19 @@ class SurfaceHandler(BaseModel):
             )
 
         # Now we can find the matching idf objects that need a construction.
-        srfs = [srf for srf in idf.idfobjects[obj_type_key] if self.check_srf(srf)]
-        idf = construction.add_to_idf(idf)
+        srfs = [srf for srf in doc[obj_type_key] if self.check_srf(srf)]
+        doc = construction.add_to_idf(doc)
 
         # and then we can finally assign the construction to the surfaces.
         for srf in srfs:
-            srf.Construction_Name = construction.Name
-        return idf
+            srf.construction_name = construction.Name
+        return doc
 
-    def check_srf(self, srf):
+    def check_srf(self, srf: IDFObject):
         """Check if the surface matches the filters.
 
         Args:
-            srf (eppy.IDF.BLOCK): The surface to check.
+            srf (IDFObject): The surface to check.
 
         Returns:
             match (bool): True if the surface matches the filters.
@@ -170,11 +292,11 @@ class SurfaceHandler(BaseModel):
             and self.check_outside_boundary_condition_object(srf)
         )
 
-    def check_construction_type(self, srf):
+    def check_construction_type(self, srf: IDFObject):
         """Check if the surface matches the construction type.
 
         Args:
-            srf (eppy.IDF.BLOCK): The surface to check.
+            srf (IDFObject): The surface to check.
 
         Returns:
             match (bool): True if the surface matches the construction type.
@@ -186,13 +308,13 @@ class SurfaceHandler(BaseModel):
             # Ignore the construction type check when filter not provided
             return True
         # Check the construction type
-        return self.original_surface_type.lower() == srf.Surface_Type.lower()
+        return self.original_surface_type.lower() == (srf.surface_type or "").lower()
 
-    def check_boundary(self, srf):
+    def check_boundary(self, srf: IDFObject):
         """Check if the surface matches the boundary condition.
 
         Args:
-            srf (eppy.IDF.BLOCK): The surface to check.
+            srf (IDFObject): The surface to check.
 
         Returns:
             match (bool): True if the surface matches the boundary condition.
@@ -204,13 +326,15 @@ class SurfaceHandler(BaseModel):
             # Ignore the bc filter when filter not provided
             return True
         # Check the boundary condition
-        return srf.Outside_Boundary_Condition.lower() == self.boundary_condition.lower()
+        return (
+            srf.outside_boundary_condition or ""
+        ).lower() == self.boundary_condition.lower()
 
-    def check_construction_name(self, srf):
+    def check_construction_name(self, srf: IDFObject):
         """Check if the surface matches the original construction name.
 
         Args:
-            srf (eppy.IDF.BLOCK): The surface to check.
+            srf (IDFObject): The surface to check.
 
         Returns:
             match (bool): True if the surface matches the original construction name.
@@ -219,10 +343,12 @@ class SurfaceHandler(BaseModel):
             # Ignore the original construction name check when filter not provided
             return True
         # Check the original construction name
-        return srf.Construction_Name.lower() == self.original_construction_name.lower()
+        return (
+            srf.construction_name or ""
+        ).lower() == self.original_construction_name.lower()
 
     # TODO: convert this to a regex for better control
-    def check_zone_name(self, srf):
+    def check_zone_name(self, srf: IDFObject):
         """Check that the zone name for the surface contains the expected substring."""
         if self.zone_name_contains is None:
             # Ignore the zone name check when filter not provided
@@ -231,10 +357,10 @@ class SurfaceHandler(BaseModel):
             # Ignore the zone name check for windows
             return True
         # Check the zone name
-        zone_name = srf.Zone_Name
+        zone_name = srf.zone_name or ""
         return self.zone_name_contains.lower() in zone_name.lower()
 
-    def check_outside_boundary_condition_object(self, srf):
+    def check_outside_boundary_condition_object(self, srf: IDFObject):
         """Check if the surface's outside boundary condition object contains the desired substring."""
         if self.outside_boundary_condition_object_contains is None:
             # Ignore the outside boundary condition object check when filter not provided
@@ -245,7 +371,7 @@ class SurfaceHandler(BaseModel):
             return True
         return (
             self.outside_boundary_condition_object_contains.lower()
-            in srf.Outside_Boundary_Condition_Object.lower()
+            in (srf.outside_boundary_condition_object or "").lower()
         )
 
 
@@ -394,19 +520,19 @@ class SurfaceHandlers(BaseModel):
 
     def handle_envelope(
         self,
-        idf: IDF,
+        doc: IDFDocument,
         constructions: EnvelopeAssemblyComponent,
         window: GlazingConstructionSimpleComponent | None,
         with_attic: bool,
         with_basement: bool,
         exposed_basement_frac: float = 0,
     ):
-        """Assign the envelope to the IDF model.
+        """Assign the envelope to the document.
 
         Note that this will add a "reversed" construction for the floorsystem slab/ceiling
 
         Args:
-            idf (IDF): The IDF model to add the envelope to.
+            doc (IDFDocument): The document to add the envelope to.
             constructions (ZoneConstruction): The construction names for the envelope.
             window (GlazingConstructionSimpleComponent | None): The window definition.
             with_attic (bool): Whether to add the attic floor and ceiling constructions.
@@ -414,7 +540,7 @@ class SurfaceHandlers(BaseModel):
             exposed_basement_frac (float): The fraction of the basement walls that are exposed above ground.
 
         Returns:
-            idf (IDF): The updated IDF model.
+            doc (IDFDocument): The updated document.
         """
         floor_ceiling_reversed = constructions.FloorCeilingAssembly.reversed
         attic_floor_reversed = constructions.AtticFloorAssembly.reversed
@@ -427,57 +553,61 @@ class SurfaceHandlers(BaseModel):
             if with_attic
             else constructions.FlatRoofAssembly
         )
-        idf = self.RoofOutdoorBC.assign_constructions_to_objs(
-            idf=idf, construction=outdoor_roof_bc
+        doc = self.RoofOutdoorBC.assign_constructions_to_objs(
+            doc=doc, construction=outdoor_roof_bc
         )
 
-        idf = self.Facade.assign_constructions_to_objs(
-            idf=idf, construction=constructions.FacadeAssembly
+        doc = self.Facade.assign_constructions_to_objs(
+            doc=doc, construction=constructions.FacadeAssembly
         )
-        idf = self.Partition.assign_constructions_to_objs(
-            idf=idf, construction=constructions.PartitionAssembly
+        doc = self.Partition.assign_constructions_to_objs(
+            doc=doc, construction=constructions.PartitionAssembly
         )
-        idf = self.FloorCeilingFloor.assign_constructions_to_objs(
-            idf=idf, construction=floor_ceiling_reversed
+        doc = self.FloorCeilingFloor.assign_constructions_to_objs(
+            doc=doc, construction=floor_ceiling_reversed
         )
-        idf = self.FloorCeilingCeiling.assign_constructions_to_objs(
-            idf=idf, construction=constructions.FloorCeilingAssembly
+        doc = self.FloorCeilingCeiling.assign_constructions_to_objs(
+            doc=doc, construction=constructions.FloorCeilingAssembly
         )
         # NB: We must execute basement and attic floor/ceiling systems
         # AFTER the regular floor ceiling systems because the regular floor ceilings
         # will match all of the floor/ceiling surfaces
         # and we want to overwrite their constructions.
         if with_basement:
-            idf = self.BasementCeilingCeiling.assign_constructions_to_objs(
-                idf=idf, construction=constructions.BasementCeilingAssembly
+            doc = self.BasementCeilingCeiling.assign_constructions_to_objs(
+                doc=doc, construction=constructions.BasementCeilingAssembly
             )
-            idf = self.BasementCeilingFloor.assign_constructions_to_objs(
-                idf=idf, construction=basement_ceiling_reversed
+            doc = self.BasementCeilingFloor.assign_constructions_to_objs(
+                doc=doc, construction=basement_ceiling_reversed
             )
         if with_attic:
-            idf = self.AtticFloorFloor.assign_constructions_to_objs(
-                idf=idf, construction=constructions.AtticFloorAssembly
+            doc = self.AtticFloorFloor.assign_constructions_to_objs(
+                doc=doc, construction=constructions.AtticFloorAssembly
             )
-            idf = self.AtticFloorCeiling.assign_constructions_to_objs(
-                idf=idf, construction=attic_floor_reversed
+            doc = self.AtticFloorCeiling.assign_constructions_to_objs(
+                doc=doc, construction=attic_floor_reversed
             )
 
-        idf = self.GroundSlab.assign_constructions_to_objs(
-            idf=idf, construction=constructions.GroundSlabAssembly
+        doc = self.GroundSlab.assign_constructions_to_objs(
+            doc=doc, construction=constructions.GroundSlabAssembly
         )
-        idf = self.GroundWall.assign_constructions_to_objs(
-            idf=idf, construction=constructions.GroundWallAssembly
+        doc = self.GroundWall.assign_constructions_to_objs(
+            doc=doc, construction=constructions.GroundWallAssembly
         )
 
         if with_basement and exposed_basement_frac > 0:
             basement_wall_surfaces = [
                 srf
-                for srf in idf.idfobjects["BUILDINGSURFACE:DETAILED"]
-                if srf.Outside_Boundary_Condition == "ground"
-                and srf.Surface_Type == "wall"
+                for srf in doc["BuildingSurface:Detailed"]
+                if (srf.outside_boundary_condition or "").lower() == "ground"
+                and (srf.surface_type or "").lower() == "wall"
             ]
             for srf in basement_wall_surfaces:
-                coords = srf.coords
+                polygon = get_surface_coords(srf)
+                if polygon is None:
+                    msg = f"Basement wall {srf.name} has no vertices."
+                    raise ValueError(msg)
+                coords = polygon.as_tuple_list()
                 z_coords = [c[2] for c in coords]
                 min_z = min(z_coords)
                 max_z = max(z_coords)
@@ -497,40 +627,47 @@ class SurfaceHandlers(BaseModel):
                     (c[0], c[1], z)
                     for c, z in zip(coords, z_coords_upper_section, strict=False)
                 ]
-                new_bottom_srf = idf.copyidfobject(srf)
-                new_top_srf = idf.copyidfobject(srf)
-                new_bottom_srf.setcoords(coords_lower_section)
-                new_top_srf.setcoords(coords_upper_section)
-                new_bottom_srf.Name = f"{srf.Name}_bottom"
-                new_top_srf.Name = f"{srf.Name}_top"
-                new_top_srf.Outside_Boundary_Condition = "outdoors"
-                idf.removeidfobject(srf)
+                fields = {k: v for k, v in srf.to_dict().items() if k != "name"}
+                new_bottom_srf = doc.add(
+                    "BuildingSurface:Detailed", f"{srf.name}_bottom", fields
+                )
+                new_top_srf = doc.add(
+                    "BuildingSurface:Detailed", f"{srf.name}_top", fields
+                )
+                set_surface_coords(
+                    new_bottom_srf, Polygon3D.from_tuples(coords_lower_section)
+                )
+                set_surface_coords(
+                    new_top_srf, Polygon3D.from_tuples(coords_upper_section)
+                )
+                new_top_srf.outside_boundary_condition = "outdoors"
+                doc.removeidfobject(srf)
 
         if window:
-            idf = self.Window.assign_constructions_to_objs(idf=idf, construction=window)
+            doc = self.Window.assign_constructions_to_objs(doc=doc, construction=window)
 
         if constructions.InternalMassAssembly is not None:
             # We need to create new IDF Objects since they were not added into the scene
             # yet (whereas the other buildingsurface/fenestrationsurface were added by
             # eppy during the add_block call which inits zone geometry)
-            for zone in idf.idfobjects["ZONE"]:
-                floor_area = get_zone_floor_area(idf, zone.Name) * (
+            for zone in doc["Zone"]:
+                floor_area = get_zone_floor_area(doc, zone.name) * (
                     constructions.InternalMassExposedAreaPerArea or 0
                 )
                 internal_mass = InternalMass(
-                    Name=f"{zone.Name}_InternalMass",
-                    Zone_or_ZoneList_Name=zone.Name,
+                    Name=f"{zone.name}_InternalMass",
+                    Zone_or_ZoneList_Name=zone.name,
                     Construction_Name=constructions.InternalMassAssembly.Name,
                     Surface_Area=floor_area,
                 )
-                idf = internal_mass.add(idf)
+                doc = internal_mass.add(doc)
 
             # once we've guaranteed that the internal mass object exists, we can
             # assign it the constructions to them
-            idf = self.InternalMass.assign_constructions_to_objs(
-                idf=idf, construction=constructions.InternalMassAssembly
+            doc = self.InternalMass.assign_constructions_to_objs(
+                doc=doc, construction=constructions.InternalMassAssembly
             )
-        return idf
+        return doc
 
 
 @dataclass
@@ -672,22 +809,22 @@ class Model(BaseWeather, validate_assignment=True):
 
     def add_zone_lists(
         self,
-        idf: IDF,
-    ) -> tuple[IDF, AddedZoneLists]:
-        """Add the zone lists to the IDF model.
+        doc: IDFDocument,
+    ) -> tuple[IDFDocument, AddedZoneLists]:
+        """Add the zone lists to the document.
 
         Note that this attempts to automatically determine
-        the zones from the IDF model which are conditioned
+        the zones from the document which are conditioned
         as well as a separate list for all zones.
 
         Args:
-            idf (IDF): The IDF model to add the zone lists to.
+            doc (IDFDocument): The document to add the zone lists to.
 
         Returns:
-            idf (IDF): The IDF model with the added zone lists
+            doc (IDFDocument): The document with the added zone lists
             zone_lists (AddedZoneLists): The list of zone lists
         """
-        all_zone_names = [zone.Name for zone in idf.idfobjects["ZONE"]]
+        all_zone_names = [zone.name for zone in doc["Zone"]]
         all_zones_list = ZoneList(Name="All_Zones", Names=all_zone_names)
 
         conditioned_zone_names = []
@@ -695,11 +832,11 @@ class Model(BaseWeather, validate_assignment=True):
         basement_zone_names = []
         main_zone_names = []
         occupied_zone_names = []
-        for zone in idf.idfobjects["ZONE"]:
+        for zone in doc["Zone"]:
             # handle attic
-            is_attic = "attic" in zone.Name.lower()
+            is_attic = "attic" in zone.name.lower()
             is_basement = (
-                zone.Name.lower().endswith(self.geometry.basement_suffix.lower())
+                zone.name.lower().endswith(self.geometry.basement_suffix.lower())
                 if self.geometry.basement
                 else False
             )
@@ -715,15 +852,15 @@ class Model(BaseWeather, validate_assignment=True):
                 or is_normal_zone
             )
             if should_condition:
-                conditioned_zone_names.append(zone.Name)
+                conditioned_zone_names.append(zone.name)
             if should_be_occupied:
-                occupied_zone_names.append(zone.Name)
+                occupied_zone_names.append(zone.name)
             if is_attic:
-                attic_zone_names.append(zone.Name)
+                attic_zone_names.append(zone.name)
             if is_basement:
-                basement_zone_names.append(zone.Name)
+                basement_zone_names.append(zone.name)
             if is_normal_zone:
-                main_zone_names.append(zone.Name)
+                main_zone_names.append(zone.name)
 
         # safety check for zone counts
         # attic never gets partitioned so it only ever contributes 1
@@ -747,9 +884,9 @@ class Model(BaseWeather, validate_assignment=True):
         main_zone_list = ZoneList(Name="Main_Zones", Names=main_zone_names)
         occupied_zone_list = ZoneList(Name="Occupied_Zones", Names=occupied_zone_names)
 
-        idf = conditioned_zone_list.add(idf)
-        idf = all_zones_list.add(idf)
-        return idf, AddedZoneLists(
+        doc = conditioned_zone_list.add(doc)
+        doc = all_zones_list.add(doc)
+        return doc, AddedZoneLists(
             conditioned_zone_list=conditioned_zone_list,
             all_zones_list=all_zones_list,
             occupied_zone_list=occupied_zone_list,
@@ -794,27 +931,27 @@ class Model(BaseWeather, validate_assignment=True):
 
     def add_constructions(
         self,
-        idf: IDF,
+        doc: IDFDocument,
         constructions: EnvelopeAssemblyComponent,
         window_def: GlazingConstructionSimpleComponent | None,
-    ) -> IDF:
+    ) -> IDFDocument:
         """Assigns the constructions to the surfaces in the model.
 
         Args:
-            idf (IDF): The IDF model to select the surfaces from.
+            doc (IDFDocument): The document to select the surfaces from.
             constructions (ZoneConstruction): The construction template.
             window_def (WindowDefinition): The window definition template.
 
         Returns:
-            idf (IDF): The IDF model with the selected surfaces.
+            doc (IDFDocument): The document with the selected surfaces.
         """
         handlers = SurfaceHandlers.Default(
             basement_suffix=self.geometry.basement_suffix
             if self.geometry.basement
             else "NO-OP"
         )
-        idf = handlers.handle_envelope(
-            idf,
+        doc = handlers.handle_envelope(
+            doc,
             constructions,
             window_def,
             with_attic=(self.geometry.roof_height or 0) > 0,
@@ -822,99 +959,52 @@ class Model(BaseWeather, validate_assignment=True):
             exposed_basement_frac=self.geometry.exposed_basement_frac,
         )
 
-        return idf
+        return doc
 
     def build(  # noqa: C901
         self,
         config: SimulationPathConfig,
-        post_geometry_callback: Callable[[IDF], IDF] | None = None,
-    ) -> IDF:
-        """Build the energy model using the Climate Studio API.
+        post_geometry_callback: Callable[[IDFDocument], IDFDocument] | None = None,
+    ) -> IDFDocument:
+        """Build the energy model.
 
         Args:
             config (SimulationConfig): The configuration for the simulation.
-            post_geometry_callback (Callable[[IDF],IDF] | None): A callback to run after the geometry is added.
+            post_geometry_callback (Callable[[IDFDocument], IDFDocument] | None): A callback to run after the geometry is added.
 
         Returns:
-            idf (IDF): The built energy model.
+            doc (IDFDocument): The built energy model.
         """
         config.output_dir.mkdir(parents=True, exist_ok=True)
-        base_filepath = EnergyPlusArtifactDir / "Minimal.idf"
-        target_base_filepath = config.output_dir / "Minimal.idf"
-        shutil.copy(base_filepath, target_base_filepath)
         epw_path, ddy_path = self.fetch_weather(config.weather_dir)
         ep_version = energyplus_settings.version_tuple
-        ep_version_str = version_string(ep_version)
-        desired_meters = DESIRED_METERS_FOR_VERSION[energyplus_settings.supported_major]
-        output_meters = (
-            [
-                {
-                    "key": "OUTPUT:METER",
-                    "Key_Name": meter,
-                    "Reporting_Frequency": "Monthly",
-                }
-                for meter in desired_meters
-            ]
-            + [
-                {
-                    "key": "OUTPUT:METER",
-                    "Key_Name": meter,
-                    "Reporting_Frequency": "Hourly",
-                }
-                for meter in desired_meters
-            ]
-            + [
-                {
-                    "key": "OUTPUT:VARIABLE",
-                    "Key_Value": "*",
-                    "Variable_Name": variable,
-                    "Reporting_Frequency": "Hourly",
-                }
-                for variable in AVAILABLE_HOURLY_VARIABLES
-            ]
-        )
-        idf = IDF(
-            target_base_filepath.as_posix(),
-            as_version=ep_version_str,
-            file_version=ep_version_str,
-            prep_outputs=output_meters,  # pyright: ignore [reportArgumentType]
-            epw=epw_path.as_posix(),
-            output_directory=config.output_dir.as_posix(),
+        doc = _minimal_document(ep_version).copy()
+        add_output_objects(
+            doc, DESIRED_METERS_FOR_VERSION[energyplus_settings.supported_major]
         )
 
-        # Remove undesired outputs from the IDF file.
-        # TODO: test the perfrmance benefits, if any
-        for output in idf.idfobjects["OUTPUT:METER"]:
-            if output.Key_Name not in desired_meters:
-                idf.removeidfobject(output)
-        for output in idf.idfobjects["OUTPUT:VARIABLE"]:
-            if output.Variable_Name not in AVAILABLE_HOURLY_VARIABLES:
-                idf.removeidfobject(output)
-
-        ddy = IDF(
-            ddy_path.as_posix(),
-            as_version=energyplus_settings.energyplus_version,
-            file_version=energyplus_settings.energyplus_version,
-            prep_outputs=False,
-        )
+        ddy = load_idf(str(ddy_path), version=ep_version)
+        # Sizing periods run in this order. archetypal added them in set order
+        # (varying from process to process); winter first is the order the
+        # regression baseline ran, and the results are sensitive to it.
         ddy_spec = DDYSizingSpec(
-            match=False, conditions_types=["Summer Extreme", "Winter Extreme"]
+            match=False, conditions_types=["Winter Extreme", "Summer Extreme"]
         )
-        ddy_spec.inject_ddy(idf, ddy)
+        ddy_spec.inject_ddy(doc, ddy)
 
-        idf = add_default_sim_controls(idf)
-        idf, _scheds = add_default_schedules(idf)
+        doc = add_default_sim_controls(doc)
+        doc, _scheds = add_default_schedules(doc)
 
-        idf = self.geometry.add(idf)
+        doc = self.geometry.add(doc)
         if post_geometry_callback is not None:
-            idf = post_geometry_callback(idf)
+            doc = post_geometry_callback(doc)
 
         # construct zone lists
-        idf, added_zone_lists = self.add_zone_lists(idf)
+        doc, added_zone_lists = self.add_zone_lists(doc)
 
         # Handle main zones
         for zone in added_zone_lists.main_zone_list.Names:
-            self.Zone.add_to_idf_zone(idf, zone)
+            self.Zone.add_to_idf_zone(doc, zone)
 
         # Handle setting ground temperature
         subtractor = (
@@ -952,7 +1042,7 @@ class Model(BaseWeather, validate_assignment=True):
             summer_line = np.array(assumed_constants.SiteGroundTemperature_degC)
         interp_temp = phase * np.abs(summer_line - winter_line) + winter_line
         ground_vals = [max(epw_ground_vals[i], interp_temp[i]) for i in range(12)]
-        idf = SiteGroundTemperature.FromValues(ground_vals).add(idf)
+        doc = SiteGroundTemperature.FromValues(ground_vals).add(doc)
 
         # handle basements
         if self.Basement.UseFraction or self.Basement.Conditioned:
@@ -983,7 +1073,7 @@ class Model(BaseWeather, validate_assignment=True):
                 new_zone_def.Operations.HVAC.ConditioningSystems.Cooling = None
 
             for zone in added_zone_lists.basement_zone_list.Names:
-                new_zone_def.add_to_idf_zone(idf, zone)
+                new_zone_def.add_to_idf_zone(doc, zone)
 
         if self.Attic.UseFraction or self.Attic.Conditioned:
             new_zone_def = self.Zone.model_copy(deep=True)
@@ -1008,10 +1098,10 @@ class Model(BaseWeather, validate_assignment=True):
 
             # TODO: handle mutating infiltration object when "ventilated attics" are set
             for zone in added_zone_lists.attic_zone_list.Names:
-                new_zone_def.add_to_idf_zone(idf, zone)
+                new_zone_def.add_to_idf_zone(doc, zone)
 
-        idf = self.add_constructions(
-            idf, self.Zone.Envelope.Assemblies, self.Zone.Envelope.Window
+        doc = self.add_constructions(
+            doc, self.Zone.Envelope.Assemblies, self.Zone.Envelope.Window
         )
 
         # > operations
@@ -1039,11 +1129,11 @@ class Model(BaseWeather, validate_assignment=True):
         # --------> special handling for operable windows
 
         # TODO: Handle separately ventilated attic/basement?
-        # idf = self.add_space_use(
-        #     idf, self.space_use, added_zone_lists.conditioned_zone_list
+        # doc = self.add_space_use(
+        #     doc, self.space_use, added_zone_lists.conditioned_zone_list
         # )
 
-        return idf
+        return doc
 
     # add schedules definition
 
@@ -1051,41 +1141,50 @@ class Model(BaseWeather, validate_assignment=True):
     def simulate(
         self,
         config: SimulationPathConfig,
-        post_geometry_callback: Callable[[IDF], IDF] | None = None,
-    ) -> tuple[IDF, SQLResult]:
-        """Build and simualte the idf model.
+        post_geometry_callback: Callable[[IDFDocument], IDFDocument] | None = None,
+    ) -> tuple[IDFDocument, SQLResult]:
+        """Build and simulate the model.
 
         Args:
             config (SimulationConfig): The configuration for the simulation.
-            post_geometry_callback (Callable[[IDF],IDF] | None): A callback to run after the geometry is added.
+            post_geometry_callback (Callable[[IDFDocument], IDFDocument] | None): A callback to run after the geometry is added.
 
         Returns:
-            idf (IDF): The built energy model.
+            doc (IDFDocument): The built energy model.
             sql (SQLResult): The sql results file with simulation data.
+
+        Raises:
+            SimulationError: If EnergyPlus fails.
+            FileNotFoundError: If the simulation produced no SQLite file.
         """
-        idf = self.build(config, post_geometry_callback)
-        idf.simulate()
-        if idf.sql_file is None:
+        doc = self.build(config, post_geometry_callback)
+        epw_path, _ = self.fetch_weather(config.weather_dir)
+        result = simulate(
+            doc,
+            weather=epw_path,
+            output_dir=config.output_dir,
+            energyplus=find_energyplus(version=energyplus_settings.version_tuple),
+        )
+        if not result.success:
+            msg = f"EnergyPlus failed in {result.run_dir}:\n{self.get_warnings(result.run_dir)}"
+            raise SimulationError(msg, exit_code=result.exit_code, stderr=result.stderr)
+        sql = result.sql
+        if sql is None:
             msg = "Simulation produced no SQLite results file."
             raise FileNotFoundError(msg)
-        sql = SQLResult(idf.sql_file)
-        return idf, sql
+        return doc, sql
 
-    def get_warnings(self, idf: IDF) -> str:
-        """Get the warning text from the idf model.
+    def get_warnings(self, output_dir: Path) -> str:
+        """Get the EnergyPlus warning text written to a simulation directory.
 
         Args:
-            idf (IDF): The IDF model to get the warning text from.
+            output_dir (Path): The simulation's output directory.
 
         Returns:
-            str: The warning text.
+            str: The concatenated text of every `*.err` file under `output_dir`.
         """
-        err_files = filter(
-            lambda x: x.suffix == ".err",
-            [Path(f) for f in idf.simulation_files],
-        )
-        err_text = "\n".join([f.read_text() for f in err_files])
-        return err_text
+        err_files = sorted(output_dir.rglob("*.err"))
+        return "\n".join(f.read_text() for f in err_files)
 
     def standard_results_postprocess(
         self, sql: SQLResult, ep_version_major: int
@@ -1132,7 +1231,7 @@ class Model(BaseWeather, validate_assignment=True):
     def run(
         self,
         weather_dir: Path | None = None,
-        post_geometry_callback: Callable[[IDF], IDF] | None = None,
+        post_geometry_callback: Callable[[IDFDocument], IDFDocument] | None = None,
         eplus_parent_dir: Path | None = None,
         overheating_config: OverheatingAnalysisConfig | None = None,
     ) -> "ModelRunResults":
@@ -1140,7 +1239,7 @@ class Model(BaseWeather, validate_assignment=True):
 
         Args:
             weather_dir (Path): The directory to store the weather files.
-            post_geometry_callback (Callable[[IDF],IDF] | None): A callback to run after the geometry is added.
+            post_geometry_callback (Callable[[IDFDocument], IDFDocument] | None): A callback to run after the geometry is added.
             eplus_parent_dir (Path | None): The parent directory to store the eplus working directory.  If None, a temporary directory will be used.
             overheating_config (OverheatingAnalysisConfig | None): Configuration for overheating analysis. Skips if None.
 
@@ -1163,17 +1262,14 @@ class Model(BaseWeather, validate_assignment=True):
                 else SimulationPathConfig(output_dir=output_dir)
             )
 
-            idf, sql = self.simulate(
+            doc, sql = self.simulate(
                 config,
                 post_geometry_callback=post_geometry_callback,
             )
-            if not idf.as_version:
-                msg = f"EnergyPlus version not found in IDF file: {idf.idfobjects['VERSION']}"
-                raise ValueError(msg)
             results = self.standard_results_postprocess(
-                sql, ep_version_major=idf.as_version.major
+                sql, ep_version_major=doc.version[0]
             )
-            zone_weights, zone_names = self.get_zone_weights_and_names(idf)
+            zone_weights, zone_names = self.get_zone_weights_and_names(doc)
 
             overheating_results = (
                 overheating_results_postprocess(
@@ -1186,14 +1282,14 @@ class Model(BaseWeather, validate_assignment=True):
                 else None
             )
 
-            err_text = self.get_warnings(idf)
+            err_text = self.get_warnings(output_dir)
 
             gc.collect()
             # if eplus_parent_dir is not None, we return the path to the output directory
             output_dir_result = output_dir if eplus_parent_dir is not None else None
 
             return ModelRunResults(
-                idf=idf,
+                idf=doc,
                 sql=sql,
                 energy_and_peak=results,
                 err_text=err_text,
@@ -1202,11 +1298,13 @@ class Model(BaseWeather, validate_assignment=True):
             )
 
     @staticmethod
-    def get_zone_weights_and_names(idf: IDF) -> tuple[NDArray[np.float64], list[str]]:
-        """Get the zone weights and names from the idf model.
+    def get_zone_weights_and_names(
+        doc: IDFDocument,
+    ) -> tuple[NDArray[np.float64], list[str]]:
+        """Get the zone weights and names from the model.
 
         Args:
-            idf (IDF): The idf model to get the zone weights and names from.
+            doc (IDFDocument): The model to get the zone weights and names from.
 
         Returns:
             zone_weights (NDArray[np.float64]): The weights of the zones.
@@ -1214,10 +1312,10 @@ class Model(BaseWeather, validate_assignment=True):
         """
         zone_weights_: list[float] = []
         zone_names: list[str] = []
-        for zone in idf.idfobjects["ZONE"]:
-            floor_area = get_zone_floor_area(idf, zone.Name)
+        for zone in doc["Zone"]:
+            floor_area = get_zone_floor_area(doc, zone.name)
             zone_weights_.append(floor_area)
-            zone_names.append(zone.Name)
+            zone_names.append(zone.name)
         zone_weights: NDArray[np.float64] = np.array(zone_weights_)
         return zone_weights, zone_names
 
@@ -1298,7 +1396,7 @@ def construct_zone_def(
 class ModelRunResults:
     """The results of a model run."""
 
-    idf: IDF
+    idf: IDFDocument
     sql: SQLResult
     energy_and_peak: pd.Series
     err_text: str

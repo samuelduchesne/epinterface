@@ -1,12 +1,9 @@
 """Fixtures for the tests."""
 
-import shutil
 import tempfile
-from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-from archetypal.idfclass import IDF
 from idfkit import IDFDocument
 
 from epinterface.data import EnergyPlusArtifactDir
@@ -60,23 +57,6 @@ def _base_doc() -> IDFDocument:
 def doc(_base_doc: IDFDocument) -> IDFDocument:
     """A fresh copy of the minimal idfkit document at the configured version."""
     return _base_doc.copy()
-
-
-@pytest.fixture(scope="function")
-def idf() -> Generator[IDF, None, None]:
-    """Create a new IDF object."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        base_filepath = EnergyPlusArtifactDir / "Minimal.idf"
-        target_base_filepath = Path(temp_dir) / "Minimal.idf"
-        shutil.copy(base_filepath, target_base_filepath)
-        idf = IDF(
-            target_base_filepath.as_posix(),
-            as_version=energyplus_settings.energyplus_version,  # pyright: ignore [reportArgumentType]
-            file_version=energyplus_settings.energyplus_version,
-            prep_outputs=True,
-            output_directory=temp_dir,
-        )
-        yield idf
 
 
 @pytest.fixture(scope="function")

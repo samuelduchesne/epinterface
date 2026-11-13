@@ -123,6 +123,25 @@ def _archetypal_field_values(epbunch):
     return _normalize(epbunch.fieldvalues[1:])
 
 
+@pytest.fixture
+def idf(tmp_path):
+    """An archetypal IDF of the minimal model, for the comparison below (remove in Task 10)."""
+    from archetypal.idfclass import IDF
+
+    from epinterface.data import EnergyPlusArtifactDir
+    from epinterface.settings import energyplus_settings
+
+    target = tmp_path / "Minimal.idf"
+    target.write_text((EnergyPlusArtifactDir / "Minimal.idf").read_text())
+    return IDF(
+        target.as_posix(),
+        as_version=energyplus_settings.energyplus_version,  # pyright: ignore [reportArgumentType]
+        file_version=energyplus_settings.energyplus_version,
+        prep_outputs=True,
+        output_directory=tmp_path.as_posix(),
+    )
+
+
 def test_add_values_schedule_matches_archetypal(doc, idf):
     """Day/Week/Year objects match archetypal's to_year_week_day field-for-field."""
     # remove in Task 10 with archetypal
