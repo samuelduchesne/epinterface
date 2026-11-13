@@ -12,7 +12,10 @@ from itertools import product
 from prisma import Prisma
 from shapely import box
 
-from epinterface.analysis.overheating import OverheatingAnalysisConfig
+from epinterface.analysis.overheating import (
+    OverheatingAnalysisConfig,
+    ThresholdWithCriteria,
+)
 from epinterface.data import DefaultEPWZipPath
 from epinterface.geometry import SceneContext, ShoeboxGeometry
 from epinterface.sbem.builder import AtticAssumptions, BasementAssumptions, Model
@@ -127,7 +130,18 @@ def _neighbors_overheating(db: Prisma):
             ),
         ),
     )
-    return model, OverheatingAnalysisConfig()
+    # Thresholds the 21/24 degC thermostat actually crosses, so every overheating
+    # frame (including the consecutive-exceedance streaks) is non-trivial. None sits
+    # on a setpoint: zone air is held at exactly 21 degC for thousands of hours, so a
+    # threshold there makes hour counts flip on float noise between builds.
+    oh = OverheatingAnalysisConfig(
+        heat_thresholds=(
+            ThresholdWithCriteria(threshold=23.0),
+            ThresholdWithCriteria(threshold=26.0),
+        ),
+        cold_thresholds=(ThresholdWithCriteria(threshold=22.5),),
+    )
+    return model, oh
 
 
 REGRESSION_CONFIGS: dict[

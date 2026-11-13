@@ -5,7 +5,15 @@ suite. It needs the pre-migration stack: archetypal is no longer a dependency of
 epinterface (2.0.0), and this script calls the pre-2.0 epinterface API, so run
 it from a checkout of commit b4f9f6a (the last one that still builds with archetypal) with a temporary pin:
 
-    EPINTERFACE_ENERGYPLUS_VERSION=25.2.0 uv run --with archetypal==2.18.10 python scripts/capture_regression_baseline.py
+    PYTHONHASHSEED=4 EPINTERFACE_ENERGYPLUS_VERSION=25.2.0 uv run --with archetypal==2.18.10 python scripts/capture_regression_baseline.py
+
+The committed fixtures were captured that way, with this branch's
+``epinterface/sbem/prisma/seed_fns.py`` (21/24 degC thermostat setpoints) and
+``tests/regression/configs.py`` (the neighbors_overheating thresholds) applied
+to the b4f9f6a checkout. archetypal writes the two
+SizingPeriod:WeatherFileConditionType objects in Python set order, which depends
+on string hashing; PYTHONHASHSEED=4 puts Winter Extreme first, the order
+epinterface now always writes. Check it in each captured built.idf.
 """
 
 import json

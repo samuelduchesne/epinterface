@@ -76,18 +76,18 @@ RUNPERIOD,
     Hour24;                   !- First Hour Interpolation Starting Values
 
 Site:GroundTemperature:BuildingSurface,
-    1.11,                     !- January Ground Temperature
-    0.1,                      !- February Ground Temperature
-    1.89,                     !- March Ground Temperature
-    4.69,                     !- April Ground Temperature
-    12.02,                    !- May Ground Temperature
-    17.68,                    !- June Ground Temperature
-    21.5,                     !- July Ground Temperature
+    19.1343085106383,         !- January Ground Temperature
+    19,                       !- February Ground Temperature
+    19.238031914893618,       !- March Ground Temperature
+    19.61037234042553,        !- April Ground Temperature
+    20.585106382978722,       !- May Ground Temperature
+    21.33776595744681,        !- June Ground Temperature
+    21.845744680851062,       !- July Ground Temperature
     22.66,                    !- August Ground Temperature
-    20.68,                    !- September Ground Temperature
-    16.29,                    !- October Ground Temperature
-    10.42,                    !- November Ground Temperature
-    4.97;                     !- December Ground Temperature
+    21.736702127659576,       !- September Ground Temperature
+    21.152925531914892,       !- October Ground Temperature
+    20.372340425531917,       !- November Ground Temperature
+    19.647606382978722;       !- December Ground Temperature
 
 SCHEDULETYPELIMITS,
     Fraction,                 !- Name
@@ -1264,450 +1264,450 @@ SCHEDULE:DAY:HOURLY,
 SCHEDULE:DAY:HOURLY,
     Block shoebox Storey 0_warm_residential_THERMOSTAT_HeatingDesignDay,    !- Name
     Temperature,              !- Schedule Type Limits Name
-    0.5,                      !- Hour 1
-    0.5,                      !- Hour 2
-    0.5,                      !- Hour 3
-    0.5,                      !- Hour 4
-    0.5,                      !- Hour 5
-    0.5,                      !- Hour 6
-    0.5,                      !- Hour 7
-    0.5,                      !- Hour 8
-    0.5,                      !- Hour 9
-    0.5,                      !- Hour 10
-    0.5,                      !- Hour 11
-    0.5,                      !- Hour 12
-    0.5,                      !- Hour 13
-    0.5,                      !- Hour 14
-    0.5,                      !- Hour 15
-    0.5,                      !- Hour 16
-    0.5,                      !- Hour 17
-    0.5,                      !- Hour 18
-    0.5,                      !- Hour 19
-    0.5,                      !- Hour 20
-    0.5,                      !- Hour 21
-    0.5,                      !- Hour 22
-    0.5,                      !- Hour 23
-    0.5;                      !- Hour 24
+    21,                       !- Hour 1
+    21,                       !- Hour 2
+    21,                       !- Hour 3
+    21,                       !- Hour 4
+    21,                       !- Hour 5
+    21,                       !- Hour 6
+    21,                       !- Hour 7
+    21,                       !- Hour 8
+    21,                       !- Hour 9
+    21,                       !- Hour 10
+    21,                       !- Hour 11
+    21,                       !- Hour 12
+    21,                       !- Hour 13
+    21,                       !- Hour 14
+    21,                       !- Hour 15
+    21,                       !- Hour 16
+    21,                       !- Hour 17
+    21,                       !- Hour 18
+    21,                       !- Hour 19
+    21,                       !- Hour 20
+    21,                       !- Hour 21
+    21,                       !- Hour 22
+    21,                       !- Hour 23
+    21;                       !- Hour 24
 
 SCHEDULE:DAY:HOURLY,
     Heating_Monday,           !- Name
-    Fraction,                 !- Schedule Type Limits Name
-    0.5,                      !- Hour 1
-    0.5,                      !- Hour 2
-    0.5,                      !- Hour 3
-    0.5,                      !- Hour 4
-    0.5,                      !- Hour 5
-    0.5,                      !- Hour 6
-    0.5,                      !- Hour 7
-    0.5,                      !- Hour 8
-    0.5,                      !- Hour 9
-    0.5,                      !- Hour 10
-    0.5,                      !- Hour 11
-    0.5,                      !- Hour 12
-    0.5,                      !- Hour 13
-    0.5,                      !- Hour 14
-    0.5,                      !- Hour 15
-    0.5,                      !- Hour 16
-    0.5,                      !- Hour 17
-    0.5,                      !- Hour 18
-    0.5,                      !- Hour 19
-    0.5,                      !- Hour 20
-    0.5,                      !- Hour 21
-    0.5,                      !- Hour 22
-    0.5,                      !- Hour 23
-    0.5;                      !- Hour 24
+    Temperature,              !- Schedule Type Limits Name
+    21,                       !- Hour 1
+    21,                       !- Hour 2
+    21,                       !- Hour 3
+    21,                       !- Hour 4
+    21,                       !- Hour 5
+    21,                       !- Hour 6
+    21,                       !- Hour 7
+    21,                       !- Hour 8
+    21,                       !- Hour 9
+    21,                       !- Hour 10
+    21,                       !- Hour 11
+    21,                       !- Hour 12
+    21,                       !- Hour 13
+    21,                       !- Hour 14
+    21,                       !- Hour 15
+    21,                       !- Hour 16
+    21,                       !- Hour 17
+    21,                       !- Hour 18
+    21,                       !- Hour 19
+    21,                       !- Hour 20
+    21,                       !- Hour 21
+    21,                       !- Hour 22
+    21,                       !- Hour 23
+    21;                       !- Hour 24
 
 SCHEDULE:DAY:HOURLY,
     Heating_Tuesday,          !- Name
-    Fraction,                 !- Schedule Type Limits Name
-    0.5,                      !- Hour 1
-    0.5,                      !- Hour 2
-    0.5,                      !- Hour 3
-    0.5,                      !- Hour 4
-    0.5,                      !- Hour 5
-    0.5,                      !- Hour 6
-    0.5,                      !- Hour 7
-    0.5,                      !- Hour 8
-    0.5,                      !- Hour 9
-    0.5,                      !- Hour 10
-    0.5,                      !- Hour 11
-    0.5,                      !- Hour 12
-    0.5,                      !- Hour 13
-    0.5,                      !- Hour 14
-    0.5,                      !- Hour 15
-    0.5,                      !- Hour 16
-    0.5,                      !- Hour 17
-    0.5,                      !- Hour 18
-    0.5,                      !- Hour 19
-    0.5,                      !- Hour 20
-    0.5,                      !- Hour 21
-    0.5,                      !- Hour 22
-    0.5,                      !- Hour 23
-    0.5;                      !- Hour 24
+    Temperature,              !- Schedule Type Limits Name
+    21,                       !- Hour 1
+    21,                       !- Hour 2
+    21,                       !- Hour 3
+    21,                       !- Hour 4
+    21,                       !- Hour 5
+    21,                       !- Hour 6
+    21,                       !- Hour 7
+    21,                       !- Hour 8
+    21,                       !- Hour 9
+    21,                       !- Hour 10
+    21,                       !- Hour 11
+    21,                       !- Hour 12
+    21,                       !- Hour 13
+    21,                       !- Hour 14
+    21,                       !- Hour 15
+    21,                       !- Hour 16
+    21,                       !- Hour 17
+    21,                       !- Hour 18
+    21,                       !- Hour 19
+    21,                       !- Hour 20
+    21,                       !- Hour 21
+    21,                       !- Hour 22
+    21,                       !- Hour 23
+    21;                       !- Hour 24
 
 SCHEDULE:DAY:HOURLY,
     Heating_Wednesday,        !- Name
-    Fraction,                 !- Schedule Type Limits Name
-    0.5,                      !- Hour 1
-    0.5,                      !- Hour 2
-    0.5,                      !- Hour 3
-    0.5,                      !- Hour 4
-    0.5,                      !- Hour 5
-    0.5,                      !- Hour 6
-    0.5,                      !- Hour 7
-    0.5,                      !- Hour 8
-    0.5,                      !- Hour 9
-    0.5,                      !- Hour 10
-    0.5,                      !- Hour 11
-    0.5,                      !- Hour 12
-    0.5,                      !- Hour 13
-    0.5,                      !- Hour 14
-    0.5,                      !- Hour 15
-    0.5,                      !- Hour 16
-    0.5,                      !- Hour 17
-    0.5,                      !- Hour 18
-    0.5,                      !- Hour 19
-    0.5,                      !- Hour 20
-    0.5,                      !- Hour 21
-    0.5,                      !- Hour 22
-    0.5,                      !- Hour 23
-    0.5;                      !- Hour 24
+    Temperature,              !- Schedule Type Limits Name
+    21,                       !- Hour 1
+    21,                       !- Hour 2
+    21,                       !- Hour 3
+    21,                       !- Hour 4
+    21,                       !- Hour 5
+    21,                       !- Hour 6
+    21,                       !- Hour 7
+    21,                       !- Hour 8
+    21,                       !- Hour 9
+    21,                       !- Hour 10
+    21,                       !- Hour 11
+    21,                       !- Hour 12
+    21,                       !- Hour 13
+    21,                       !- Hour 14
+    21,                       !- Hour 15
+    21,                       !- Hour 16
+    21,                       !- Hour 17
+    21,                       !- Hour 18
+    21,                       !- Hour 19
+    21,                       !- Hour 20
+    21,                       !- Hour 21
+    21,                       !- Hour 22
+    21,                       !- Hour 23
+    21;                       !- Hour 24
 
 SCHEDULE:DAY:HOURLY,
     Heating_Thursday,         !- Name
-    Fraction,                 !- Schedule Type Limits Name
-    0.5,                      !- Hour 1
-    0.5,                      !- Hour 2
-    0.5,                      !- Hour 3
-    0.5,                      !- Hour 4
-    0.5,                      !- Hour 5
-    0.5,                      !- Hour 6
-    0.5,                      !- Hour 7
-    0.5,                      !- Hour 8
-    0.5,                      !- Hour 9
-    0.5,                      !- Hour 10
-    0.5,                      !- Hour 11
-    0.5,                      !- Hour 12
-    0.5,                      !- Hour 13
-    0.5,                      !- Hour 14
-    0.5,                      !- Hour 15
-    0.5,                      !- Hour 16
-    0.5,                      !- Hour 17
-    0.5,                      !- Hour 18
-    0.5,                      !- Hour 19
-    0.5,                      !- Hour 20
-    0.5,                      !- Hour 21
-    0.5,                      !- Hour 22
-    0.5,                      !- Hour 23
-    0.5;                      !- Hour 24
+    Temperature,              !- Schedule Type Limits Name
+    21,                       !- Hour 1
+    21,                       !- Hour 2
+    21,                       !- Hour 3
+    21,                       !- Hour 4
+    21,                       !- Hour 5
+    21,                       !- Hour 6
+    21,                       !- Hour 7
+    21,                       !- Hour 8
+    21,                       !- Hour 9
+    21,                       !- Hour 10
+    21,                       !- Hour 11
+    21,                       !- Hour 12
+    21,                       !- Hour 13
+    21,                       !- Hour 14
+    21,                       !- Hour 15
+    21,                       !- Hour 16
+    21,                       !- Hour 17
+    21,                       !- Hour 18
+    21,                       !- Hour 19
+    21,                       !- Hour 20
+    21,                       !- Hour 21
+    21,                       !- Hour 22
+    21,                       !- Hour 23
+    21;                       !- Hour 24
 
 SCHEDULE:DAY:HOURLY,
     Heating_Friday,           !- Name
-    Fraction,                 !- Schedule Type Limits Name
-    0.5,                      !- Hour 1
-    0.5,                      !- Hour 2
-    0.5,                      !- Hour 3
-    0.5,                      !- Hour 4
-    0.5,                      !- Hour 5
-    0.5,                      !- Hour 6
-    0.5,                      !- Hour 7
-    0.5,                      !- Hour 8
-    0.5,                      !- Hour 9
-    0.5,                      !- Hour 10
-    0.5,                      !- Hour 11
-    0.5,                      !- Hour 12
-    0.5,                      !- Hour 13
-    0.5,                      !- Hour 14
-    0.5,                      !- Hour 15
-    0.5,                      !- Hour 16
-    0.5,                      !- Hour 17
-    0.5,                      !- Hour 18
-    0.5,                      !- Hour 19
-    0.5,                      !- Hour 20
-    0.5,                      !- Hour 21
-    0.5,                      !- Hour 22
-    0.5,                      !- Hour 23
-    0.5;                      !- Hour 24
+    Temperature,              !- Schedule Type Limits Name
+    21,                       !- Hour 1
+    21,                       !- Hour 2
+    21,                       !- Hour 3
+    21,                       !- Hour 4
+    21,                       !- Hour 5
+    21,                       !- Hour 6
+    21,                       !- Hour 7
+    21,                       !- Hour 8
+    21,                       !- Hour 9
+    21,                       !- Hour 10
+    21,                       !- Hour 11
+    21,                       !- Hour 12
+    21,                       !- Hour 13
+    21,                       !- Hour 14
+    21,                       !- Hour 15
+    21,                       !- Hour 16
+    21,                       !- Hour 17
+    21,                       !- Hour 18
+    21,                       !- Hour 19
+    21,                       !- Hour 20
+    21,                       !- Hour 21
+    21,                       !- Hour 22
+    21,                       !- Hour 23
+    21;                       !- Hour 24
 
 SCHEDULE:DAY:HOURLY,
     Heating_Saturday,         !- Name
-    Fraction,                 !- Schedule Type Limits Name
-    0.5,                      !- Hour 1
-    0.5,                      !- Hour 2
-    0.5,                      !- Hour 3
-    0.5,                      !- Hour 4
-    0.5,                      !- Hour 5
-    0.5,                      !- Hour 6
-    0.5,                      !- Hour 7
-    0.5,                      !- Hour 8
-    0.5,                      !- Hour 9
-    0.5,                      !- Hour 10
-    0.5,                      !- Hour 11
-    0.5,                      !- Hour 12
-    0.5,                      !- Hour 13
-    0.5,                      !- Hour 14
-    0.5,                      !- Hour 15
-    0.5,                      !- Hour 16
-    0.5,                      !- Hour 17
-    0.5,                      !- Hour 18
-    0.5,                      !- Hour 19
-    0.5,                      !- Hour 20
-    0.5,                      !- Hour 21
-    0.5,                      !- Hour 22
-    0.5,                      !- Hour 23
-    0.5;                      !- Hour 24
+    Temperature,              !- Schedule Type Limits Name
+    21,                       !- Hour 1
+    21,                       !- Hour 2
+    21,                       !- Hour 3
+    21,                       !- Hour 4
+    21,                       !- Hour 5
+    21,                       !- Hour 6
+    21,                       !- Hour 7
+    21,                       !- Hour 8
+    21,                       !- Hour 9
+    21,                       !- Hour 10
+    21,                       !- Hour 11
+    21,                       !- Hour 12
+    21,                       !- Hour 13
+    21,                       !- Hour 14
+    21,                       !- Hour 15
+    21,                       !- Hour 16
+    21,                       !- Hour 17
+    21,                       !- Hour 18
+    21,                       !- Hour 19
+    21,                       !- Hour 20
+    21,                       !- Hour 21
+    21,                       !- Hour 22
+    21,                       !- Hour 23
+    21;                       !- Hour 24
 
 SCHEDULE:DAY:HOURLY,
     Heating_Sunday,           !- Name
-    Fraction,                 !- Schedule Type Limits Name
-    0.5,                      !- Hour 1
-    0.5,                      !- Hour 2
-    0.5,                      !- Hour 3
-    0.5,                      !- Hour 4
-    0.5,                      !- Hour 5
-    0.5,                      !- Hour 6
-    0.5,                      !- Hour 7
-    0.5,                      !- Hour 8
-    0.5,                      !- Hour 9
-    0.5,                      !- Hour 10
-    0.5,                      !- Hour 11
-    0.5,                      !- Hour 12
-    0.5,                      !- Hour 13
-    0.5,                      !- Hour 14
-    0.5,                      !- Hour 15
-    0.5,                      !- Hour 16
-    0.5,                      !- Hour 17
-    0.5,                      !- Hour 18
-    0.5,                      !- Hour 19
-    0.5,                      !- Hour 20
-    0.5,                      !- Hour 21
-    0.5,                      !- Hour 22
-    0.5,                      !- Hour 23
-    0.5;                      !- Hour 24
+    Temperature,              !- Schedule Type Limits Name
+    21,                       !- Hour 1
+    21,                       !- Hour 2
+    21,                       !- Hour 3
+    21,                       !- Hour 4
+    21,                       !- Hour 5
+    21,                       !- Hour 6
+    21,                       !- Hour 7
+    21,                       !- Hour 8
+    21,                       !- Hour 9
+    21,                       !- Hour 10
+    21,                       !- Hour 11
+    21,                       !- Hour 12
+    21,                       !- Hour 13
+    21,                       !- Hour 14
+    21,                       !- Hour 15
+    21,                       !- Hour 16
+    21,                       !- Hour 17
+    21,                       !- Hour 18
+    21,                       !- Hour 19
+    21,                       !- Hour 20
+    21,                       !- Hour 21
+    21,                       !- Hour 22
+    21,                       !- Hour 23
+    21;                       !- Hour 24
 
 SCHEDULE:DAY:HOURLY,
     Block shoebox Storey 0_warm_residential_THERMOSTAT_CoolingDesignDay,    !- Name
     Temperature,              !- Schedule Type Limits Name
-    0.5,                      !- Hour 1
-    0.5,                      !- Hour 2
-    0.5,                      !- Hour 3
-    0.5,                      !- Hour 4
-    0.5,                      !- Hour 5
-    0.5,                      !- Hour 6
-    0.5,                      !- Hour 7
-    0.5,                      !- Hour 8
-    0.5,                      !- Hour 9
-    0.5,                      !- Hour 10
-    0.5,                      !- Hour 11
-    0.5,                      !- Hour 12
-    0.5,                      !- Hour 13
-    0.5,                      !- Hour 14
-    0.5,                      !- Hour 15
-    0.5,                      !- Hour 16
-    0.5,                      !- Hour 17
-    0.5,                      !- Hour 18
-    0.5,                      !- Hour 19
-    0.5,                      !- Hour 20
-    0.5,                      !- Hour 21
-    0.5,                      !- Hour 22
-    0.5,                      !- Hour 23
-    0.5;                      !- Hour 24
+    24,                       !- Hour 1
+    24,                       !- Hour 2
+    24,                       !- Hour 3
+    24,                       !- Hour 4
+    24,                       !- Hour 5
+    24,                       !- Hour 6
+    24,                       !- Hour 7
+    24,                       !- Hour 8
+    24,                       !- Hour 9
+    24,                       !- Hour 10
+    24,                       !- Hour 11
+    24,                       !- Hour 12
+    24,                       !- Hour 13
+    24,                       !- Hour 14
+    24,                       !- Hour 15
+    24,                       !- Hour 16
+    24,                       !- Hour 17
+    24,                       !- Hour 18
+    24,                       !- Hour 19
+    24,                       !- Hour 20
+    24,                       !- Hour 21
+    24,                       !- Hour 22
+    24,                       !- Hour 23
+    24;                       !- Hour 24
 
 SCHEDULE:DAY:HOURLY,
     Cooling_Monday,           !- Name
-    Fraction,                 !- Schedule Type Limits Name
-    0.5,                      !- Hour 1
-    0.5,                      !- Hour 2
-    0.5,                      !- Hour 3
-    0.5,                      !- Hour 4
-    0.5,                      !- Hour 5
-    0.5,                      !- Hour 6
-    0.5,                      !- Hour 7
-    0.5,                      !- Hour 8
-    0.5,                      !- Hour 9
-    0.5,                      !- Hour 10
-    0.5,                      !- Hour 11
-    0.5,                      !- Hour 12
-    0.5,                      !- Hour 13
-    0.5,                      !- Hour 14
-    0.5,                      !- Hour 15
-    0.5,                      !- Hour 16
-    0.5,                      !- Hour 17
-    0.5,                      !- Hour 18
-    0.5,                      !- Hour 19
-    0.5,                      !- Hour 20
-    0.5,                      !- Hour 21
-    0.5,                      !- Hour 22
-    0.5,                      !- Hour 23
-    0.5;                      !- Hour 24
+    Temperature,              !- Schedule Type Limits Name
+    24,                       !- Hour 1
+    24,                       !- Hour 2
+    24,                       !- Hour 3
+    24,                       !- Hour 4
+    24,                       !- Hour 5
+    24,                       !- Hour 6
+    24,                       !- Hour 7
+    24,                       !- Hour 8
+    24,                       !- Hour 9
+    24,                       !- Hour 10
+    24,                       !- Hour 11
+    24,                       !- Hour 12
+    24,                       !- Hour 13
+    24,                       !- Hour 14
+    24,                       !- Hour 15
+    24,                       !- Hour 16
+    24,                       !- Hour 17
+    24,                       !- Hour 18
+    24,                       !- Hour 19
+    24,                       !- Hour 20
+    24,                       !- Hour 21
+    24,                       !- Hour 22
+    24,                       !- Hour 23
+    24;                       !- Hour 24
 
 SCHEDULE:DAY:HOURLY,
     Cooling_Tuesday,          !- Name
-    Fraction,                 !- Schedule Type Limits Name
-    0.5,                      !- Hour 1
-    0.5,                      !- Hour 2
-    0.5,                      !- Hour 3
-    0.5,                      !- Hour 4
-    0.5,                      !- Hour 5
-    0.5,                      !- Hour 6
-    0.5,                      !- Hour 7
-    0.5,                      !- Hour 8
-    0.5,                      !- Hour 9
-    0.5,                      !- Hour 10
-    0.5,                      !- Hour 11
-    0.5,                      !- Hour 12
-    0.5,                      !- Hour 13
-    0.5,                      !- Hour 14
-    0.5,                      !- Hour 15
-    0.5,                      !- Hour 16
-    0.5,                      !- Hour 17
-    0.5,                      !- Hour 18
-    0.5,                      !- Hour 19
-    0.5,                      !- Hour 20
-    0.5,                      !- Hour 21
-    0.5,                      !- Hour 22
-    0.5,                      !- Hour 23
-    0.5;                      !- Hour 24
+    Temperature,              !- Schedule Type Limits Name
+    24,                       !- Hour 1
+    24,                       !- Hour 2
+    24,                       !- Hour 3
+    24,                       !- Hour 4
+    24,                       !- Hour 5
+    24,                       !- Hour 6
+    24,                       !- Hour 7
+    24,                       !- Hour 8
+    24,                       !- Hour 9
+    24,                       !- Hour 10
+    24,                       !- Hour 11
+    24,                       !- Hour 12
+    24,                       !- Hour 13
+    24,                       !- Hour 14
+    24,                       !- Hour 15
+    24,                       !- Hour 16
+    24,                       !- Hour 17
+    24,                       !- Hour 18
+    24,                       !- Hour 19
+    24,                       !- Hour 20
+    24,                       !- Hour 21
+    24,                       !- Hour 22
+    24,                       !- Hour 23
+    24;                       !- Hour 24
 
 SCHEDULE:DAY:HOURLY,
     Cooling_Wednesday,        !- Name
-    Fraction,                 !- Schedule Type Limits Name
-    0.5,                      !- Hour 1
-    0.5,                      !- Hour 2
-    0.5,                      !- Hour 3
-    0.5,                      !- Hour 4
-    0.5,                      !- Hour 5
-    0.5,                      !- Hour 6
-    0.5,                      !- Hour 7
-    0.5,                      !- Hour 8
-    0.5,                      !- Hour 9
-    0.5,                      !- Hour 10
-    0.5,                      !- Hour 11
-    0.5,                      !- Hour 12
-    0.5,                      !- Hour 13
-    0.5,                      !- Hour 14
-    0.5,                      !- Hour 15
-    0.5,                      !- Hour 16
-    0.5,                      !- Hour 17
-    0.5,                      !- Hour 18
-    0.5,                      !- Hour 19
-    0.5,                      !- Hour 20
-    0.5,                      !- Hour 21
-    0.5,                      !- Hour 22
-    0.5,                      !- Hour 23
-    0.5;                      !- Hour 24
+    Temperature,              !- Schedule Type Limits Name
+    24,                       !- Hour 1
+    24,                       !- Hour 2
+    24,                       !- Hour 3
+    24,                       !- Hour 4
+    24,                       !- Hour 5
+    24,                       !- Hour 6
+    24,                       !- Hour 7
+    24,                       !- Hour 8
+    24,                       !- Hour 9
+    24,                       !- Hour 10
+    24,                       !- Hour 11
+    24,                       !- Hour 12
+    24,                       !- Hour 13
+    24,                       !- Hour 14
+    24,                       !- Hour 15
+    24,                       !- Hour 16
+    24,                       !- Hour 17
+    24,                       !- Hour 18
+    24,                       !- Hour 19
+    24,                       !- Hour 20
+    24,                       !- Hour 21
+    24,                       !- Hour 22
+    24,                       !- Hour 23
+    24;                       !- Hour 24
 
 SCHEDULE:DAY:HOURLY,
     Cooling_Thursday,         !- Name
-    Fraction,                 !- Schedule Type Limits Name
-    0.5,                      !- Hour 1
-    0.5,                      !- Hour 2
-    0.5,                      !- Hour 3
-    0.5,                      !- Hour 4
-    0.5,                      !- Hour 5
-    0.5,                      !- Hour 6
-    0.5,                      !- Hour 7
-    0.5,                      !- Hour 8
-    0.5,                      !- Hour 9
-    0.5,                      !- Hour 10
-    0.5,                      !- Hour 11
-    0.5,                      !- Hour 12
-    0.5,                      !- Hour 13
-    0.5,                      !- Hour 14
-    0.5,                      !- Hour 15
-    0.5,                      !- Hour 16
-    0.5,                      !- Hour 17
-    0.5,                      !- Hour 18
-    0.5,                      !- Hour 19
-    0.5,                      !- Hour 20
-    0.5,                      !- Hour 21
-    0.5,                      !- Hour 22
-    0.5,                      !- Hour 23
-    0.5;                      !- Hour 24
+    Temperature,              !- Schedule Type Limits Name
+    24,                       !- Hour 1
+    24,                       !- Hour 2
+    24,                       !- Hour 3
+    24,                       !- Hour 4
+    24,                       !- Hour 5
+    24,                       !- Hour 6
+    24,                       !- Hour 7
+    24,                       !- Hour 8
+    24,                       !- Hour 9
+    24,                       !- Hour 10
+    24,                       !- Hour 11
+    24,                       !- Hour 12
+    24,                       !- Hour 13
+    24,                       !- Hour 14
+    24,                       !- Hour 15
+    24,                       !- Hour 16
+    24,                       !- Hour 17
+    24,                       !- Hour 18
+    24,                       !- Hour 19
+    24,                       !- Hour 20
+    24,                       !- Hour 21
+    24,                       !- Hour 22
+    24,                       !- Hour 23
+    24;                       !- Hour 24
 
 SCHEDULE:DAY:HOURLY,
     Cooling_Friday,           !- Name
-    Fraction,                 !- Schedule Type Limits Name
-    0.5,                      !- Hour 1
-    0.5,                      !- Hour 2
-    0.5,                      !- Hour 3
-    0.5,                      !- Hour 4
-    0.5,                      !- Hour 5
-    0.5,                      !- Hour 6
-    0.5,                      !- Hour 7
-    0.5,                      !- Hour 8
-    0.5,                      !- Hour 9
-    0.5,                      !- Hour 10
-    0.5,                      !- Hour 11
-    0.5,                      !- Hour 12
-    0.5,                      !- Hour 13
-    0.5,                      !- Hour 14
-    0.5,                      !- Hour 15
-    0.5,                      !- Hour 16
-    0.5,                      !- Hour 17
-    0.5,                      !- Hour 18
-    0.5,                      !- Hour 19
-    0.5,                      !- Hour 20
-    0.5,                      !- Hour 21
-    0.5,                      !- Hour 22
-    0.5,                      !- Hour 23
-    0.5;                      !- Hour 24
+    Temperature,              !- Schedule Type Limits Name
+    24,                       !- Hour 1
+    24,                       !- Hour 2
+    24,                       !- Hour 3
+    24,                       !- Hour 4
+    24,                       !- Hour 5
+    24,                       !- Hour 6
+    24,                       !- Hour 7
+    24,                       !- Hour 8
+    24,                       !- Hour 9
+    24,                       !- Hour 10
+    24,                       !- Hour 11
+    24,                       !- Hour 12
+    24,                       !- Hour 13
+    24,                       !- Hour 14
+    24,                       !- Hour 15
+    24,                       !- Hour 16
+    24,                       !- Hour 17
+    24,                       !- Hour 18
+    24,                       !- Hour 19
+    24,                       !- Hour 20
+    24,                       !- Hour 21
+    24,                       !- Hour 22
+    24,                       !- Hour 23
+    24;                       !- Hour 24
 
 SCHEDULE:DAY:HOURLY,
     Cooling_Saturday,         !- Name
-    Fraction,                 !- Schedule Type Limits Name
-    0.5,                      !- Hour 1
-    0.5,                      !- Hour 2
-    0.5,                      !- Hour 3
-    0.5,                      !- Hour 4
-    0.5,                      !- Hour 5
-    0.5,                      !- Hour 6
-    0.5,                      !- Hour 7
-    0.5,                      !- Hour 8
-    0.5,                      !- Hour 9
-    0.5,                      !- Hour 10
-    0.5,                      !- Hour 11
-    0.5,                      !- Hour 12
-    0.5,                      !- Hour 13
-    0.5,                      !- Hour 14
-    0.5,                      !- Hour 15
-    0.5,                      !- Hour 16
-    0.5,                      !- Hour 17
-    0.5,                      !- Hour 18
-    0.5,                      !- Hour 19
-    0.5,                      !- Hour 20
-    0.5,                      !- Hour 21
-    0.5,                      !- Hour 22
-    0.5,                      !- Hour 23
-    0.5;                      !- Hour 24
+    Temperature,              !- Schedule Type Limits Name
+    24,                       !- Hour 1
+    24,                       !- Hour 2
+    24,                       !- Hour 3
+    24,                       !- Hour 4
+    24,                       !- Hour 5
+    24,                       !- Hour 6
+    24,                       !- Hour 7
+    24,                       !- Hour 8
+    24,                       !- Hour 9
+    24,                       !- Hour 10
+    24,                       !- Hour 11
+    24,                       !- Hour 12
+    24,                       !- Hour 13
+    24,                       !- Hour 14
+    24,                       !- Hour 15
+    24,                       !- Hour 16
+    24,                       !- Hour 17
+    24,                       !- Hour 18
+    24,                       !- Hour 19
+    24,                       !- Hour 20
+    24,                       !- Hour 21
+    24,                       !- Hour 22
+    24,                       !- Hour 23
+    24;                       !- Hour 24
 
 SCHEDULE:DAY:HOURLY,
     Cooling_Sunday,           !- Name
-    Fraction,                 !- Schedule Type Limits Name
-    0.5,                      !- Hour 1
-    0.5,                      !- Hour 2
-    0.5,                      !- Hour 3
-    0.5,                      !- Hour 4
-    0.5,                      !- Hour 5
-    0.5,                      !- Hour 6
-    0.5,                      !- Hour 7
-    0.5,                      !- Hour 8
-    0.5,                      !- Hour 9
-    0.5,                      !- Hour 10
-    0.5,                      !- Hour 11
-    0.5,                      !- Hour 12
-    0.5,                      !- Hour 13
-    0.5,                      !- Hour 14
-    0.5,                      !- Hour 15
-    0.5,                      !- Hour 16
-    0.5,                      !- Hour 17
-    0.5,                      !- Hour 18
-    0.5,                      !- Hour 19
-    0.5,                      !- Hour 20
-    0.5,                      !- Hour 21
-    0.5,                      !- Hour 22
-    0.5,                      !- Hour 23
-    0.5;                      !- Hour 24
+    Temperature,              !- Schedule Type Limits Name
+    24,                       !- Hour 1
+    24,                       !- Hour 2
+    24,                       !- Hour 3
+    24,                       !- Hour 4
+    24,                       !- Hour 5
+    24,                       !- Hour 6
+    24,                       !- Hour 7
+    24,                       !- Hour 8
+    24,                       !- Hour 9
+    24,                       !- Hour 10
+    24,                       !- Hour 11
+    24,                       !- Hour 12
+    24,                       !- Hour 13
+    24,                       !- Hour 14
+    24,                       !- Hour 15
+    24,                       !- Hour 16
+    24,                       !- Hour 17
+    24,                       !- Hour 18
+    24,                       !- Hour 19
+    24,                       !- Hour 20
+    24,                       !- Hour 21
+    24,                       !- Hour 22
+    24,                       !- Hour 23
+    24;                       !- Hour 24
 
 SCHEDULE:DAY:HOURLY,
     d_Block shoebox Storey 0_office_unweatherized_INFILTRATION_Schedule_00,    !- Name
@@ -1824,58 +1824,58 @@ SCHEDULE:DAY:HOURLY,
 SCHEDULE:DAY:HOURLY,
     Block shoebox Storey 1_warm_residential_THERMOSTAT_HeatingDesignDay,    !- Name
     Temperature,              !- Schedule Type Limits Name
-    0.5,                      !- Hour 1
-    0.5,                      !- Hour 2
-    0.5,                      !- Hour 3
-    0.5,                      !- Hour 4
-    0.5,                      !- Hour 5
-    0.5,                      !- Hour 6
-    0.5,                      !- Hour 7
-    0.5,                      !- Hour 8
-    0.5,                      !- Hour 9
-    0.5,                      !- Hour 10
-    0.5,                      !- Hour 11
-    0.5,                      !- Hour 12
-    0.5,                      !- Hour 13
-    0.5,                      !- Hour 14
-    0.5,                      !- Hour 15
-    0.5,                      !- Hour 16
-    0.5,                      !- Hour 17
-    0.5,                      !- Hour 18
-    0.5,                      !- Hour 19
-    0.5,                      !- Hour 20
-    0.5,                      !- Hour 21
-    0.5,                      !- Hour 22
-    0.5,                      !- Hour 23
-    0.5;                      !- Hour 24
+    21,                       !- Hour 1
+    21,                       !- Hour 2
+    21,                       !- Hour 3
+    21,                       !- Hour 4
+    21,                       !- Hour 5
+    21,                       !- Hour 6
+    21,                       !- Hour 7
+    21,                       !- Hour 8
+    21,                       !- Hour 9
+    21,                       !- Hour 10
+    21,                       !- Hour 11
+    21,                       !- Hour 12
+    21,                       !- Hour 13
+    21,                       !- Hour 14
+    21,                       !- Hour 15
+    21,                       !- Hour 16
+    21,                       !- Hour 17
+    21,                       !- Hour 18
+    21,                       !- Hour 19
+    21,                       !- Hour 20
+    21,                       !- Hour 21
+    21,                       !- Hour 22
+    21,                       !- Hour 23
+    21;                       !- Hour 24
 
 SCHEDULE:DAY:HOURLY,
     Block shoebox Storey 1_warm_residential_THERMOSTAT_CoolingDesignDay,    !- Name
     Temperature,              !- Schedule Type Limits Name
-    0.5,                      !- Hour 1
-    0.5,                      !- Hour 2
-    0.5,                      !- Hour 3
-    0.5,                      !- Hour 4
-    0.5,                      !- Hour 5
-    0.5,                      !- Hour 6
-    0.5,                      !- Hour 7
-    0.5,                      !- Hour 8
-    0.5,                      !- Hour 9
-    0.5,                      !- Hour 10
-    0.5,                      !- Hour 11
-    0.5,                      !- Hour 12
-    0.5,                      !- Hour 13
-    0.5,                      !- Hour 14
-    0.5,                      !- Hour 15
-    0.5,                      !- Hour 16
-    0.5,                      !- Hour 17
-    0.5,                      !- Hour 18
-    0.5,                      !- Hour 19
-    0.5,                      !- Hour 20
-    0.5,                      !- Hour 21
-    0.5,                      !- Hour 22
-    0.5,                      !- Hour 23
-    0.5;                      !- Hour 24
+    24,                       !- Hour 1
+    24,                       !- Hour 2
+    24,                       !- Hour 3
+    24,                       !- Hour 4
+    24,                       !- Hour 5
+    24,                       !- Hour 6
+    24,                       !- Hour 7
+    24,                       !- Hour 8
+    24,                       !- Hour 9
+    24,                       !- Hour 10
+    24,                       !- Hour 11
+    24,                       !- Hour 12
+    24,                       !- Hour 13
+    24,                       !- Hour 14
+    24,                       !- Hour 15
+    24,                       !- Hour 16
+    24,                       !- Hour 17
+    24,                       !- Hour 18
+    24,                       !- Hour 19
+    24,                       !- Hour 20
+    24,                       !- Hour 21
+    24,                       !- Hour 22
+    24,                       !- Hour 23
+    24;                       !- Hour 24
 
 SCHEDULE:DAY:HOURLY,
     d_Block shoebox Storey 1_office_unweatherized_INFILTRATION_Schedule_00,    !- Name
@@ -1992,58 +1992,58 @@ SCHEDULE:DAY:HOURLY,
 SCHEDULE:DAY:HOURLY,
     Block shoebox Storey 2_warm_residential_THERMOSTAT_HeatingDesignDay,    !- Name
     Temperature,              !- Schedule Type Limits Name
-    0.5,                      !- Hour 1
-    0.5,                      !- Hour 2
-    0.5,                      !- Hour 3
-    0.5,                      !- Hour 4
-    0.5,                      !- Hour 5
-    0.5,                      !- Hour 6
-    0.5,                      !- Hour 7
-    0.5,                      !- Hour 8
-    0.5,                      !- Hour 9
-    0.5,                      !- Hour 10
-    0.5,                      !- Hour 11
-    0.5,                      !- Hour 12
-    0.5,                      !- Hour 13
-    0.5,                      !- Hour 14
-    0.5,                      !- Hour 15
-    0.5,                      !- Hour 16
-    0.5,                      !- Hour 17
-    0.5,                      !- Hour 18
-    0.5,                      !- Hour 19
-    0.5,                      !- Hour 20
-    0.5,                      !- Hour 21
-    0.5,                      !- Hour 22
-    0.5,                      !- Hour 23
-    0.5;                      !- Hour 24
+    21,                       !- Hour 1
+    21,                       !- Hour 2
+    21,                       !- Hour 3
+    21,                       !- Hour 4
+    21,                       !- Hour 5
+    21,                       !- Hour 6
+    21,                       !- Hour 7
+    21,                       !- Hour 8
+    21,                       !- Hour 9
+    21,                       !- Hour 10
+    21,                       !- Hour 11
+    21,                       !- Hour 12
+    21,                       !- Hour 13
+    21,                       !- Hour 14
+    21,                       !- Hour 15
+    21,                       !- Hour 16
+    21,                       !- Hour 17
+    21,                       !- Hour 18
+    21,                       !- Hour 19
+    21,                       !- Hour 20
+    21,                       !- Hour 21
+    21,                       !- Hour 22
+    21,                       !- Hour 23
+    21;                       !- Hour 24
 
 SCHEDULE:DAY:HOURLY,
     Block shoebox Storey 2_warm_residential_THERMOSTAT_CoolingDesignDay,    !- Name
     Temperature,              !- Schedule Type Limits Name
-    0.5,                      !- Hour 1
-    0.5,                      !- Hour 2
-    0.5,                      !- Hour 3
-    0.5,                      !- Hour 4
-    0.5,                      !- Hour 5
-    0.5,                      !- Hour 6
-    0.5,                      !- Hour 7
-    0.5,                      !- Hour 8
-    0.5,                      !- Hour 9
-    0.5,                      !- Hour 10
-    0.5,                      !- Hour 11
-    0.5,                      !- Hour 12
-    0.5,                      !- Hour 13
-    0.5,                      !- Hour 14
-    0.5,                      !- Hour 15
-    0.5,                      !- Hour 16
-    0.5,                      !- Hour 17
-    0.5,                      !- Hour 18
-    0.5,                      !- Hour 19
-    0.5,                      !- Hour 20
-    0.5,                      !- Hour 21
-    0.5,                      !- Hour 22
-    0.5,                      !- Hour 23
-    0.5;                      !- Hour 24
+    24,                       !- Hour 1
+    24,                       !- Hour 2
+    24,                       !- Hour 3
+    24,                       !- Hour 4
+    24,                       !- Hour 5
+    24,                       !- Hour 6
+    24,                       !- Hour 7
+    24,                       !- Hour 8
+    24,                       !- Hour 9
+    24,                       !- Hour 10
+    24,                       !- Hour 11
+    24,                       !- Hour 12
+    24,                       !- Hour 13
+    24,                       !- Hour 14
+    24,                       !- Hour 15
+    24,                       !- Hour 16
+    24,                       !- Hour 17
+    24,                       !- Hour 18
+    24,                       !- Hour 19
+    24,                       !- Hour 20
+    24,                       !- Hour 21
+    24,                       !- Hour 22
+    24,                       !- Hour 23
+    24;                       !- Hour 24
 
 SCHEDULE:DAY:HOURLY,
     d_Block shoebox Storey 2_office_unweatherized_INFILTRATION_Schedule_00,    !- Name
@@ -2958,7 +2958,7 @@ SCHEDULE:YEAR,
 
 SCHEDULE:YEAR,
     Heating_Year,             !- Name
-    Fraction,                 !- Schedule Type Limits Name
+    Temperature,              !- Schedule Type Limits Name
     Heating_RegularWeek,      !- ScheduleWeek Name 1
     1,                        !- Start Month 1
     1,                        !- Start Day 1
@@ -3022,7 +3022,7 @@ SCHEDULE:YEAR,
 
 SCHEDULE:YEAR,
     Cooling_Year,             !- Name
-    Fraction,                 !- Schedule Type Limits Name
+    Temperature,              !- Schedule Type Limits Name
     Cooling_RegularWeek,      !- ScheduleWeek Name 1
     1,                        !- Start Month 1
     1,                        !- Start Day 1

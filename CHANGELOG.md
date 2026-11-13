@@ -46,6 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Sql.timeseries_by_name(names, reporting_frequency="Hourly")`.
 - Regression tests that compare built models, geometry and simulation results
   with fixtures captured under archetypal.
+- The test seed's thermostat setpoints are now 21 degC heating and 24 degC
+  cooling `Temperature` schedules (they were constant 0.5 fraction schedules,
+  so the regression models never really heated or cooled). The regression
+  baseline was recaptured from the archetypal-era code on that seed, and the
+  `neighbors_overheating` regression case now uses overheating thresholds the
+  conditioned zones cross (heat 23 and 26 degC, cold 22.5 degC).
 
 ### Removed
 
