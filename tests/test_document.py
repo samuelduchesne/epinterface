@@ -9,7 +9,12 @@ import idfkit
 import pytest
 from idfkit import IDFDocument
 
-from epinterface.document import _add_objects, minimal_document
+from epinterface.document import (
+    _add_objects,
+    add_or_replace,
+    field_name,
+    minimal_document,
+)
 from epinterface.settings import energyplus_settings
 
 # The objects of the original EnergyPlus 22.2 Minimal.idf (tests/data/Minimal_22_2.idf)
@@ -115,3 +120,72 @@ def test_unknown_field_fails_loudly(version):
     doc = idfkit.new_document(version)
     with pytest.raises(Exception, match="typo_field"):
         _add_objects(doc, (("Sizing:Parameters", "", {"typo_field": 1.15}),))
+
+
+_WOOD = {
+    "roughness": "MediumSmooth",
+    "thickness": 0.1,
+    "conductivity": 0.12,
+    "density": 540.0,
+    "specific_heat": 1210.0,
+}
+
+
+def test_add_or_replace_reuses_identical_object(doc: IDFDocument):
+    """An object with the same type, name and fields is returned, not duplicated."""
+    first = add_or_replace(doc, "Material", "Wood", **_WOOD)
+    second = add_or_replace(doc, "Material", "Wood", **_WOOD)
+    assert second is first
+    assert len(doc["Material"]) == 1
+
+
+def test_add_or_replace_replaces_different_object(doc: IDFDocument):
+    """An object with the same type and name but other fields replaces the old one."""
+    add_or_replace(doc, "Material", "Wood", **_WOOD)
+    add_or_replace(doc, "Material", "Wood", **(_WOOD | {"thickness": 0.2}))
+    assert len(doc["Material"]) == 1
+    assert doc["Material"]["Wood"].thickness == 0.2
+
+
+def test_add_or_replace_leaves_none_fields_blank(doc: IDFDocument):
+    """None means unset: the field stays blank and does not break reuse."""
+    first = add_or_replace(doc, "Material", "Wood", **_WOOD, solar_absorptance=None)
+    assert first.solar_absorptance in (None, "")
+    assert add_or_replace(doc, "Material", "Wood", **_WOOD) is first
+
+
+def test_add_or_replace_replaces_singleton(doc: IDFDocument):
+    """A type allowed once (Timestep) holds only the latest definition."""
+    add_or_replace(doc, "Timestep", number_of_timesteps_per_hour=4)
+    add_or_replace(doc, "Timestep", number_of_timesteps_per_hour=6)
+    assert [t.number_of_timesteps_per_hour for t in doc["Timestep"]] == [6]
+
+
+def test_add_or_replace_unknown_field_raises(doc: IDFDocument):
+    """A field the schema does not know is an error, not silently dropped."""
+    with pytest.raises(Exception, match="typo_field"):
+        add_or_replace(doc, "Material", "Wood", **_WOOD, typo_field=1)
+
+
+@pytest.mark.parametrize(
+    ("version", "expected"),
+    [
+        ((22, 2, 0), "watts_per_zone_floor_area"),
+        ((23, 1, 0), "watts_per_zone_floor_area"),
+        ((24, 1, 0), "watts_per_floor_area"),
+        ((25, 2, 0), "watts_per_floor_area"),
+    ],
+    ids=lambda v: idfkit.version_string(v) if isinstance(v, tuple) else v,
+)
+def test_field_name_picks_the_versions_name(version, expected):
+    """The first candidate the document's schema knows is returned."""
+    doc = idfkit.new_document(version)
+    candidates = ("watts_per_floor_area", "watts_per_zone_floor_area")
+    assert field_name(doc, "Lights", *candidates) == expected
+    assert field_name(doc, "ElectricEquipment", *candidates) == expected
+
+
+def test_field_name_raises_when_none_is_known(doc: IDFDocument):
+    """No known candidate is an error naming the type and the candidates."""
+    with pytest.raises(ValueError, match="Lights"):
+        field_name(doc, "Lights", "watts_per_parsec", "lumens_per_fortnight")

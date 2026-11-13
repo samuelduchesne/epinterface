@@ -3,7 +3,7 @@
 from typing import Any
 
 import idfkit
-from idfkit import IDFDocument
+from idfkit import IDFDocument, IDFObject
 
 _DESIGN_DAY_COMMON: dict[str, Any] = {
     "daily_dry_bulb_temperature_range": 0.0,
@@ -202,3 +202,69 @@ def minimal_document(version: tuple[int, int, int]) -> IDFDocument:
             doc.removeidfobject(obj)
     _add_objects(doc)
     return doc
+
+
+def field_name(doc: IDFDocument, obj_type: str, *candidates: str) -> str:
+    """The first of `candidates` that `doc`'s schema knows for `obj_type`.
+
+    A few fields were renamed between the EnergyPlus versions epinterface
+    supports (e.g. `People`'s `zone_or_zonelist_name`, later
+    `zone_or_zonelist_or_space_or_spacelist_name`). List the names, newest first,
+    and the one this document's version uses is returned.
+
+    Raises:
+        ValueError: If the schema knows none of `candidates` for `obj_type`.
+    """
+    known = set(doc.schema.get_all_field_names(obj_type)) if doc.schema else set()
+    for candidate in candidates:
+        if candidate in known:
+            return candidate
+    msg = (
+        f"{obj_type} has none of the fields {candidates} in EnergyPlus "
+        f"{idfkit.version_string(doc.version)}"
+    )
+    raise ValueError(msg)
+
+
+def add_or_replace(
+    doc: IDFDocument, obj_type: str, name: str = "", /, **fields: Any
+) -> IDFObject:
+    """Add one object, reusing or replacing an existing one as archetypal did.
+
+    archetypal's writer (`newidfobject`) kept a model free of duplicates, and
+    epinterface relies on that when several components write the same shared
+    object (a material used by several constructions, a type limit or a
+    schedule used by several loads):
+
+    - A type EnergyPlus allows only once (e.g. `Timestep`) replaces the object
+      already in the document, so the result holds a single, current definition.
+    - An object whose type and name already exist is returned as is when its
+      fields are identical, and replaced otherwise.
+
+    Fields set to None are left blank. Field names are idfkit's (the schema's
+    snake_case names); an unknown field raises in `doc.add`.
+
+    Args:
+        doc (IDFDocument): The document to write to.
+        obj_type (str): The EnergyPlus object type, e.g. "Material".
+        name (str): The object's name; empty for unnamed types.
+        **fields (Any): The object's fields by idfkit name.
+
+    Returns:
+        IDFObject: The object now in the document.
+    """
+    fields = {k: v for k, v in fields.items() if v is not None}
+    obj_schema = doc.schema.get_object_schema(obj_type) if doc.schema else None
+    if obj_schema and obj_schema.get("maxProperties") == 1:
+        for existing in list(doc[obj_type]):
+            doc.removeidfobject(existing)
+    elif name and (existing := doc[obj_type].get(name)) is not None:
+        stored = {
+            k: v
+            for k, v in existing.to_dict().items()
+            if k != "name" and v not in (None, "")
+        }
+        if stored == {k: v for k, v in fields.items() if v not in (None, "")}:
+            return existing
+        doc.removeidfobject(existing)
+    return doc.add(obj_type, name, fields)
