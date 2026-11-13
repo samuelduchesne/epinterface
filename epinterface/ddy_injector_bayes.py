@@ -300,9 +300,8 @@ def _remove_all(doc: IDFDocument, field: DDYField) -> None:
 
 
 def _copy_object(doc: IDFDocument, obj: IDFObject) -> IDFObject:
-    """Add a copy of a DDY object to the document."""
-    fields = {k: v for k, v in obj.to_dict().items() if k != "name"}
-    return doc.add(obj.obj_type, obj.name, fields)
+    """Add a copy of a DDY object to the document (idfkit's own copy primitive)."""
+    return doc.copyidfobject(obj)
 
 
 class DDYFieldNotFoundError(Exception):

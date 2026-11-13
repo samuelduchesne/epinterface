@@ -511,13 +511,8 @@ class SurfaceHandlers(BaseModel):
                     (c[0], c[1], z)
                     for c, z in zip(coords, z_coords_upper_section, strict=False)
                 ]
-                fields = {k: v for k, v in srf.to_dict().items() if k != "name"}
-                new_bottom_srf = doc.add(
-                    "BuildingSurface:Detailed", f"{srf.name}_bottom", fields
-                )
-                new_top_srf = doc.add(
-                    "BuildingSurface:Detailed", f"{srf.name}_top", fields
-                )
+                new_bottom_srf = doc.copyidfobject(srf, new_name=f"{srf.name}_bottom")
+                new_top_srf = doc.copyidfobject(srf, new_name=f"{srf.name}_top")
                 set_surface_coords(
                     new_bottom_srf, Polygon3D.from_tuples(coords_lower_section)
                 )
