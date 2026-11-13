@@ -209,9 +209,9 @@ def field_name(doc: IDFDocument, obj_type: str, *candidates: str) -> str:
     """The first of `candidates` that `doc`'s schema knows for `obj_type`.
 
     A few fields were renamed between the EnergyPlus versions epinterface
-    supports (e.g. `People`'s `zone_or_zonelist_name`, later
-    `zone_or_zonelist_or_space_or_spacelist_name`). List the names, newest first,
-    and the one this document's version uses is returned.
+    supports (e.g. `Lights`' `watts_per_zone_floor_area` up to 23.2, then
+    `watts_per_floor_area`). List the names, newest first, and the one this
+    document's version uses is returned.
 
     Raises:
         ValueError: If the schema knows none of `candidates` for `obj_type`.
