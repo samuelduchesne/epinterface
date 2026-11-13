@@ -8,6 +8,8 @@ import numpy as np
 from idfkit import IDFDocument, IDFObject
 from numpy.typing import NDArray
 
+from epinterface.document import add_or_replace
+
 HOURS_PER_YEAR = 8760
 DAYS_PER_YEAR = 365
 WEEKS_PER_YEAR = 52
@@ -161,3 +163,26 @@ def _month_day(day_of_year: int) -> tuple[int, int]:
         remaining -= length
     msg = f"Day of year out of range: {day_of_year}"
     raise ValueError(msg)
+
+
+def add_day_hourly_schedule(
+    doc: IDFDocument, name: str, type_limits: str, values: Sequence[float]
+) -> IDFObject:
+    """Write a `Schedule:Day:Hourly` of 24 values, the first for hour 1.
+
+    An identical schedule is reused and a different one of the same name
+    replaced (see `epinterface.document.add_or_replace`).
+
+    Raises:
+        ValueError: If `values` does not hold exactly 24 numbers.
+    """
+    if len(values) != 24:
+        msg = f"Expected 24 hourly values, got {len(values)}."
+        raise ValueError(msg)
+    return add_or_replace(
+        doc,
+        "Schedule:Day:Hourly",
+        name,
+        schedule_type_limits_name=type_limits,
+        **{f"hour_{h + 1}": v for h, v in enumerate(values)},
+    )

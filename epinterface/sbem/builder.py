@@ -35,14 +35,13 @@ from epinterface.analysis.overheating import (
 from epinterface.constants import assumed_constants, physical_constants
 from epinterface.data import EnergyPlusArtifactDir
 from epinterface.ddy_injector_bayes import DDYSizingSpec
-from epinterface.document import minimal_document
+from epinterface.document import add_or_replace, minimal_document
 from epinterface.geometry import ShoeboxGeometry, get_zone_floor_area
 from epinterface.interface import (
-    InternalMass,
-    SiteGroundTemperature,
-    ZoneList,
     add_default_schedules,
     add_default_sim_controls,
+    add_site_ground_temperature,
+    add_zone_list,
 )
 from epinterface.results import timeseries_frame
 from epinterface.sbem.components.composer import (
@@ -533,13 +532,14 @@ class SurfaceHandlers(BaseModel):
                 floor_area = get_zone_floor_area(doc, zone.name) * (
                     constructions.InternalMassExposedAreaPerArea or 0
                 )
-                internal_mass = InternalMass(
-                    Name=f"{zone.name}_InternalMass",
-                    Zone_or_ZoneList_Name=zone.name,
-                    Construction_Name=constructions.InternalMassAssembly.Name,
-                    Surface_Area=floor_area,
+                add_or_replace(
+                    doc,
+                    "InternalMass",
+                    f"{zone.name}_InternalMass",
+                    construction_name=constructions.InternalMassAssembly.Name,
+                    zone_or_zonelist_name=zone.name,
+                    surface_area=float(floor_area),
                 )
-                doc = internal_mass.add(doc)
 
             # once we've guaranteed that the internal mass object exists, we can
             # assign it the constructions to them
@@ -551,14 +551,18 @@ class SurfaceHandlers(BaseModel):
 
 @dataclass
 class AddedZoneLists:
-    """A collection of zone lists for a model."""
+    """The zone names of a model, by group.
 
-    conditioned_zone_list: ZoneList
-    all_zones_list: ZoneList
-    occupied_zone_list: ZoneList
-    attic_zone_list: ZoneList
-    basement_zone_list: ZoneList
-    main_zone_list: ZoneList
+    Only the conditioned and all-zones groups are written to the document, as
+    the `ZoneList` objects "Conditioned_Zones" and "All_Zones".
+    """
+
+    conditioned_zone_list: list[str]
+    all_zones_list: list[str]
+    occupied_zone_list: list[str]
+    attic_zone_list: list[str]
+    basement_zone_list: list[str]
+    main_zone_list: list[str]
 
 
 class AtticAssumptions(BaseModel):
@@ -704,7 +708,6 @@ class Model(BaseWeather, validate_assignment=True):
             zone_lists (AddedZoneLists): The list of zone lists
         """
         all_zone_names = [zone.name for zone in doc["Zone"]]
-        all_zones_list = ZoneList(Name="All_Zones", Names=all_zone_names)
 
         conditioned_zone_names = []
         attic_zone_names = []
@@ -755,23 +758,15 @@ class Model(BaseWeather, validate_assignment=True):
             msg = f"Expected {expected_zone_count} zones, but found {len(conditioned_zone_names)}."
             raise ValueError(msg)
 
-        conditioned_zone_list = ZoneList(
-            Name="Conditioned_Zones", Names=conditioned_zone_names
-        )
-        attic_zone_list = ZoneList(Name="Attic_Zones", Names=attic_zone_names)
-        basement_zone_list = ZoneList(Name="Basement_Zones", Names=basement_zone_names)
-        main_zone_list = ZoneList(Name="Main_Zones", Names=main_zone_names)
-        occupied_zone_list = ZoneList(Name="Occupied_Zones", Names=occupied_zone_names)
-
-        doc = conditioned_zone_list.add(doc)
-        doc = all_zones_list.add(doc)
+        add_zone_list(doc, "Conditioned_Zones", conditioned_zone_names)
+        add_zone_list(doc, "All_Zones", all_zone_names)
         return doc, AddedZoneLists(
-            conditioned_zone_list=conditioned_zone_list,
-            all_zones_list=all_zones_list,
-            occupied_zone_list=occupied_zone_list,
-            attic_zone_list=attic_zone_list,
-            basement_zone_list=basement_zone_list,
-            main_zone_list=main_zone_list,
+            conditioned_zone_list=conditioned_zone_names,
+            all_zones_list=all_zone_names,
+            occupied_zone_list=occupied_zone_names,
+            attic_zone_list=attic_zone_names,
+            basement_zone_list=basement_zone_names,
+            main_zone_list=main_zone_names,
         )
 
     # part of the HVAC/conditioning system
@@ -882,7 +877,7 @@ class Model(BaseWeather, validate_assignment=True):
         doc, added_zone_lists = self.add_zone_lists(doc)
 
         # Handle main zones
-        for zone in added_zone_lists.main_zone_list.Names:
+        for zone in added_zone_lists.main_zone_list:
             self.Zone.add_to_idf_zone(doc, zone)
 
         # Handle setting ground temperature
@@ -921,7 +916,7 @@ class Model(BaseWeather, validate_assignment=True):
             summer_line = np.array(assumed_constants.SiteGroundTemperature_degC)
         interp_temp = phase * np.abs(summer_line - winter_line) + winter_line
         ground_vals = [max(epw_ground_vals[i], interp_temp[i]) for i in range(12)]
-        doc = SiteGroundTemperature.FromValues(ground_vals).add(doc)
+        add_site_ground_temperature(doc, ground_vals)
 
         # handle basements
         if self.Basement.UseFraction or self.Basement.Conditioned:
@@ -951,7 +946,7 @@ class Model(BaseWeather, validate_assignment=True):
                 )
                 new_zone_def.Operations.HVAC.ConditioningSystems.Cooling = None
 
-            for zone in added_zone_lists.basement_zone_list.Names:
+            for zone in added_zone_lists.basement_zone_list:
                 new_zone_def.add_to_idf_zone(doc, zone)
 
         if self.Attic.UseFraction or self.Attic.Conditioned:
@@ -976,7 +971,7 @@ class Model(BaseWeather, validate_assignment=True):
                 new_zone_def.Operations.HVAC.ConditioningSystems.Cooling = None
 
             # TODO: handle mutating infiltration object when "ventilated attics" are set
-            for zone in added_zone_lists.attic_zone_list.Names:
+            for zone in added_zone_lists.attic_zone_list:
                 new_zone_def.add_to_idf_zone(doc, zone)
 
         doc = self.add_constructions(

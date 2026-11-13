@@ -1,42 +1,69 @@
 """This module contains the definitions for the schedules."""
 
 import calendar
+from dataclasses import dataclass
 from typing import Literal
 
-from idfkit import IDFDocument
+from idfkit import IDFDocument, IDFObject
 from pydantic import Field, field_validator, model_validator
 
-from epinterface.interface import (
-    PROTECTED_SCHEDULE_NAMES,
-    ScheduleDayHourly,
-    ScheduleTypeLimits,
-    ScheduleWeekDaily,
-    ScheduleYear,
-)
+from epinterface.document import add_or_replace
+from epinterface.interface import PROTECTED_SCHEDULE_NAMES
 from epinterface.sbem.common import NamedObject
+from epinterface.schedules import add_day_hourly_schedule
 
 # TODO: handle schedule type limits in a consistent way once?
 ScheduleTypeLimitType = Literal["Fraction", "Temperature", "AnyNumber"]
 
-TypeLimits: dict[ScheduleTypeLimitType, ScheduleTypeLimits] = {
-    "Fraction": ScheduleTypeLimits(
+_NON_LEAP_MONTH_LENGTHS = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+
+
+@dataclass(frozen=True)
+class TypeLimitsSpec:
+    """The bounds of a schedule type, and how to write its `ScheduleTypeLimits`.
+
+    The attribute names are the ones `TypeLimits` entries have always had
+    (GLOBi reads `Lower_Limit_Value` / `Upper_Limit_Value`).
+    """
+
+    Name: str
+    Lower_Limit_Value: float | None = None
+    Upper_Limit_Value: float | None = None
+    Numeric_Type: Literal["Continuous", "Discrete"] | None = None
+    Unit_Type: str | None = None
+
+    def add_to_idf(self, doc: IDFDocument) -> IDFObject:
+        """Write the `ScheduleTypeLimits` object (an identical one is reused)."""
+        return add_or_replace(
+            doc,
+            "ScheduleTypeLimits",
+            self.Name,
+            lower_limit_value=self.Lower_Limit_Value,
+            upper_limit_value=self.Upper_Limit_Value,
+            numeric_type=self.Numeric_Type,
+            unit_type=self.Unit_Type,
+        )
+
+
+TypeLimits: dict[ScheduleTypeLimitType, TypeLimitsSpec] = {
+    "Fraction": TypeLimitsSpec(
         Name="Fraction",
         Unit_Type="Dimensionless",
-        Lower_Limit_Value=0,
-        Upper_Limit_Value=1,
+        Lower_Limit_Value=0.0,
+        Upper_Limit_Value=1.0,
         Numeric_Type="Continuous",
     ),
-    "Temperature": ScheduleTypeLimits(
+    "Temperature": TypeLimitsSpec(
         Name="Temperature",
         Unit_Type="Temperature",
-        Lower_Limit_Value=-270,
-        Upper_Limit_Value=1000,
+        Lower_Limit_Value=-270.0,
+        Upper_Limit_Value=1000.0,
         Numeric_Type="Continuous",
     ),
-    "AnyNumber": ScheduleTypeLimits(
+    "AnyNumber": TypeLimitsSpec(
         Name="AnyNumber",
-        Lower_Limit_Value=-1000,
-        Upper_Limit_Value=1000,
+        Lower_Limit_Value=-1000.0,
+        Upper_Limit_Value=1000.0,
         Numeric_Type="Continuous",
     ),
 }
@@ -150,36 +177,8 @@ class DayComponent(NamedObject, extra="forbid"):
         if desired_name in doc["Schedule:Day:Hourly"]:
             return doc, desired_name
 
-        day_sched = ScheduleDayHourly(
-            Name=desired_name,
-            Schedule_Type_Limits_Name=self.Type,
-            Hour_1=self.Hour_00,
-            Hour_2=self.Hour_01,
-            Hour_3=self.Hour_02,
-            Hour_4=self.Hour_03,
-            Hour_5=self.Hour_04,
-            Hour_6=self.Hour_05,
-            Hour_7=self.Hour_06,
-            Hour_8=self.Hour_07,
-            Hour_9=self.Hour_08,
-            Hour_10=self.Hour_09,
-            Hour_11=self.Hour_10,
-            Hour_12=self.Hour_11,
-            Hour_13=self.Hour_12,
-            Hour_14=self.Hour_13,
-            Hour_15=self.Hour_14,
-            Hour_16=self.Hour_15,
-            Hour_17=self.Hour_16,
-            Hour_18=self.Hour_17,
-            Hour_19=self.Hour_18,
-            Hour_20=self.Hour_19,
-            Hour_21=self.Hour_20,
-            Hour_22=self.Hour_21,
-            Hour_23=self.Hour_22,
-            Hour_24=self.Hour_23,
-        )
-        doc = day_sched.add(doc)
-        return doc, day_sched.Name
+        add_day_hourly_schedule(doc, desired_name, self.Type, self.Values)
+        return doc, desired_name
 
 
 class WeekComponent(NamedObject, extra="forbid"):
@@ -263,20 +262,29 @@ class WeekComponent(NamedObject, extra="forbid"):
         doc, friday_name = self.Friday.add_day_to_idf(doc, name_prefix)
         doc, saturday_name = self.Saturday.add_day_to_idf(doc, name_prefix)
         doc, sunday_name = self.Sunday.add_day_to_idf(doc, name_prefix)
-        week_sched = ScheduleWeekDaily(
-            Name=desired_name,
-            Monday_ScheduleDay_Name=monday_name,
-            Tuesday_ScheduleDay_Name=tuesday_name,
-            Wednesday_ScheduleDay_Name=wednesday_name,
-            Thursday_ScheduleDay_Name=thursday_name,
-            Friday_ScheduleDay_Name=friday_name,
-            Saturday_ScheduleDay_Name=saturday_name,
-            Sunday_ScheduleDay_Name=sunday_name,
-            SummerDesignDay_ScheduleDay_Name=summer_design_day_sch_name,
-            WinterDesignDay_ScheduleDay_Name=winter_design_day_sch_name,
+        # Holiday follows Sunday; custom days and unset design days follow Monday.
+        add_or_replace(
+            doc,
+            "Schedule:Week:Daily",
+            desired_name,
+            sunday_schedule_day_name=sunday_name,
+            monday_schedule_day_name=monday_name,
+            tuesday_schedule_day_name=tuesday_name,
+            wednesday_schedule_day_name=wednesday_name,
+            thursday_schedule_day_name=thursday_name,
+            friday_schedule_day_name=friday_name,
+            saturday_schedule_day_name=saturday_name,
+            holiday_schedule_day_name=sunday_name,
+            summerdesignday_schedule_day_name=monday_name
+            if summer_design_day_sch_name is None
+            else summer_design_day_sch_name,
+            winterdesignday_schedule_day_name=monday_name
+            if winter_design_day_sch_name is None
+            else winter_design_day_sch_name,
+            customday1_schedule_day_name=monday_name,
+            customday2_schedule_day_name=monday_name,
         )
-        doc = week_sched.add(doc)
-        return doc, week_sched.Name
+        return doc, desired_name
 
     @property
     def Type(self) -> ScheduleTypeLimitType:
@@ -504,81 +512,45 @@ class YearComponent(NamedObject, extra="forbid"):
             summer_design_day_sch_name=summer_design_day_sch_name,
             winter_design_day_sch_name=winter_design_day_sch_name,
         )
-        year_sched = ScheduleYear(
-            Name=self.Name,
-            Schedule_Type_Limits_Name=self.schedule_type_limits,
-            ScheduleWeek_Name_1=jan_name,
-            Start_Month_1=1,
-            Start_Day_1=1,
-            End_Month_1=1,
-            End_Day_1=31,
-            ScheduleWeek_Name_2=feb_name,
-            Start_Month_2=2,
-            Start_Day_2=1,
-            End_Month_2=2,
-            End_Day_2=28,
-            ScheduleWeek_Name_3=mar_name,
-            Start_Month_3=3,
-            Start_Day_3=1,
-            End_Month_3=3,
-            End_Day_3=31,
-            ScheduleWeek_Name_4=apr_name,
-            Start_Month_4=4,
-            Start_Day_4=1,
-            End_Month_4=4,
-            End_Day_4=30,
-            ScheduleWeek_Name_5=may_name,
-            Start_Month_5=5,
-            Start_Day_5=1,
-            End_Month_5=5,
-            End_Day_5=31,
-            ScheduleWeek_Name_6=jun_name,
-            Start_Month_6=6,
-            Start_Day_6=1,
-            End_Month_6=6,
-            End_Day_6=30,
-            ScheduleWeek_Name_7=jul_name,
-            Start_Month_7=7,
-            Start_Day_7=1,
-            End_Month_7=7,
-            End_Day_7=31,
-            ScheduleWeek_Name_8=aug_name,
-            Start_Month_8=8,
-            Start_Day_8=1,
-            End_Month_8=8,
-            End_Day_8=31,
-            ScheduleWeek_Name_9=sep_name,
-            Start_Month_9=9,
-            Start_Day_9=1,
-            End_Month_9=9,
-            End_Day_9=30,
-            ScheduleWeek_Name_10=oct_name,
-            Start_Month_10=10,
-            Start_Day_10=1,
-            End_Month_10=10,
-            End_Day_10=31,
-            ScheduleWeek_Name_11=nov_name,
-            Start_Month_11=11,
-            Start_Day_11=1,
-            End_Month_11=11,
-            End_Day_11=30,
-            ScheduleWeek_Name_12=dec_name,
-            Start_Month_12=12,
-            Start_Day_12=1,
-            End_Month_12=12,
-            End_Day_12=31,
+        week_names = [
+            jan_name,
+            feb_name,
+            mar_name,
+            apr_name,
+            may_name,
+            jun_name,
+            jul_name,
+            aug_name,
+            sep_name,
+            oct_name,
+            nov_name,
+            dec_name,
+        ]
+        add_or_replace(
+            doc,
+            "Schedule:Year",
+            self.Name,
+            schedule_type_limits_name=self.schedule_type_limits,
+            schedule_weeks=[
+                {
+                    "schedule_week_name": week_name,
+                    "start_month": month,
+                    "start_day": 1,
+                    "end_month": month,
+                    "end_day": _NON_LEAP_MONTH_LENGTHS[month - 1],
+                }
+                for month, week_name in enumerate(week_names, start=1)
+            ],
         )
-        doc = year_sched.add(doc)
 
         type_lim = self.schedule_type_limits
         if type_lim not in doc["ScheduleTypeLimits"]:
             if type_lim not in TypeLimits:
                 msg = f"Type {type_lim} not in TypeLimits, unsure how to add to IDF."
                 raise ValueError(msg)
-            lim = TypeLimits[type_lim]
-            lim.add(doc)
+            TypeLimits[type_lim].add_to_idf(doc)
 
-        return doc, year_sched.Name
+        return doc, self.Name
 
     def fractional_year_sum(self, year: int):
         """Compute the sum of the year as a fraction of the year."""

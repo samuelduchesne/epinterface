@@ -1,5 +1,6 @@
 """The base idfkit document every model is built on."""
 
+from collections.abc import Sequence
 from typing import Any
 
 import idfkit
@@ -268,3 +269,26 @@ def add_or_replace(
             return existing
         doc.removeidfobject(existing)
     return doc.add(obj_type, name, fields)
+
+
+def add_construction(
+    doc: IDFDocument, name: str, layer_names: Sequence[str]
+) -> IDFObject:
+    """Write a `Construction` of the named layers, outside first.
+
+    The layer materials must be written first. An identical construction is
+    reused and a different one of the same name replaced (see `add_or_replace`).
+
+    Args:
+        doc (IDFDocument): The document to write to.
+        name (str): The construction's name.
+        layer_names (Sequence[str]): The material names, from outside to inside.
+
+    Returns:
+        IDFObject: The `Construction` object.
+    """
+    layers = {
+        ("outside_layer" if i == 0 else f"layer_{i + 1}"): layer
+        for i, layer in enumerate(layer_names)
+    }
+    return add_or_replace(doc, "Construction", name, **layers)

@@ -15,6 +15,7 @@ from pydantic import (
     model_validator,
 )
 
+from epinterface.document import add_or_replace
 from epinterface.schedules import HOURS_PER_YEAR, add_values_schedule
 
 try:
@@ -306,6 +307,37 @@ class BaseMaterial(BaseModel, extra="ignore", populate_by_name=True):
     Visible_Absorptance: float | None = Field(
         default=None, validation_alias="VisibleAbsorptance [0-1]", ge=0, le=1
     )
+
+    def layer_name(self, thickness: float) -> str:
+        """The name of this material's `Material` object at `thickness` [m]."""
+        return f"{self.Name}_{thickness}m"
+
+    def add_layer_to_idf(self, doc: IDFDocument, thickness: float) -> IDFObject:
+        """Write this material as a `Material` object of the given thickness.
+
+        An identical layer already in the document is reused (see
+        `epinterface.document.add_or_replace`).
+
+        Args:
+            doc (IDFDocument): The IDF document to write to.
+            thickness (float): The thickness of the layer [m].
+
+        Returns:
+            IDFObject: The `Material` object, named `layer_name(thickness)`.
+        """
+        return add_or_replace(
+            doc,
+            "Material",
+            self.layer_name(thickness),
+            roughness=self.Roughness,
+            thickness=thickness,
+            conductivity=self.Conductivity,
+            density=self.Density,
+            specific_heat=self.Specific_Heat,
+            thermal_absorptance=self.Thermal_Absorptance,
+            solar_absorptance=self.Solar_Absorptance,
+            visible_absorptance=self.Visible_Absorptance,
+        )
 
     def as_layer(self, thickness: float):
         """Create a new material object with a given thickness.
@@ -1033,52 +1065,109 @@ class ZoneList(BaseModel, extra="ignore"):
 def add_default_sim_controls(doc: IDFDocument) -> IDFDocument:
     """Helper to add default simulation controls to the IDF model.
 
+    Writes (replacing any existing ones) `SimulationControl`, a `RunPeriod`
+    named "Year" over the whole year starting on a Sunday, a 6 per hour
+    `Timestep` and 1.15 heating/cooling `Sizing:Parameters`.
+
     Args:
         doc (IDFDocument): The IDF model to add the simulation controls to.
 
     Returns:
         IDFDocument: The IDF model with the added simulation controls.
     """
-    # Configure simulation
-    sim_control = SimulationControl(
-        Do_Zone_Sizing_Calculation="Yes",
-        Do_System_Sizing_Calculation="Yes",
-        Do_Plant_Sizing_Calculation="No",
-        Run_Simulation_for_Sizing_Periods="Yes",
-        Run_Simulation_for_Weather_File_Run_Periods="Yes",
-        Do_HVAC_Sizing_Simulation_for_Sizing_Periods="Yes",
-        Maximum_Number_of_HVAC_Sizing_Simulation_Passes=2,
+    add_or_replace(
+        doc,
+        "SimulationControl",
+        do_zone_sizing_calculation="Yes",
+        do_system_sizing_calculation="Yes",
+        do_plant_sizing_calculation="No",
+        run_simulation_for_sizing_periods="Yes",
+        run_simulation_for_weather_file_run_periods="Yes",
+        do_hvac_sizing_simulation_for_sizing_periods="Yes",
+        maximum_number_of_hvac_sizing_simulation_passes=2,
     )
-    sim_control.add(doc)
-
-    # Configure run period
-    run_period = RunPeriod(
-        Name="Year",
-        Use_Weather_File_Daylight_Saving_Period="No",
-        Use_Weather_File_Rain_Indicators="No",
-        Use_Weather_File_Snow_Indicators="No",
-        Use_Weather_File_Holidays_and_Special_Days="No",
-        Begin_Month=1,
-        Begin_Day_of_Month=1,
-        End_Month=12,
-        End_Day_of_Month=31,
-        Day_of_Week_for_Start_Day="Sunday",
+    add_or_replace(
+        doc,
+        "RunPeriod",
+        "Year",
+        begin_month=1,
+        begin_day_of_month=1,
+        end_month=12,
+        end_day_of_month=31,
+        day_of_week_for_start_day="Sunday",
+        use_weather_file_holidays_and_special_days="No",
+        use_weather_file_daylight_saving_period="No",
+        apply_weekend_holiday_rule="Yes",
+        use_weather_file_rain_indicators="No",
+        use_weather_file_snow_indicators="No",
     )
-    run_period.add(doc)
-
-    # configure timestep
-    timestep = Timestep(
-        Number_of_Timesteps_per_Hour=6,
+    add_or_replace(doc, "Timestep", number_of_timesteps_per_hour=6)
+    add_or_replace(
+        doc,
+        "Sizing:Parameters",
+        heating_sizing_factor=1.15,
+        cooling_sizing_factor=1.15,
     )
-    timestep.add(doc)
-
-    sizing = SizingParameters(
-        Heating_Sizing_Factor=1.15,
-        Cooling_Sizing_Factor=1.15,
-    )
-    sizing.add(doc)
-
     return doc
+
+
+_MONTHS = (
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+)
+
+
+def add_site_ground_temperature(doc: IDFDocument, values: list[float]) -> IDFObject:
+    """Write `Site:GroundTemperature:BuildingSurface` from 12 monthly values.
+
+    The document holds one such object; an existing one is replaced.
+
+    Args:
+        doc (IDFDocument): The IDF document to write to.
+        values (list[float]): The ground temperatures [degC], January first.
+
+    Returns:
+        IDFObject: The `Site:GroundTemperature:BuildingSurface` object.
+
+    Raises:
+        ValueError: If `values` does not hold exactly 12 values.
+    """
+    if len(values) != 12:
+        raise ValueError(f"GROUNDTEMP:EXPECTED_12:RECEIVED_{len(values)}")
+    return add_or_replace(
+        doc,
+        "Site:GroundTemperature:BuildingSurface",
+        **{
+            f"{month}_ground_temperature": float(value)
+            for month, value in zip(_MONTHS, values, strict=True)
+        },
+    )
+
+
+def add_zone_list(doc: IDFDocument, name: str, zone_names: list[str]) -> IDFObject:
+    """Write a `ZoneList` of the (non-empty) `zone_names`.
+
+    Args:
+        doc (IDFDocument): The IDF document to write to.
+        name (str): The name of the zone list.
+        zone_names (list[str]): The zones in the list; empty names are skipped.
+
+    Returns:
+        IDFObject: The `ZoneList` object.
+    """
+    return add_or_replace(
+        doc, "ZoneList", name, zones=[{"zone_name": z} for z in zone_names if z]
+    )
 
 
 def ensure_fraction_type_limits(doc: IDFDocument) -> IDFObject:

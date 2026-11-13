@@ -2,15 +2,12 @@
 
 from typing import Literal
 
-from idfkit import IDFDocument
+from idfkit import IDFDocument, IDFObject
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from epinterface.document import add_construction, add_or_replace
 from epinterface.interface import (
-    Construction,
     InfDesignFlowRateCalculationMethodType,
-    Material,
-    SimpleGlazingMaterial,
-    ZoneInfiltrationDesignFlowRate,
     add_constant_schedule,
 )
 from epinterface.sbem.common import BoolStr, MetadataMixin, NamedObject, NanStr
@@ -49,19 +46,15 @@ class GlazingConstructionSimpleComponent(
         Returns:
             IDFDocument: The updated IDF document.
         """
-        glazing_mat = SimpleGlazingMaterial(
-            Name=self.Name,
-            UFactor=self.UValue,
-            Solar_Heat_Gain_Coefficient=self.SHGF,
-            Visible_Transmittance=self.TVis,
+        add_or_replace(
+            doc,
+            "WindowMaterial:SimpleGlazingSystem",
+            self.Name,
+            u_factor=self.UValue,
+            solar_heat_gain_coefficient=self.SHGF,
+            visible_transmittance=self.TVis,
         )
-
-        construction = Construction(
-            name=self.Name,
-            layers=[glazing_mat],
-        )
-
-        doc = construction.add(doc)
+        add_construction(doc, self.Name, [self.Name])
         return doc
 
 
@@ -135,21 +128,23 @@ class InfiltrationComponent(
         inf_schedule = add_constant_schedule(
             doc, infiltration_schedule_name, 1, "Fraction"
         )
-        inf = ZoneInfiltrationDesignFlowRate(
-            Name=infiltration_name,
-            Zone_or_ZoneList_Name=target_zone_or_zone_list_name,
-            Schedule_Name=inf_schedule.name,
-            Design_Flow_Rate_Calculation_Method=self.CalculationMethod,
-            Flow_Rate_per_Exterior_Surface_Area=self.FlowPerExteriorSurfaceArea,
-            Air_Changes_per_Hour=self.AirChangesPerHour,
-            Flow_Rate_per_Floor_Area=None,
-            Design_Flow_Rate=None,
-            # Constant_Term_Coefficient=self.ConstantCoefficient,
-            # Temperature_Term_Coefficient=self.TemperatureCoefficient,
-            # Velocity_Term_Coefficient=self.WindVelocityCoefficient,
-            # Velocity_Squared_Term_Coefficient=self.WindVelocitySquaredCoefficient,
+        # The coefficients are 1/0/0/0 rather than this component's own: the
+        # infiltration values are taken as actual rates, and no assumption is
+        # made about the wind velocity.
+        add_or_replace(
+            doc,
+            "ZoneInfiltration:DesignFlowRate",
+            infiltration_name,
+            zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
+            schedule_name=inf_schedule.name,
+            design_flow_rate_calculation_method=self.CalculationMethod,
+            flow_rate_per_exterior_surface_area=self.FlowPerExteriorSurfaceArea,
+            air_changes_per_hour=self.AirChangesPerHour,
+            constant_term_coefficient=1.0,
+            temperature_term_coefficient=0.0,
+            velocity_term_coefficient=0.0,
+            velocity_squared_term_coefficient=0.0,
         )
-        doc = inf.add(doc)
         return doc
 
 
@@ -175,19 +170,31 @@ class ConstructionLayerComponent(BaseModel, extra="forbid"):
         # return f"{self.LayerOrder}_{self.ConstructionMaterial.Name}_{self.Thickness}m"
         return f"{self.ConstructionMaterial.Name}_{self.Thickness}m"
 
-    @property
-    def ep_material(self):
-        """Return the EP material for the layer."""
-        return Material(
-            Name=self.name,
-            Thickness=self.Thickness,
-            Conductivity=self.ConstructionMaterial.Conductivity,
-            Density=self.ConstructionMaterial.Density,
-            Specific_Heat=self.ConstructionMaterial.SpecificHeat,
-            Thermal_Absorptance=self.ConstructionMaterial.ThermalAbsorptance,
-            Solar_Absorptance=self.ConstructionMaterial.SolarAbsorptance,
-            Roughness=self.ConstructionMaterial.Roughness,
-            Visible_Absorptance=self.ConstructionMaterial.VisibleAbsorptance,
+    def add_to_idf(self, doc: IDFDocument) -> IDFObject:
+        """Write the layer as a `Material` object named `self.name`.
+
+        An identical material already in the document (e.g. the same layer of
+        another construction) is reused.
+
+        Args:
+            doc (IDFDocument): The IDF document to write to.
+
+        Returns:
+            IDFObject: The `Material` object.
+        """
+        material = self.ConstructionMaterial
+        return add_or_replace(
+            doc,
+            "Material",
+            self.name,
+            roughness=material.Roughness,
+            thickness=self.Thickness,
+            conductivity=material.Conductivity,
+            density=material.Density,
+            specific_heat=material.SpecificHeat,
+            thermal_absorptance=material.ThermalAbsorptance,
+            solar_absorptance=material.SolarAbsorptance,
+            visible_absorptance=material.VisibleAbsorptance,
         )
 
     @property
@@ -246,13 +253,9 @@ class ConstructionAssemblyComponent(
         Returns:
             doc (IDFDocument): The updated IDF document.
         """
-        layers = [layer.ep_material for layer in self.Layers]
-
-        construction = Construction(
-            name=self.Name,
-            layers=layers,
-        )
-        doc = construction.add(doc)
+        for layer in self.Layers:
+            layer.add_to_idf(doc)
+        add_construction(doc, self.Name, [layer.name for layer in self.Layers])
         return doc
 
     @property

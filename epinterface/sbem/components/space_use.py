@@ -7,13 +7,8 @@ from idfkit import IDFDocument
 from pydantic import Field
 
 from epinterface.constants import assumed_constants, physical_constants
-from epinterface.interface import (
-    ElectricEquipment,
-    Lights,
-    People,
-    ScheduleTypeLimits,
-    add_constant_schedule,
-)
+from epinterface.document import add_or_replace, field_name
+from epinterface.interface import add_constant_schedule
 from epinterface.sbem.common import BoolStr, MetadataMixin, NamedObject
 from epinterface.sbem.components.schedules import (
     YearComponent,
@@ -66,11 +61,13 @@ class OccupancyComponent(NamedObject, MetadataMixin, extra="forbid"):
             f"{target_zone_or_zone_list_name}_{self.safe_name}_PEOPLE_Activity_Schedule"
         )
         if "AnyNumber" not in doc["ScheduleTypeLimits"]:
-            ScheduleTypeLimits(
-                Name="AnyNumber",
-                Numeric_Type="Continuous",
-                Unit_Type="Dimensionless",
-            ).add(doc)
+            add_or_replace(
+                doc,
+                "ScheduleTypeLimits",
+                "AnyNumber",
+                numeric_type="Continuous",
+                unit_type="Dimensionless",
+            )
         activity_sch_year = add_constant_schedule(
             doc, activity_sch_name, self.MetabolicRate_met_to_W, "AnyNumber"
         )
@@ -82,20 +79,19 @@ class OccupancyComponent(NamedObject, MetadataMixin, extra="forbid"):
             summer_design_day_sch_name="d_AllOn_00",
             winter_design_day_sch_name="d_AllOn_00",
         )
-        people = People(
-            Name=name_prefix,
-            Zone_or_ZoneList_Name=target_zone_or_zone_list_name,
-            Number_of_People_Schedule_Name=year_name,
-            Number_of_People_Calculation_Method="People/Area",
-            Number_of_People=None,
-            Floor_Area_per_Person=None,
-            People_per_Floor_Area=self.PeopleDensity,
-            Fraction_Radiant=assumed_constants.FractionRadiantPeople,
-            Sensible_Heat_Fraction="autocalculate",
-            Activity_Level_Schedule_Name=activity_sch_year.name,
+        add_or_replace(
+            doc,
+            "People",
+            name_prefix,
+            zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
+            number_of_people_schedule_name=year_name,
+            number_of_people_calculation_method="People/Area",
+            people_per_floor_area=self.PeopleDensity,
+            fraction_radiant=assumed_constants.FractionRadiantPeople,
+            sensible_heat_fraction="autocalculate",
+            activity_level_schedule_name=activity_sch_year.name,
+            enable_ashrae_55_comfort_warnings="No",
         )
-
-        doc = people.add(doc)
         return doc
 
 
@@ -145,21 +141,22 @@ class LightingComponent(NamedObject, MetadataMixin, extra="forbid"):
             summer_design_day_sch_name="d_AllOn_00",
             winter_design_day_sch_name="d_AllOn_00",
         )
-        lights = Lights(
-            Name=name_prefix,
-            Zone_or_ZoneList_Name=target_zone_or_zone_list_name,
-            Schedule_Name=year_name,
-            Design_Level_Calculation_Method="Watts/Area",
-            Watts_per_Zone_Floor_Area=self.PowerDensity,
-            Watts_per_Person=None,
-            Lighting_Level=None,
-            Return_Air_Fraction=assumed_constants.ReturnAirFractionLights,
-            Fraction_Radiant=assumed_constants.FractionRadiantLights,
-            Fraction_Visible=assumed_constants.FractionVisibleLights,
-            Fraction_Replaceable=assumed_constants.FractionReplaceableLights,
-            EndUse_Subcategory=None,
+        watts_per_area = field_name(
+            doc, "Lights", "watts_per_floor_area", "watts_per_zone_floor_area"
         )
-        doc = lights.add(doc)
+        add_or_replace(
+            doc,
+            "Lights",
+            name_prefix,
+            zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
+            schedule_name=year_name,
+            design_level_calculation_method="Watts/Area",
+            **{watts_per_area: self.PowerDensity},
+            return_air_fraction=assumed_constants.ReturnAirFractionLights,
+            fraction_radiant=assumed_constants.FractionRadiantLights,
+            fraction_visible=assumed_constants.FractionVisibleLights,
+            fraction_replaceable=assumed_constants.FractionReplaceableLights,
+        )
         return doc
 
 
@@ -194,23 +191,27 @@ class EquipmentComponent(NamedObject, MetadataMixin, extra="forbid"):
             summer_design_day_sch_name="d_AllOn_00",
             winter_design_day_sch_name="d_AllOn_00",
         )
-        equipment = ElectricEquipment(
-            Name=name_prefix,
-            Zone_or_ZoneList_Name=target_zone_or_zone_list_name,
-            Schedule_Name=year_name,
-            Design_Level_Calculation_Method="Watts/Area",
-            Watts_per_Zone_Floor_Area=self.PowerDensity,
-            Watts_per_Person=None,
-            Fraction_Latent=assumed_constants.FractionLatentEquipment,
-            Fraction_Radiant=assumed_constants.FractionRadiantEquipment,
-            Fraction_Lost=assumed_constants.FractionLostEquipment,
-            EndUse_Subcategory=None,
+        watts_per_area = field_name(
+            doc,
+            "ElectricEquipment",
+            "watts_per_floor_area",
+            "watts_per_zone_floor_area",
         )
-        doc = equipment.add(doc)
+        add_or_replace(
+            doc,
+            "ElectricEquipment",
+            name_prefix,
+            zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
+            schedule_name=year_name,
+            design_level_calculation_method="Watts/Area",
+            **{watts_per_area: self.PowerDensity},
+            fraction_latent=assumed_constants.FractionLatentEquipment,
+            fraction_radiant=assumed_constants.FractionRadiantEquipment,
+            fraction_lost=assumed_constants.FractionLostEquipment,
+        )
         return doc
 
 
-# TODO: Potentially duplicative with HVACTempelateThermostat in epinterface > interface
 class ThermostatComponent(NamedObject, MetadataMixin, extra="forbid"):
     """A thermostat object in the SBEM library."""
 

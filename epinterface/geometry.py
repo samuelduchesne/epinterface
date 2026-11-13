@@ -3,7 +3,7 @@
 import re
 import warnings
 from collections.abc import Sequence
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 from idfkit import (
@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 from shapely import LineString, Polygon, from_wkt
 from shapely.affinity import translate
 
-from epinterface.interface import Construction, Material, SimpleGlazingMaterial
+from epinterface.document import add_construction, add_or_replace
 
 
 def _total_floor_area(doc: IDFDocument) -> float:
@@ -816,14 +816,14 @@ class ShoeboxGeometry(BaseModel):
             doc.rename("Zone", zone.name, new_name)
 
 
-_DEFAULT_MATERIAL = Material(
-    Name="DefaultMaterial",
-    Roughness="Rough",
-    Thickness=0.1,
-    Conductivity=0.1,
-    Density=1000,
-    Specific_Heat=1000,
-)
+_DEFAULT_MATERIAL_NAME = "DefaultMaterial"
+_DEFAULT_MATERIAL: dict[str, Any] = {
+    "roughness": "Rough",
+    "thickness": 0.1,
+    "conductivity": 0.1,
+    "density": 1000.0,
+    "specific_heat": 1000.0,
+}
 _DEFAULT_OPAQUE_CONSTRUCTIONS = (
     "Project Wall",
     "Project Partition",
@@ -832,17 +832,13 @@ _DEFAULT_OPAQUE_CONSTRUCTIONS = (
     "Project Ceiling",
     "Project Door",
 )
-_DEFAULT_WINDOW_CONSTRUCTION = Construction(
-    name="Project External Window",
-    layers=[
-        SimpleGlazingMaterial(
-            Name="DefaultGlazing",
-            UFactor=2.7,
-            Solar_Heat_Gain_Coefficient=0.763,
-            Visible_Transmittance=0.8,
-        )
-    ],
-)
+_DEFAULT_WINDOW_CONSTRUCTION = "Project External Window"
+_DEFAULT_GLAZING_NAME = "DefaultGlazing"
+_DEFAULT_GLAZING: dict[str, Any] = {
+    "u_factor": 2.7,
+    "solar_heat_gain_coefficient": 0.763,
+    "visible_transmittance": 0.8,
+}
 
 
 def _default_construction_name(surface: IDFObject) -> str | None:
@@ -871,8 +867,15 @@ def _set_default_constructions(doc: IDFDocument) -> None:
     are assigned.
     """
     for name in _DEFAULT_OPAQUE_CONSTRUCTIONS:
-        Construction(name=name, layers=[_DEFAULT_MATERIAL]).add(doc)
-    _DEFAULT_WINDOW_CONSTRUCTION.add(doc)
+        add_or_replace(doc, "Material", _DEFAULT_MATERIAL_NAME, **_DEFAULT_MATERIAL)
+        add_construction(doc, name, [_DEFAULT_MATERIAL_NAME])
+    add_or_replace(
+        doc,
+        "WindowMaterial:SimpleGlazingSystem",
+        _DEFAULT_GLAZING_NAME,
+        **_DEFAULT_GLAZING,
+    )
+    add_construction(doc, _DEFAULT_WINDOW_CONSTRUCTION, [_DEFAULT_GLAZING_NAME])
     for surface in doc["BuildingSurface:Detailed"]:
         construction = _default_construction_name(surface)
         if construction is not None:
