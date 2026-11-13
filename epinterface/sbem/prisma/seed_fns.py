@@ -15,36 +15,47 @@ tightnesses = ["unweatherized", "lightly", "moderately", "heavily"]
 windows = ["single", "double", "triple"]
 
 
-def create_schedule(db: Prisma, name_prefix: str):
-    """Create a schedule for the given name prefix."""
+def create_schedule(
+    db: Prisma,
+    name_prefix: str,
+    value: float = 0.5,
+    day_type: str = "Fraction",
+    year_type: str = "Equipment",
+):
+    """Create a constant schedule for the given name prefix.
+
+    By default the schedule is a 0.5 ``Fraction`` schedule; thermostat setpoint
+    schedules pass a ``Temperature`` day type, a ``Setpoint`` year type and a
+    setpoint value in degC.
+    """
     with db.tx() as tx:
         day_create_input: DayCreateInput = {
             "Name": f"{name_prefix} Monday",
-            "Type": "Fraction",
-            "Hour_00": 0.5,
-            "Hour_01": 0.5,
-            "Hour_02": 0.5,
-            "Hour_03": 0.5,
-            "Hour_04": 0.5,
-            "Hour_05": 0.5,
-            "Hour_06": 0.5,
-            "Hour_07": 0.5,
-            "Hour_08": 0.5,
-            "Hour_09": 0.5,
-            "Hour_10": 0.5,
-            "Hour_11": 0.5,
-            "Hour_12": 0.5,
-            "Hour_13": 0.5,
-            "Hour_14": 0.5,
-            "Hour_15": 0.5,
-            "Hour_16": 0.5,
-            "Hour_17": 0.5,
-            "Hour_18": 0.5,
-            "Hour_19": 0.5,
-            "Hour_20": 0.5,
-            "Hour_21": 0.5,
-            "Hour_22": 0.5,
-            "Hour_23": 0.5,
+            "Type": day_type,
+            "Hour_00": value,
+            "Hour_01": value,
+            "Hour_02": value,
+            "Hour_03": value,
+            "Hour_04": value,
+            "Hour_05": value,
+            "Hour_06": value,
+            "Hour_07": value,
+            "Hour_08": value,
+            "Hour_09": value,
+            "Hour_10": value,
+            "Hour_11": value,
+            "Hour_12": value,
+            "Hour_13": value,
+            "Hour_14": value,
+            "Hour_15": value,
+            "Hour_16": value,
+            "Hour_17": value,
+            "Hour_18": value,
+            "Hour_19": value,
+            "Hour_20": value,
+            "Hour_21": value,
+            "Hour_22": value,
+            "Hour_23": value,
         }
         day_creations_for_whole_week = {
             "Monday": day_create_input,
@@ -86,7 +97,7 @@ def create_schedule(db: Prisma, name_prefix: str):
         tx.year.create(
             data={
                 "Name": f"{name_prefix}_Year",
-                "Type": "Equipment",
+                "Type": year_type,
                 "January": {"connect": {"id": week_a.id}},
                 "February": {"connect": {"id": week_a.id}},
                 "March": {"connect": {"id": week_a.id}},
@@ -109,8 +120,13 @@ def create_schedules(db: Prisma):
     create_schedule(db, "Equipment")
     create_schedule(db, "Occupancy")
     create_schedule(db, "WaterUse")
-    create_schedule(db, "Heating")
-    create_schedule(db, "Cooling")
+    # Thermostat setpoints are temperature schedules in degC.
+    create_schedule(
+        db, "Heating", value=21, day_type="Temperature", year_type="Setpoint"
+    )
+    create_schedule(
+        db, "Cooling", value=24, day_type="Temperature", year_type="Setpoint"
+    )
     create_schedule(db, "Ventilation")
 
 
