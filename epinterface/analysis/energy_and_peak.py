@@ -199,8 +199,7 @@ def standard_results_postprocess(
         raise ValueError(msg)
 
     energy_dfs = (
-        pd
-        .concat(
+        pd.concat(
             [raw_monthly, end_use_df, utilities_df],
             axis=1,
             keys=["Raw", "End Uses", "Utilities"],

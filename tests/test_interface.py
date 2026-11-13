@@ -1,6 +1,7 @@
 """Tests for the legacy IDF object writers on idfkit documents."""
 
 import idfkit
+import idfkit.schedules
 import numpy as np
 import pytest
 
@@ -191,7 +192,16 @@ def test_people_writes_zone_and_density(doc):
 
 
 def test_lights_and_equipment_use_floor_area_field(doc):
-    """Watts/Area loads land in watts_per_floor_area (EnergyPlus >= 24)."""
+    """Watts/Area loads land in the version's floor-area field.
+
+    EnergyPlus >= 24 names it `watts_per_floor_area`; older versions
+    `watts_per_zone_floor_area`.
+    """
+    area_field = (
+        "watts_per_floor_area"
+        if doc.version >= (24, 0, 0)
+        else "watts_per_zone_floor_area"
+    )
     Lights(
         Name="Lt",
         Zone_or_ZoneList_Name="L",
@@ -206,10 +216,10 @@ def test_lights_and_equipment_use_floor_area_field(doc):
     ).add(doc)
     lights = doc["Lights"]["Lt"]
     assert lights.zone_or_zonelist_or_space_or_spacelist_name == "L"
-    assert lights.watts_per_floor_area == 4
+    assert getattr(lights, area_field) == 4
     assert lights.fraction_radiant == 0.42
     equipment = doc["ElectricEquipment"]["Eq"]
-    assert equipment.watts_per_floor_area == 9
+    assert getattr(equipment, area_field) == 9
     assert equipment.fraction_radiant == 0.2
 
 

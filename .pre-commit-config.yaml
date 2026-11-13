@@ -12,12 +12,18 @@ repos:
       #   exclude: ^.devcontainer/devcontainer.json
       #   args: [--autofix, --no-sort-keys]
       - id: end-of-file-fixer
+        # Regression fixtures and design docs are kept byte-for-byte as written.
+        exclude: ^(tests/data/|docs/superpowers/)
       - id: trailing-whitespace
+        # Regression fixtures and design docs are kept byte-for-byte as written.
+        exclude: ^(tests/data/|docs/superpowers/)
 
   - repo: https://github.com/RobertCraigie/pyright-python
     rev: v1.1.382
     hooks:
       - id: pyright
+        # The capture scripts import archetypal, which is not a dependency.
+        exclude: ^scripts/capture_.*\.py$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: "v0.11.5"
@@ -30,3 +36,5 @@ repos:
     rev: "v3.0.3"
     hooks:
       - id: prettier
+        # Regression fixtures and design docs are kept byte-for-byte as written.
+        exclude: ^(tests/data/|docs/superpowers/)

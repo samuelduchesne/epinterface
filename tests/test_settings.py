@@ -49,7 +49,7 @@ def test_default_none_when_nothing_installed(monkeypatch: pytest.MonkeyPatch):
     """No installation found for any supported major gives a None default."""
 
     def _raise(**_kwargs: object):
-        raise EnergyPlusNotFoundError("none")
+        raise EnergyPlusNotFoundError([])
 
     monkeypatch.delenv("EPINTERFACE_ENERGYPLUS_VERSION", raising=False)
     monkeypatch.setattr(settings_module, "find_energyplus", _raise)

@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 import numpy as np
 from idfkit import IDFDocument, IDFObject
+from numpy.typing import NDArray
 
 HOURS_PER_YEAR = 8760
 DAYS_PER_YEAR = 365
@@ -25,7 +26,7 @@ _WEEKDAY_FIELDS = (
 def add_values_schedule(
     doc: IDFDocument,
     name: str,
-    values: Sequence[float],
+    values: Sequence[float] | NDArray[np.floating],
     type_limits: str,
     first_weekday: Literal["monday", "sunday"] = "monday",
 ) -> IDFObject:
@@ -139,7 +140,7 @@ def _is_unchanged(
 
 def _remove_generated(doc: IDFDocument, name: str) -> None:
     """Remove the `Schedule:Year` `name` and the day/week objects generated for it."""
-    generated = re.compile(rf"[dw]_{re.escape(name)}_\d\d", re.IGNORECASE)
+    generated = re.compile(rf"[dw]_{re.escape(name)}_\d{{2,}}", re.IGNORECASE)
     if name in doc["Schedule:Year"]:
         doc.removeidfobject(doc["Schedule:Year"][name])
     for obj_type in ("Schedule:Week:Daily", "Schedule:Day:Hourly"):

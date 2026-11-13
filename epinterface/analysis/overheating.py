@@ -191,8 +191,7 @@ def calculate_hi_categories(
 
     val_counts_by_timestep = [df.loc[zone].value_counts() for zone in zone_names_]
     cat_counts_by_zone = (
-        pd
-        .concat(val_counts_by_timestep, axis=1, keys=zone_names_, names=["Group"])
+        pd.concat(val_counts_by_timestep, axis=1, keys=zone_names_, names=["Group"])
         .fillna(0)
         .sort_index()
     )
@@ -747,8 +746,7 @@ def calculate_consecutive_hours_above_threshold(
     return cast(
         pd.DataFrame,
         (
-            pd
-            .concat([over_df, under_df], axis=0)
+            pd.concat([over_df, under_df], axis=0)
             .stack(level="Streak Index", future_stack=True)
             .dropna()
         ),
@@ -1140,8 +1138,7 @@ def overheating_results_postprocess(
 
     hourly: pd.DataFrame = cast(
         pd.DataFrame,
-        hourly
-        .droplevel("_", axis=1)
+        hourly.droplevel("_", axis=1)
         .stack(level="Zone", future_stack=True)
         .unstack(level="Timestep"),
     )

@@ -1,8 +1,8 @@
 """Test the builder."""
 
 import pytest
-from idfkit import IDFDocument, SimulationError, load_idf
-from idfkit.geometry import calculate_surface_area, get_surface_coords
+from idfkit import IDFDocument, IDFObject, SimulationError, load_idf
+from idfkit.geometry import Vector3D, calculate_surface_area, get_surface_coords
 from prisma import Prisma
 
 from epinterface.data import DefaultEPWZipPath, EnergyPlusArtifactDir
@@ -17,6 +17,17 @@ from epinterface.sbem.builder import (
 from epinterface.sbem.flat_model import FlatModel
 from epinterface.sbem.prisma.client import deep_fetcher
 from epinterface.settings import energyplus_settings
+
+
+def _lower(value: str | None) -> str:
+    assert value is not None
+    return value.lower()
+
+
+def _vertices(surface: IDFObject) -> list[Vector3D]:
+    coords = get_surface_coords(surface)
+    assert coords is not None
+    return list(coords.vertices)
 
 
 def _model(db: Prisma, **geometry) -> Model:
@@ -45,7 +56,7 @@ def _model(db: Prisma, **geometry) -> Model:
 def test_builder(preseeded_readonly_db: Prisma):
     """A model runs and returns its idfkit document and EnergyPlus warnings."""
     r = _model(preseeded_readonly_db).run()
-    assert isinstance(r.idf, IDFDocument)
+    assert r.idf.version == energyplus_settings.version_tuple
     assert "EnergyPlus Completed Successfully" in r.err_text
 
 
@@ -69,22 +80,22 @@ def test_exposed_basement_walls_are_split(preseeded_readonly_db: Prisma, tmp_pat
     model = _model(preseeded_readonly_db, basement=True, exposed_basement_frac=0.25)
     doc = model.build(SimulationPathConfig(output_dir=tmp_path))
     walls = [
-        s for s in doc["BuildingSurface:Detailed"] if s.surface_type.lower() == "wall"
+        s for s in doc["BuildingSurface:Detailed"] if _lower(s.surface_type) == "wall"
     ]
     bottoms = [s for s in walls if s.name.endswith("_bottom")]
     tops = [s for s in walls if s.name.endswith("_top")]
     assert len(bottoms) == len(tops) == 4
     # the original ground walls are replaced by their bottom parts
     assert [
-        s for s in walls if s.outside_boundary_condition.lower() == "ground"
+        s for s in walls if _lower(s.outside_boundary_condition) == "ground"
     ] == bottoms
-    assert {s.outside_boundary_condition.lower() for s in tops} == {"outdoors"}
+    assert {_lower(s.outside_boundary_condition) for s in tops} == {"outdoors"}
     for bottom in bottoms:
         top = doc["BuildingSurface:Detailed"][
             bottom.name.removesuffix("_bottom") + "_top"
         ]
-        bottom_zs = [v.z for v in get_surface_coords(bottom).vertices]
-        top_zs = [v.z for v in get_surface_coords(top).vertices]
+        bottom_zs = [v.z for v in _vertices(bottom)]
+        top_zs = [v.z for v in _vertices(top)]
         assert max(bottom_zs) == pytest.approx(min(top_zs))
         assert max(top_zs) - min(bottom_zs) == pytest.approx(3)
         assert max(top_zs) - min(top_zs) == pytest.approx(0.75)
@@ -123,8 +134,8 @@ def test_flat_model_rotates_around_floor_plan_centre(doc: IDFDocument):
         points = [
             v
             for s in d["BuildingSurface:Detailed"]
-            if s.surface_type.lower() == "floor"
-            for v in get_surface_coords(s).vertices
+            if _lower(s.surface_type) == "floor"
+            for v in _vertices(s)
         ]
         return (
             min(p.x for p in points),

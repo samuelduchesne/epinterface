@@ -4,6 +4,7 @@ from itertools import chain
 from pathlib import Path
 
 import idfkit
+import idfkit.schedules
 import numpy as np
 import pytest
 
@@ -192,3 +193,18 @@ def test_default_schedules_twice(doc):
     before = _schedule_names(doc)
     add_default_schedules(doc)
     assert _schedule_names(doc) == before
+
+
+def test_rewrite_with_over_100_distinct_days(doc):
+    """Schedules with three-digit day names (d_S_100...) can be replaced."""
+    rng = np.random.default_rng(1)
+    first = rng.random(8760)
+    second = rng.random(8760)
+    add_values_schedule(doc, "S", first, "Fraction")
+    assert "d_S_100" in doc["Schedule:Day:Hourly"]
+
+    add_values_schedule(doc, "S", second, "Fraction")
+
+    names = [o.name for o in doc["Schedule:Day:Hourly"]]
+    assert len(names) == len(set(names)) == 364
+    assert np.allclose(_values(doc, "S")[: 364 * 24], second[: 364 * 24])
