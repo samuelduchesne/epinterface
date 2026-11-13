@@ -7,24 +7,17 @@ import pandas as pd
 from idfkit import IDFDocument, load_idf
 
 from epinterface.ddy_injector_bayes import DDYSizingSpec
-from epinterface.document import minimal_document
+from epinterface.document import (
+    add_construction,
+    add_or_replace,
+    field_name,
+    minimal_document,
+)
 from epinterface.geometry import ShoeboxGeometry
 from epinterface.interface import (
-    Construction,
     DefaultMaterialLibrary,
-    ElectricEquipment,
-    HVACTemplateThermostat,
-    HVACTemplateZoneIdealLoadsAirSystem,
-    Lights,
-    People,
-    RunPeriod,
-    ScheduleTypeLimits,
-    SimpleGlazingMaterial,
-    SimulationControl,
-    Timestep,
-    ZoneInfiltrationDesignFlowRate,
-    ZoneList,
     add_constant_schedule,
+    add_zone_list,
     ensure_fraction_type_limits,
 )
 from epinterface.schedules import HOURS_PER_YEAR, add_values_schedule
@@ -78,37 +71,38 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
         ddyspec.inject_ddy(idf, ddy)
 
         # Configure simulation
-        sim_control = SimulationControl(
-            Do_Zone_Sizing_Calculation="Yes",
-            Do_System_Sizing_Calculation="Yes",
+        add_or_replace(
+            idf,
+            "SimulationControl",
+            do_zone_sizing_calculation="Yes",
+            do_system_sizing_calculation="Yes",
             # The model has no plant loops; plant sizing would require Sizing:Plant.
-            Do_Plant_Sizing_Calculation="No",
-            Run_Simulation_for_Sizing_Periods="Yes",
-            Run_Simulation_for_Weather_File_Run_Periods="Yes",
-            Do_HVAC_Sizing_Simulation_for_Sizing_Periods="Yes",
+            do_plant_sizing_calculation="No",
+            run_simulation_for_sizing_periods="Yes",
+            run_simulation_for_weather_file_run_periods="Yes",
+            do_hvac_sizing_simulation_for_sizing_periods="Yes",
+            maximum_number_of_hvac_sizing_simulation_passes=1,
         )
-        sim_control.add(idf)
 
         # Configure run period
-        run_period = RunPeriod(
-            Name="Year",
-            Use_Weather_File_Daylight_Saving_Period="No",
-            Use_Weather_File_Rain_Indicators="No",
-            Use_Weather_File_Snow_Indicators="No",
-            Use_Weather_File_Holidays_and_Special_Days="No",
-            Begin_Month=1,
-            Begin_Day_of_Month=1,
-            End_Month=12,
-            End_Day_of_Month=31,
-            Day_of_Week_for_Start_Day="Sunday",
+        add_or_replace(
+            idf,
+            "RunPeriod",
+            "Year",
+            begin_month=1,
+            begin_day_of_month=1,
+            end_month=12,
+            end_day_of_month=31,
+            day_of_week_for_start_day="Sunday",
+            use_weather_file_holidays_and_special_days="No",
+            use_weather_file_daylight_saving_period="No",
+            apply_weekend_holiday_rule="Yes",
+            use_weather_file_rain_indicators="No",
+            use_weather_file_snow_indicators="No",
         )
-        run_period.add(idf)
 
         # configure timestep
-        timestep = Timestep(
-            Number_of_Timesteps_per_Hour=self.timestep,
-        )
-        timestep.add(idf)
+        add_or_replace(idf, "Timestep", number_of_timesteps_per_hour=self.timestep)
 
         # create constant scheds
         for on_name, off_name in (
@@ -135,45 +129,35 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
         )
         idf = zone_dims.add(idf)
 
-        window_construction = Construction(
-            name="Project External Window",
-            layers=[
-                SimpleGlazingMaterial(
-                    Name="DefaultGlazing",
-                    Solar_Heat_Gain_Coefficient=self.WindowSHGC,
-                    UFactor=self.WindowU,
-                    Visible_Transmittance=0.7,
-                )
-            ],
+        add_or_replace(
+            idf,
+            "WindowMaterial:SimpleGlazingSystem",
+            "DefaultGlazing",
+            u_factor=self.WindowU,
+            solar_heat_gain_coefficient=self.WindowSHGC,
+            visible_transmittance=0.7,
         )
-        window_construction.add(idf)
+        add_construction(idf, "Project External Window", ["DefaultGlazing"])
 
         # Handle Wall Constructions
-        wall_construction = Construction(
-            name="Project Wall",
-            layers=[
-                material_lib.stucco.as_layer(thickness=0.03),
-                material_lib.insulation.as_layer(thickness=0.15),
-                material_lib.gypsum.as_layer(thickness=0.02),
+        wall_layers = [
+            (material_lib.stucco, 0.03),
+            (material_lib.insulation, 0.15),
+            (material_lib.gypsum, 0.02),
+        ]
+        wall_construction = add_construction(
+            idf,
+            "Project Wall",
+            [
+                material.add_layer_to_idf(idf, thickness).name
+                for material, thickness in wall_layers
             ],
         )
-        wall_construction.add(idf)
         for surface in idf["BuildingSurface:Detailed"]:
             if (surface.surface_type or "").lower() == "wall" and (
                 surface.outside_boundary_condition or ""
             ).lower() == "outdoors":
                 surface.construction_name = wall_construction.name
-
-        # Handle Roof Constructions
-        # roof_construction = Construction(
-        #     name="Project Flat Roof",
-        #     layers=[
-        #         material_lib.stucco.as_layer(thickness=0.03),
-        #         material_lib.insulation.as_layer(thickness=0.15),
-        #         material_lib.gypsum.as_layer(thickness=0.02),
-        #     ],
-        # )
-        # roof_construction.add(idf)
 
         # TODO: handle other constructions.
 
@@ -181,25 +165,47 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
         zone_names = [
             zone.name for zone in idf["Zone"] if "attic" not in zone.name.lower()
         ]
-        zone_list = ZoneList(Name="Conditioned_Zones", Names=zone_names)
-        zone_list.add(idf)
+        zone_list = add_zone_list(idf, "Conditioned_Zones", zone_names)
 
         # Handle HVAC
-        thermostat = HVACTemplateThermostat(
-            Name="Thermostat",
-            Constant_Heating_Setpoint=self.HeatingSetpoint,
-            Constant_Cooling_Setpoint=self.CoolingSetpoint,
+        thermostat = add_or_replace(
+            idf,
+            "HVACTemplate:Thermostat",
+            "Thermostat",
+            constant_heating_setpoint=self.HeatingSetpoint,
+            constant_cooling_setpoint=self.CoolingSetpoint,
         )
-        thermostat.add(idf)
         for zone in idf["Zone"]:
             zone_name = zone.name
             if "attic" in zone_name.lower():
                 continue
-            hvac_template = HVACTemplateZoneIdealLoadsAirSystem(
-                Zone_Name=zone_name,
-                Template_Thermostat_Name=thermostat.Name,
+            add_or_replace(
+                idf,
+                "HVACTemplate:Zone:IdealLoadsAirSystem",
+                "",
+                zone_name=zone_name,
+                template_thermostat_name=thermostat.name,
+                maximum_heating_supply_air_temperature=30.0,
+                minimum_cooling_supply_air_temperature=18.0,
+                maximum_heating_supply_air_humidity_ratio=0.0156,
+                minimum_cooling_supply_air_humidity_ratio=0.0077,
+                heating_limit="NoLimit",
+                cooling_limit="NoLimit",
+                dehumidification_control_type="None",
+                cooling_sensible_heat_ratio=0.7,
+                dehumidification_setpoint=60.0,
+                humidification_control_type="None",
+                humidification_setpoint=30.0,
+                outdoor_air_method="None",
+                outdoor_air_flow_rate_per_person=0.00944,
+                outdoor_air_flow_rate_per_zone_floor_area=0.00025,
+                outdoor_air_flow_rate_per_zone=0.0,
+                demand_controlled_ventilation_type="None",
+                outdoor_air_economizer_type="NoEconomizer",
+                heat_recovery_type="None",
+                sensible_heat_recovery_effectiveness=0.7,
+                latent_heat_recovery_effectiveness=0.65,
             )
-            idf = hvac_template.add(idf)
 
         # Handle People
         occ_sched = add_values_schedule(
@@ -209,34 +215,52 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
             type_limits="Fraction",
         )
         ensure_fraction_type_limits(idf)
-        ScheduleTypeLimits(
-            Name="any number", Numeric_Type="Continuous", Unit_Type="Dimensionless"
-        ).add(idf)
+        add_or_replace(
+            idf,
+            "ScheduleTypeLimits",
+            "any number",
+            numeric_type="Continuous",
+            unit_type="Dimensionless",
+        )
         acti_year = add_values_schedule(
             idf,
             "Activity_Schedule",
             [117.28] * HOURS_PER_YEAR,
             type_limits="any number",
         )
-        people = People(
-            Name="People",
-            Zone_or_ZoneList_Name=zone_list.Name,
-            Number_of_People_Schedule_Name=occ_sched.name,
-            Activity_Level_Schedule_Name=acti_year.name,
-            Number_of_People_Calculation_Method="People/Area",
-            People_per_Floor_Area=self.PeopleDensity,
+        add_or_replace(
+            idf,
+            "People",
+            "People",
+            zone_or_zonelist_or_space_or_spacelist_name=zone_list.name,
+            number_of_people_schedule_name=occ_sched.name,
+            number_of_people_calculation_method="People/Area",
+            people_per_floor_area=self.PeopleDensity,
+            fraction_radiant=0.3,
+            sensible_heat_fraction="autocalculate",
+            activity_level_schedule_name=acti_year.name,
+            enable_ashrae_55_comfort_warnings="No",
         )
-        people.add(idf)
 
         # Handle Infiltration
-        infiltration = ZoneInfiltrationDesignFlowRate(
-            Name="Infiltration",
-            Zone_or_ZoneList_Name=zone_list.Name,
-            Schedule_Name=always_on_name,
-            Design_Flow_Rate_Calculation_Method="AirChanges/Hour",
-            Flow_Rate_per_Exterior_Surface_Area=self.Infiltration,
+        add_or_replace(
+            idf,
+            "ZoneInfiltration:DesignFlowRate",
+            "Infiltration",
+            zone_or_zonelist_or_space_or_spacelist_name=zone_list.name,
+            schedule_name=always_on_name,
+            design_flow_rate_calculation_method="AirChanges/Hour",
+            flow_rate_per_exterior_surface_area=self.Infiltration,
+            constant_term_coefficient=1.0,
+            temperature_term_coefficient=0.0,
+            velocity_term_coefficient=0.0,
+            velocity_squared_term_coefficient=0.0,
         )
-        infiltration.add(idf)
+
+        def watts_per_area(obj_type: str) -> str:
+            return field_name(
+                idf, obj_type, "watts_per_floor_area", "watts_per_zone_floor_area"
+            )
 
         # Handle Equipment
         equip_sched = add_values_schedule(
@@ -245,14 +269,18 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
             schedules.Equipment.values.tolist(),
             type_limits="Fraction",
         )
-        equipment = ElectricEquipment(
-            Name="Equipment",
-            Zone_or_ZoneList_Name=zone_list.Name,
-            Schedule_Name=equip_sched.name,
-            Design_Level_Calculation_Method="Watts/Area",
-            Watts_per_Zone_Floor_Area=self.EPD,
+        add_or_replace(
+            idf,
+            "ElectricEquipment",
+            "Equipment",
+            zone_or_zonelist_or_space_or_spacelist_name=zone_list.name,
+            schedule_name=equip_sched.name,
+            design_level_calculation_method="Watts/Area",
+            **{watts_per_area("ElectricEquipment"): self.EPD},
+            fraction_latent=0.0,
+            fraction_radiant=0.2,
+            fraction_lost=0.0,
         )
-        equipment.add(idf)
 
         # Handle Lights
         lights_sched = add_values_schedule(
@@ -261,31 +289,21 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
             schedules.Lights.values.tolist(),
             type_limits="Fraction",
         )
-        lights = Lights(
-            Name="Lights",
-            Zone_or_ZoneList_Name=zone_list.Name,
-            Schedule_Name=lights_sched.name,
-            Design_Level_Calculation_Method="Watts/Area",
-            Watts_per_Zone_Floor_Area=self.LPD,
+        add_or_replace(
+            idf,
+            "Lights",
+            "Lights",
+            zone_or_zonelist_or_space_or_spacelist_name=zone_list.name,
+            schedule_name=lights_sched.name,
+            design_level_calculation_method="Watts/Area",
+            **{watts_per_area("Lights"): self.LPD},
+            return_air_fraction=0.0,
+            fraction_radiant=0.42,
+            fraction_visible=0.18,
+            fraction_replaceable=1.0,
         )
-        lights.add(idf)
 
-        # Handle Water
-        # TODO: energy only changes with flow rate because no heater is provided.
-        # water_flow_sch, *_ = Schedule.constant_schedule(Name="Water_Flow", value=0.1).to_year_week_day()
-        # water_flow_sch.to_epbunch(idf)
-        # target_temp_sch, *_ = Schedule.constant_schedule(Name="Target_Temperature", value=10, Type="Temperature").to_year_week_day()
-        # target_temp_sch.to_epbunch(idf)
-        # water = WaterUseEquipment(
-        #     Name="DHW",
-        #     Peak_Flow_Rate=0.0001,
-        #     Flow_Rate_Fraction_Schedule_Name=water_flow_sch.Name,
-        #     Hot_Water_Supply_Temperature_Schedule_Name=target_temp_sch.Name,
-        #     # Zone_Name=
-        #     # Latent_Fraction_Schedule_Name=
-        #     # Sensible_Fraction_Schedule_Name=
-        # )
-        # water.add(idf)
+        # TODO: water use (no heater is provided, so only the flow rate matters).
 
         # TODO: should we be using a slab processor?
 

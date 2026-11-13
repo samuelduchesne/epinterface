@@ -8,7 +8,7 @@ from typing import cast
 from uuid import uuid4
 
 import pandas as pd
-from idfkit import IDFDocument, load_idf
+from idfkit import IDFDocument, IDFObject, load_idf
 from idfkit.simulation.parsers.sql import SQLResult
 from pydantic import BaseModel, Field
 
@@ -34,10 +34,11 @@ from epinterface.document import minimal_document
 from epinterface.geometry import ShoeboxGeometry, get_zone_floor_area
 from epinterface.interface import (
     PROTECTED_SCHEDULE_NAMES,
-    SiteGroundTemperature,
-    ZoneList,
     add_default_schedules,
     add_default_sim_controls,
+    add_site_ground_temperature,
+    add_zone_list,
+    zone_list_names,
 )
 from epinterface.results import tabular_frame
 from epinterface.settings import energyplus_settings, require_supported_major
@@ -186,56 +187,59 @@ class Model(BaseWeather, validate_assignment=True):
         # take precedence over library schedules of the same name.
         idf, _scheds = add_default_schedules(idf)
 
-        idf = SiteGroundTemperature.FromValues([
-            18.3,
-            18.2,
-            18.3,
-            18.4,
-            20.1,
-            22.0,
-            22.3,
-            22.5,
-            22.5,
-            20.7,
-            18.9,
-            18.5,
-            # 18,
-            # 18,
-            # 18,
-            # 18,
-            # 18,
-            # 18,
-            # 18,
-            # 18,
-            # 18,
-            # 18,
-            # 18,
-            # 18,
-            # 7.9,
-            # 6.05,
-            # 5.65,
-            # 6.21,
-            # 8.98,
-            # 11.97,
-            # 14.71,
-            # 16.62,
-            # 17.06,
-            # 15.98,
-            # 13.61,
-            # 10.71,
-            # 1.11,
-            # 0.1,
-            # 1.89,
-            # 4.69,
-            # 12.02,
-            # 17.68,
-            # 21.5,
-            # 22.66,
-            # 20.68,
-            # 16.29,
-            # 10.42,
-            # 4.97,
-        ]).add(idf)
+        add_site_ground_temperature(
+            idf,
+            [
+                18.3,
+                18.2,
+                18.3,
+                18.4,
+                20.1,
+                22.0,
+                22.3,
+                22.5,
+                22.5,
+                20.7,
+                18.9,
+                18.5,
+                # 18,
+                # 18,
+                # 18,
+                # 18,
+                # 18,
+                # 18,
+                # 18,
+                # 18,
+                # 18,
+                # 18,
+                # 18,
+                # 18,
+                # 7.9,
+                # 6.05,
+                # 5.65,
+                # 6.21,
+                # 8.98,
+                # 11.97,
+                # 14.71,
+                # 16.62,
+                # 17.06,
+                # 15.98,
+                # 13.61,
+                # 10.71,
+                # 1.11,
+                # 0.1,
+                # 1.89,
+                # 4.69,
+                # 12.02,
+                # 17.68,
+                # 21.5,
+                # 22.66,
+                # 20.68,
+                # 16.29,
+                # 10.42,
+                # 4.97,
+            ],
+        )
 
         idf = self.geometry.add(idf)
 
@@ -249,19 +253,19 @@ class Model(BaseWeather, validate_assignment=True):
         return idf
 
     def add_hot_water_to_zone_list(
-        self, idf: IDFDocument, space_use: ZoneUse, zone_list: ZoneList
+        self, idf: IDFDocument, space_use: ZoneUse, zone_list: IDFObject
     ) -> IDFDocument:
         """Add the hot water to the zone list.
 
         Args:
             idf (IDFDocument): The IDF model to add the hot water to.
             space_use (ZoneUse): The zone use template.
-            zone_list (ZoneList): The list of zones to add the hot water to.
+            zone_list (IDFObject): The `ZoneList` of the zones to add the hot water to.
 
         Returns:
             idf (IDFDocument): The IDF model with the added hot water.
         """
-        for zone_name in zone_list.Names:
+        for zone_name in zone_list_names(zone_list):
             idf = self.add_hot_water_to_zone(idf, space_use, zone_name)
         return idf
 
@@ -288,7 +292,7 @@ class Model(BaseWeather, validate_assignment=True):
         return idf
 
     def add_envelope(
-        self, idf: IDFDocument, envelope: ZoneEnvelope, inf_zone_list: ZoneList
+        self, idf: IDFDocument, envelope: ZoneEnvelope, inf_zone_list: IDFObject
     ) -> IDFDocument:
         """Add the envelope to the IDF model.
 
@@ -297,7 +301,7 @@ class Model(BaseWeather, validate_assignment=True):
         Args:
             idf (IDFDocument): The IDF model to add the envelope to.
             envelope (ZoneEnvelope): The envelope template.
-            inf_zone_list (ZoneList): The list of zones to add the infiltration to.
+            inf_zone_list (IDFObject): The `ZoneList` of the zones to add the infiltration to.
 
 
         Returns:
@@ -369,11 +373,10 @@ class Model(BaseWeather, validate_assignment=True):
 
         Returns:
             idf (IDFDocument): The IDF model with the added zone lists
-            conditioned_zone_list (ZoneList): The list of conditioned zones
-            all_zones_list (ZoneList): The list of all zones
+            conditioned_zone_list (IDFObject): The `ZoneList` of conditioned zones
+            all_zones_list (IDFObject): The `ZoneList` of all zones
         """
         all_zone_names = [zone.name for zone in idf["Zone"]]
-        all_zones_list = ZoneList(Name="All_Zones", Names=all_zone_names)
         conditioned_zone_names = [
             zone.name
             for zone in idf["Zone"]
@@ -394,39 +397,38 @@ class Model(BaseWeather, validate_assignment=True):
             msg = f"Expected {expected_zone_count} zones, but found {len(conditioned_zone_names)}."
             raise ValueError(msg)
 
-        conditioned_zone_list = ZoneList(
-            Name="Conditioned_Zones", Names=conditioned_zone_names
+        conditioned_zone_list = add_zone_list(
+            idf, "Conditioned_Zones", conditioned_zone_names
         )
-        idf = conditioned_zone_list.add(idf)
-        idf = all_zones_list.add(idf)
+        all_zones_list = add_zone_list(idf, "All_Zones", all_zone_names)
         return idf, conditioned_zone_list, all_zones_list
 
     def add_infiltration(
-        self, idf: IDFDocument, infiltration: ZoneInfiltration, zone_list: ZoneList
+        self, idf: IDFDocument, infiltration: ZoneInfiltration, zone_list: IDFObject
     ):
         """Add the infiltration to the IDF model.
 
         Args:
             idf (IDFDocument): The IDF model to add the infiltration to.
             infiltration: The infiltration object.
-            zone_list (ZoneList): The list of zones to add the infiltration to.
+            zone_list (IDFObject): The `ZoneList` of the zones to add the infiltration to.
 
         Returns:
             idf (IDFDocument): The IDF model with the added infiltration.
         """
-        idf = infiltration.add_infiltration_to_idf_zone(idf, zone_list.Name)
+        idf = infiltration.add_infiltration_to_idf_zone(idf, zone_list.name)
         # idf = self.add_schedules_by_name(idf, infiltration.schedule_names)
         return idf
 
     def add_space_use(
-        self, idf: IDFDocument, space_use: ZoneUse, zone_list: ZoneList
+        self, idf: IDFDocument, space_use: ZoneUse, zone_list: IDFObject
     ) -> IDFDocument:
         """Add the space use to the IDF model.
 
         Args:
             idf (IDFDocument): The IDF model to add the space use to.
             space_use (ZoneUse): The zone use template.
-            zone_list (ZoneList): The list of zones to add the space use to.
+            zone_list (IDFObject): The `ZoneList` of the zones to add the space use to.
 
         Returns:
             IDFDocument: The IDF model with the added space use.

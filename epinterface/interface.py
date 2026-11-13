@@ -1170,6 +1170,11 @@ def add_zone_list(doc: IDFDocument, name: str, zone_names: list[str]) -> IDFObje
     )
 
 
+def zone_list_names(zone_list: IDFObject) -> list[str]:
+    """The zone names of a `ZoneList` object, in order."""
+    return [group["zone_name"] for group in zone_list.to_dict().get("zones", [])]
+
+
 def ensure_fraction_type_limits(doc: IDFDocument) -> IDFObject:
     """Return the `Fraction` ScheduleTypeLimits, creating it (0 to 1) if missing.
 

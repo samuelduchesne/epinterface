@@ -17,25 +17,14 @@ from pydantic import (
     validate_call,
 )
 
+from epinterface.document import add_construction, add_or_replace, field_name
 from epinterface.interface import (
-    Construction,
-    ElectricEquipment,
     HeatRecoveryTypeType,
-    HVACTemplateThermostat,
-    HVACTemplateZoneIdealLoadsAirSystem,
     IdealLoadsLimitType,
     InfDesignFlowRateCalculationMethodType,
-    Lights,
-    Material,
     OutdoorAirEconomizerTypeType,
-    People,
-    ScheduleTypeLimits,
-    SimpleGlazingMaterial,
-    SizingParameters,
-    WaterUseEquipment,
-    ZoneInfiltrationDesignFlowRate,
-    ZoneList,
     add_constant_schedule,
+    zone_list_names,
 )
 from epinterface.schedules import HOURS_PER_YEAR, add_values_schedule
 
@@ -360,19 +349,15 @@ class GlazingConstructionSimple(
         Returns:
             IDFDocument: The updated IDF document.
         """
-        glazing_mat = SimpleGlazingMaterial(
-            Name=self.Name,
-            UFactor=self.UValue,
-            Solar_Heat_Gain_Coefficient=self.SHGF,
-            Visible_Transmittance=self.TVis,
+        add_or_replace(
+            idf,
+            "WindowMaterial:SimpleGlazingSystem",
+            self.Name,
+            u_factor=self.UValue,
+            solar_heat_gain_coefficient=self.SHGF,
+            visible_transmittance=self.TVis,
         )
-
-        construction = Construction(
-            name=self.Name,
-            layers=[glazing_mat],
-        )
-
-        idf = construction.add(idf)
+        add_construction(idf, self.Name, [self.Name])
         return idf
 
 
@@ -609,34 +594,37 @@ class OpaqueMaterial(
 class OpaqueConstructionLayer(MaterialWithThickness, NamedObject, extra="forbid"):
     """Layer of an opaque construction."""
 
-    def dereference_to_material(
-        self, material_defs: dict[str, OpaqueMaterial]
-    ) -> Material:
-        """Converts a referenced material into a direct EP material object.
+    def add_material_to_idf(
+        self, idf: IDFDocument, material_defs: dict[str, OpaqueMaterial]
+    ) -> IDFObject:
+        """Write the referenced material as a `Material` of this layer's thickness.
+
+        An identical material already in the document is reused.
 
         Args:
-            material_defs (list[OpaqueMaterial]): List of opaque material definitions.
+            idf (IDFDocument): The IDF document to write to.
+            material_defs (dict[str, OpaqueMaterial]): Opaque material definitions by name.
 
         Returns:
-            Material: The material object.
+            IDFObject: The `Material` object, named `{Name}_{Thickness}`.
         """
         if self.Name not in material_defs:
             raise ClimateStudioValueNotFound("Material", self.Name)
 
         mat_def = material_defs[self.Name]
-
-        material = Material(
-            Name=f"{self.Name}_{self.Thickness}",
-            Thickness=self.Thickness,
-            Conductivity=mat_def.Conductivity,
-            Density=mat_def.Density,
-            Specific_Heat=mat_def.SpecificHeat,
-            Thermal_Absorptance=mat_def.ThermalAbsorptance,
-            Solar_Absorptance=mat_def.SolarAbsorptance,
-            Visible_Absorptance=mat_def.VisibleAbsorptance,
-            Roughness=mat_def.Roughness,
+        return add_or_replace(
+            idf,
+            "Material",
+            f"{self.Name}_{self.Thickness}",
+            roughness=mat_def.Roughness,
+            thickness=self.Thickness,
+            conductivity=mat_def.Conductivity,
+            density=mat_def.Density,
+            specific_heat=mat_def.SpecificHeat,
+            thermal_absorptance=mat_def.ThermalAbsorptance,
+            solar_absorptance=mat_def.SolarAbsorptance,
+            visible_absorptance=mat_def.VisibleAbsorptance,
         )
-        return material
 
 
 def str_to_opaque_layer_list(v: str | list):
@@ -703,13 +691,10 @@ class OpaqueConstruction(
         Returns:
             IDFDocument: The updated IDF document.
         """
-        layers = [layer.dereference_to_material(material_defs) for layer in self.Layers]
-
-        construction = Construction(
-            name=self.Name,
-            layers=layers,
-        )
-        idf = construction.add(idf)
+        layer_names = [
+            layer.add_material_to_idf(idf, material_defs).name for layer in self.Layers
+        ]
+        add_construction(idf, self.Name, layer_names)
         return idf
 
 
@@ -970,79 +955,88 @@ class ZoneConditioning(
                 "Conditioning",
             )
 
-        thermostat = HVACTemplateThermostat(
-            Name=f"{self.Name}_{target_zone_name}_Thermostat",
-            Heating_Setpoint_Schedule_Name=(
-                self.HeatingSetpointSchedule
-                if not self.HeatingSetpointConstant
-                else None
-            ),
-            Cooling_Setpoint_Schedule_Name=(
-                self.CoolingSetpointSchedule
-                if not self.CoolingSetpointConstant
-                else None
-            ),
-            Constant_Cooling_Setpoint=(
-                self.CoolingSetpoint if self.CoolingSetpointConstant else None
-            ),
-            Constant_Heating_Setpoint=(
-                self.HeatingSetpoint if self.HeatingSetpointConstant else None
-            ),
-        )
-
         # TODO: better handling of alwayson/off schedule names
         # TODO: better handling of mech vent schedule
         logger.warning(
             f"Mechanical ventilation schedule is being ignored in zone {target_zone_name}."
         )
-        hvac_template = HVACTemplateZoneIdealLoadsAirSystem(
-            Zone_Name=target_zone_name,
-            Template_Thermostat_Name=thermostat.Name,
-            System_Availability_Schedule_Name="AlwaysOn",
-            Heating_Availability_Schedule_Name=(
+        thermostat = add_or_replace(
+            idf,
+            "HVACTemplate:Thermostat",
+            f"{self.Name}_{target_zone_name}_Thermostat",
+            heating_setpoint_schedule_name=(
+                self.HeatingSetpointSchedule
+                if not self.HeatingSetpointConstant
+                else None
+            ),
+            constant_heating_setpoint=(
+                self.HeatingSetpoint if self.HeatingSetpointConstant else None
+            ),
+            cooling_setpoint_schedule_name=(
+                self.CoolingSetpointSchedule
+                if not self.CoolingSetpointConstant
+                else None
+            ),
+            constant_cooling_setpoint=(
+                self.CoolingSetpoint if self.CoolingSetpointConstant else None
+            ),
+        )
+        # The template has no name, so it is always added (never reused).
+        add_or_replace(
+            idf,
+            "HVACTemplate:Zone:IdealLoadsAirSystem",
+            "",
+            zone_name=target_zone_name,
+            template_thermostat_name=thermostat.name,
+            system_availability_schedule_name="AlwaysOn",
+            maximum_heating_supply_air_temperature=self.MaxHeatSupplyAirTemp,
+            minimum_cooling_supply_air_temperature=self.MinCoolSupplyAirTemp,
+            maximum_heating_supply_air_humidity_ratio=0.0156,
+            minimum_cooling_supply_air_humidity_ratio=0.0077,
+            heating_limit=self.HeatingLimitType,
+            maximum_heating_air_flow_rate=self.MaxHeatFlow
+            if not self.Autosize
+            else "autosize",
+            maximum_sensible_heating_capacity=self.MaxHeatingCapacity
+            if not self.Autosize
+            else "autosize",
+            cooling_limit=self.CoolingLimitType,
+            maximum_cooling_air_flow_rate=self.MaxCoolFlow
+            if not self.Autosize
+            else "autosize",
+            maximum_total_cooling_capacity=self.MaxCoolingCapacity
+            if not self.Autosize
+            else "autosize",
+            heating_availability_schedule_name=(
                 self.HeatingSchedule if self.HeatIsOn else "AlwaysOff"
             ),
-            Cooling_Availability_Schedule_Name=(
+            cooling_availability_schedule_name=(
                 self.CoolingSchedule if self.CoolIsOn else None
             ),
-            Maximum_Heating_Supply_Air_Temperature=self.MaxHeatSupplyAirTemp,
-            Maximum_Heating_Air_Flow_Rate=self.MaxHeatFlow
-            if not self.Autosize
-            else "autosize",
-            Maximum_Sensible_Heating_Capacity=self.MaxHeatingCapacity
-            if not self.Autosize
-            else "autosize",
-            Minimum_Cooling_Supply_Air_Temperature=self.MinCoolSupplyAirTemp,
-            Maximum_Cooling_Air_Flow_Rate=self.MaxCoolFlow
-            if not self.Autosize
-            else "autosize",
-            Maximum_Total_Cooling_Capacity=self.MaxCoolingCapacity
-            if not self.Autosize
-            else "autosize",
-            Heating_Limit=self.HeatingLimitType,
-            Cooling_Limit=self.CoolingLimitType,
-            Humidification_Control_Type="None",
-            Outdoor_Air_Method="Sum" if self.MechVentIsOn else "None",
-            Outdoor_Air_Flow_Rate_per_Person=self.MinFreshAirPerson
+            dehumidification_control_type="None",
+            cooling_sensible_heat_ratio=0.7,
+            dehumidification_setpoint=60.0,
+            humidification_control_type="None",
+            humidification_setpoint=30.0,
+            outdoor_air_method="Sum" if self.MechVentIsOn else "None",
+            outdoor_air_flow_rate_per_person=self.MinFreshAirPerson
             / 1000,  # convert to m3
-            Outdoor_Air_Flow_Rate_per_Zone_Floor_Area=self.MinFreshAirArea
+            outdoor_air_flow_rate_per_zone_floor_area=self.MinFreshAirArea
             / 1000,  # convert to m3
-            Outdoor_Air_Flow_Rate_per_Zone=0,
-            Demand_Controlled_Ventilation_Type="None",
-            Outdoor_Air_Economizer_Type=self.EconomizerType,
-            Heat_Recovery_Type=self.HeatRecoveryType,
-            Sensible_Heat_Recovery_Effectiveness=self.HeatRecoveryEfficiencySensible,
-            Latent_Heat_Recovery_Effectiveness=self.HeatRecoveryEfficiencyLatent,
+            outdoor_air_flow_rate_per_zone=0.0,
+            demand_controlled_ventilation_type="None",
+            outdoor_air_economizer_type=self.EconomizerType,
+            heat_recovery_type=self.HeatRecoveryType,
+            sensible_heat_recovery_effectiveness=self.HeatRecoveryEfficiencySensible,
+            latent_heat_recovery_effectiveness=self.HeatRecoveryEfficiencyLatent,
         )
-
-        idf = thermostat.add(idf)
-        idf = hvac_template.add(idf)
         if self.Autosize:
-            sizing = SizingParameters(
-                Heating_Sizing_Factor=self.HeatingSizingFactor,
-                Cooling_Sizing_Factor=self.CoolingSizingFactor,
+            add_or_replace(
+                idf,
+                "Sizing:Parameters",
+                heating_sizing_factor=self.HeatingSizingFactor,
+                cooling_sizing_factor=self.CoolingSizingFactor,
             )
-            idf = sizing.add(idf)
         return idf
 
 
@@ -1162,21 +1156,20 @@ class ZoneInfiltration(
         inf_schedule = add_constant_schedule(
             idf, infiltration_schedule_name, 1, "Fraction"
         )
-        inf = ZoneInfiltrationDesignFlowRate(
-            Name=f"{target_zone_or_zone_list_name}_{self.Name}_Infiltration",
-            Zone_or_ZoneList_Name=target_zone_or_zone_list_name,
-            Schedule_Name=inf_schedule.name,
-            Design_Flow_Rate_Calculation_Method=self.CalculationMethod,
-            Flow_Rate_per_Exterior_Surface_Area=self.InfiltrationFlowPerExteriorSurfaceArea,
-            Air_Changes_per_Hour=self.InfiltrationAch,
-            Flow_Rate_per_Floor_Area=None,
-            Design_Flow_Rate=None,
-            Constant_Term_Coefficient=self.InfiltrationConstantCoefficient,
-            Temperature_Term_Coefficient=self.InfiltrationTemperatureCoefficient,
-            Velocity_Term_Coefficient=self.InfiltrationWindVelocityCoefficient,
-            Velocity_Squared_Term_Coefficient=self.InfiltrationWindVelocitySquaredCoefficient,
+        add_or_replace(
+            idf,
+            "ZoneInfiltration:DesignFlowRate",
+            f"{target_zone_or_zone_list_name}_{self.Name}_Infiltration",
+            zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
+            schedule_name=inf_schedule.name,
+            design_flow_rate_calculation_method=self.CalculationMethod,
+            flow_rate_per_exterior_surface_area=self.InfiltrationFlowPerExteriorSurfaceArea,
+            air_changes_per_hour=self.InfiltrationAch,
+            constant_term_coefficient=self.InfiltrationConstantCoefficient,
+            temperature_term_coefficient=self.InfiltrationTemperatureCoefficient,
+            velocity_term_coefficient=self.InfiltrationWindVelocityCoefficient,
+            velocity_squared_term_coefficient=self.InfiltrationWindVelocitySquaredCoefficient,
         )
-        idf = inf.add(idf)
         return idf
 
 
@@ -1347,21 +1340,23 @@ class ZoneLoad(
         logger.warning(
             f"Ignoring IlluminanceTarget for zone(s) {target_zone_or_zone_list_name}."
         )
-        lights = Lights(
-            Name=f"{target_zone_or_zone_list_name}_{self.Name.join('_')}_Lights",
-            Zone_or_ZoneList_Name=target_zone_or_zone_list_name,
-            Schedule_Name=self.LightsAvailabilitySchedule,
-            Design_Level_Calculation_Method="Watts/Area",
-            Watts_per_Zone_Floor_Area=self.LightingPowerDensity,
-            Watts_per_Person=None,
-            Lighting_Level=None,
-            Return_Air_Fraction=0,
-            Fraction_Radiant=0.42,
-            Fraction_Visible=0.18,
-            Fraction_Replaceable=1,
-            EndUse_Subcategory=None,
+        add_or_replace(
+            idf,
+            "Lights",
+            f"{target_zone_or_zone_list_name}_{self.Name.join('_')}_Lights",
+            zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
+            schedule_name=self.LightsAvailabilitySchedule,
+            design_level_calculation_method="Watts/Area",
+            **{
+                field_name(
+                    idf, "Lights", "watts_per_floor_area", "watts_per_zone_floor_area"
+                ): self.LightingPowerDensity
+            },
+            return_air_fraction=0.0,
+            fraction_radiant=0.42,
+            fraction_visible=0.18,
+            fraction_replaceable=1.0,
         )
-        idf = lights.add(idf)
         return idf
 
     def add_people_to_idf_zone(
@@ -1383,11 +1378,13 @@ class ZoneLoad(
             f"{target_zone_or_zone_list_name}_{self.Name}_Activity_Schedule"
         )
         if "AnyNumber" not in idf["ScheduleTypeLimits"]:
-            ScheduleTypeLimits(
-                Name="AnyNumber",
-                Numeric_Type="Continuous",
-                Unit_Type="Dimensionless",
-            ).add(idf)
+            add_or_replace(
+                idf,
+                "ScheduleTypeLimits",
+                "AnyNumber",
+                numeric_type="Continuous",
+                unit_type="Dimensionless",
+            )
         activity_sch_year = add_constant_schedule(
             idf, activity_sch_name, self.MetabolicRate_W, "AnyNumber"
         )
@@ -1398,20 +1395,19 @@ class ZoneLoad(
         logger.warning(
             f"Ignoring AirspeedSchedule for zone(s) {target_zone_or_zone_list_name}."
         )
-        people = People(
-            Name=f"{target_zone_or_zone_list_name}_{self.Name.join('_')}_People",
-            Zone_or_ZoneList_Name=target_zone_or_zone_list_name,
-            Number_of_People_Schedule_Name=self.OccupancySchedule,
-            Number_of_People_Calculation_Method="People/Area",
-            Number_of_People=None,
-            Floor_Area_per_Person=None,
-            People_per_Floor_Area=self.PeopleDensity,
-            Fraction_Radiant=0.3,
-            Sensible_Heat_Fraction="autocalculate",
-            Activity_Level_Schedule_Name=activity_sch_year.name,
+        add_or_replace(
+            idf,
+            "People",
+            f"{target_zone_or_zone_list_name}_{self.Name.join('_')}_People",
+            zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
+            number_of_people_schedule_name=self.OccupancySchedule,
+            number_of_people_calculation_method="People/Area",
+            people_per_floor_area=self.PeopleDensity,
+            fraction_radiant=0.3,
+            sensible_heat_fraction="autocalculate",
+            activity_level_schedule_name=activity_sch_year.name,
+            enable_ashrae_55_comfort_warnings="No",
         )
-
-        idf = people.add(idf)
         return idf
 
     def add_equipment_to_idf_zone(
@@ -1433,19 +1429,25 @@ class ZoneLoad(
             f"Adding equipment to zone with schedule {self.EquipmentAvailabilitySchedule}.  Make sure this schedule exists."
         )
 
-        equipment = ElectricEquipment(
-            Name=f"{target_zone_or_zone_list_name}_{self.Name.join('_')}_Equipment",
-            Zone_or_ZoneList_Name=target_zone_or_zone_list_name,
-            Schedule_Name=self.EquipmentAvailabilitySchedule,
-            Design_Level_Calculation_Method="Watts/Area",
-            Watts_per_Zone_Floor_Area=self.EquipmentPowerDensity,
-            Watts_per_Person=None,
-            Fraction_Latent=0,
-            Fraction_Radiant=0.2,
-            Fraction_Lost=0,
-            EndUse_Subcategory=None,
+        add_or_replace(
+            idf,
+            "ElectricEquipment",
+            f"{target_zone_or_zone_list_name}_{self.Name.join('_')}_Equipment",
+            zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
+            schedule_name=self.EquipmentAvailabilitySchedule,
+            design_level_calculation_method="Watts/Area",
+            **{
+                field_name(
+                    idf,
+                    "ElectricEquipment",
+                    "watts_per_floor_area",
+                    "watts_per_zone_floor_area",
+                ): self.EquipmentPowerDensity
+            },
+            fraction_latent=0.0,
+            fraction_radiant=0.2,
+            fraction_lost=0.0,
         )
-        idf = equipment.add(idf)
         return idf
 
     def add_loads_to_idf_zone(
@@ -1536,13 +1538,15 @@ class ZoneHotWater(
         total_flow_rate_per_s = total_flow_rate / 3600  # m3/s
 
         if "Temperature" not in idf["ScheduleTypeLimits"]:
-            ScheduleTypeLimits(
-                Name="Temperature",
-                Lower_Limit_Value=-60,
-                Upper_Limit_Value=200,
-                Numeric_Type="Continuous",
-                Unit_Type="Dimensionless",
-            ).add(idf)
+            add_or_replace(
+                idf,
+                "ScheduleTypeLimits",
+                "Temperature",
+                lower_limit_value=-60.0,
+                upper_limit_value=200.0,
+                numeric_type="Continuous",
+                unit_type="Dimensionless",
+            )
 
         target_temperature_yr_schedule = add_constant_schedule(
             idf,
@@ -1557,19 +1561,18 @@ class ZoneHotWater(
             "Temperature",
         )
 
-        hot_water = WaterUseEquipment(
-            Name=f"{target_zone_name}_{self.Name}_HotWater",
-            EndUse_Subcategory="Domestic Hot Water",
-            Peak_Flow_Rate=total_flow_rate_per_s,
-            Flow_Rate_Fraction_Schedule_Name=self.WaterSchedule,
-            Zone_Name=target_zone_name,
-            Target_Temperature_Schedule_Name=target_temperature_yr_schedule.name,
-            Hot_Water_Supply_Temperature_Schedule_Name=target_temperature_yr_schedule.name,
-            Cold_Water_Supply_Temperature_Schedule_Name=inlet_temperature_yr_schedule.name,
-            Sensible_Fraction_Schedule_Name=None,
-            Latent_Fraction_Schedule_Name=None,
+        add_or_replace(
+            idf,
+            "WaterUse:Equipment",
+            f"{target_zone_name}_{self.Name}_HotWater",
+            end_use_subcategory="Domestic Hot Water",
+            peak_flow_rate=float(total_flow_rate_per_s),
+            flow_rate_fraction_schedule_name=self.WaterSchedule,
+            target_temperature_schedule_name=target_temperature_yr_schedule.name,
+            hot_water_supply_temperature_schedule_name=target_temperature_yr_schedule.name,
+            cold_water_supply_temperature_schedule_name=inlet_temperature_yr_schedule.name,
+            zone_name=target_zone_name,
         )
-        idf = hot_water.add(idf)
         return idf
 
 
@@ -1637,7 +1640,7 @@ class ZoneUse(
         return idf
 
     def add_space_use_to_idf_zone(
-        self, idf: IDFDocument, target_zone: str | ZoneList
+        self, idf: IDFDocument, target_zone: str | IDFObject
     ) -> IDFDocument:
         """Add the use to an IDF zone.
 
@@ -1645,17 +1648,17 @@ class ZoneUse(
 
         Args:
             idf (IDFDocument): The IDF document to add the use to.
-            target_zone (str | ZoneList): The name of the zone to add the use to.
+            target_zone (str | IDFObject): The name of the zone, or the `ZoneList`, to add the use to.
 
         Returns:
             IDFDocument: The updated IDF document.
         """
-        loads_target = target_zone if isinstance(target_zone, str) else target_zone.Name
+        loads_target = target_zone if isinstance(target_zone, str) else target_zone.name
         idf = self.add_loads_to_idf_zone(idf, loads_target)
         if isinstance(target_zone, str):
             idf = self.add_conditioning_to_idf_zone(idf, target_zone)
         else:
-            for zone in target_zone.Names:
+            for zone in zone_list_names(target_zone):
                 idf = self.add_conditioning_to_idf_zone(idf, zone)
         return idf
 
@@ -1694,14 +1697,15 @@ class LibraryScheduleTypeLimits(BaseModel):
         Returns:
             IDFObject: The `ScheduleTypeLimits` object.
         """
-        ScheduleTypeLimits(
-            Name=self.Name,
-            Lower_Limit_Value=self.LowerLimit,
-            Upper_Limit_Value=self.UpperLimit,
-            Numeric_Type=self.NumericType,
-            Unit_Type=self.UnitType,  # pyright: ignore [reportArgumentType]
-        ).add(idf)
-        return idf["ScheduleTypeLimits"][self.Name]
+        return add_or_replace(
+            idf,
+            "ScheduleTypeLimits",
+            self.Name,
+            lower_limit_value=self.LowerLimit,
+            upper_limit_value=self.UpperLimit,
+            numeric_type=self.NumericType,
+            unit_type=self.UnitType,
+        )
 
 
 class LibrarySchedule(BaseModel):
