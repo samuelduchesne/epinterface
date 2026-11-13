@@ -57,6 +57,20 @@ def _build_geometry_grid() -> dict[str, ShoeboxGeometry]:
 
 GEOMETRY_GRID: dict[str, ShoeboxGeometry] = _build_geometry_grid()
 
+# A case where geomeppy's surface matching went wrong (floating point heights);
+# the idfkit geometry deliberately differs from geomeppy here.
+GEOMEPPY_MISMATCHED_KEY = "core/perim-False-None-3-h4.321"
+GEOMETRY_SURFACE_CASES: dict[str, ShoeboxGeometry] = {
+    **GEOMETRY_GRID,
+    GEOMEPPY_MISMATCHED_KEY: ShoeboxGeometry(
+        **{**_SHOEBOX, "h": 4.321},
+        num_stories=3,
+        zoning="core/perim",
+        basement=False,
+        roof_height=None,
+    ),
+}
+
 
 def _by_storey_plain(db: Prisma):
     _, zone = deep_fetcher.Zone.get_deep_object("default_zone", db)

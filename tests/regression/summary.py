@@ -5,6 +5,8 @@ import sqlite3
 from pathlib import Path
 
 import pandas as pd
+from idfkit import IDFDocument, IDFObject, calculate_surface_area
+from idfkit.geometry import get_surface_coords
 
 _EXCLUDED_ROWS = (
     "Total",
@@ -67,3 +69,57 @@ def zone_names(doc_text: str) -> list[str]:
         m.group(1).strip()
         for m in re.finditer(r"(?im)^\s*Zone\s*,\s*([^,;]+?)\s*[,;]", without_comments)
     ]
+
+
+def surface_records(doc: IDFDocument) -> list[dict]:
+    """Describe every surface without relying on surface names or vertex order.
+
+    Building surfaces, windows and shading surfaces are each described by their
+    zone, type, boundary condition, the zone on the other side of a
+    `Surface` boundary, construction, area and centroid.
+
+    Args:
+        doc (IDFDocument): The document to describe.
+
+    Returns:
+        list[dict]: One record per surface, sorted.
+    """
+    surfaces = doc["BuildingSurface:Detailed"]
+
+    def record(kind: str, srf: IDFObject, zone: str, boundary: str, other: str):
+        poly = get_surface_coords(srf)
+        assert poly is not None
+        is_shading = kind == "shading"
+        return {
+            "kind": kind,
+            "zone": zone,
+            "surface_type": "" if is_shading else str(srf.surface_type).lower(),
+            "boundary": boundary.lower(),
+            "boundary_zone": other,
+            "construction": "" if is_shading else str(srf.construction_name or ""),
+            "area": round(calculate_surface_area(srf), 6) + 0.0,
+            "centroid": [round(c, 6) + 0.0 for c in poly.centroid.as_tuple()],
+        }
+
+    records = []
+    for srf in surfaces:
+        partner = surfaces.get(str(srf.outside_boundary_condition_object or ""))
+        records.append(
+            record(
+                "surface",
+                srf,
+                str(srf.zone_name),
+                str(srf.outside_boundary_condition),
+                str(partner.zone_name) if partner is not None else "",
+            )
+        )
+    for win in doc["FenestrationSurface:Detailed"]:
+        parent = surfaces[str(win.building_surface_name)]
+        records.append(record("window", win, str(parent.zone_name), "", ""))
+    for shading_type in ("Shading:Site:Detailed", "Shading:Building:Detailed"):
+        for srf in doc[shading_type]:
+            records.append(record("shading", srf, "", "", ""))
+    return sorted(
+        records,
+        key=lambda r: (r["kind"], r["zone"], r["surface_type"], r["centroid"]),
+    )
