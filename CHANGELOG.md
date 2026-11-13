@@ -56,6 +56,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - **Breaking:** `ddy_interface_bayes` (unused).
+- **Breaking:** the `epinterface.interface` classes that mirrored one
+  EnergyPlus object each: `ScheduleTypeLimits`, `SimulationControl`,
+  `RunPeriod`, `Timestep`, `SizingParameters`, `SiteGroundTemperature`,
+  `InternalMass`, `Material`, `SimpleGlazingMaterial`, `AirGapMaterial`,
+  `NoMassMaterial`, `Construction`, `HVACTemplateThermostat`,
+  `HVACTemplateZoneIdealLoadsAirSystem`, `WaterUseEquipment`,
+  `ElectricEquipment`, `Lights`, `ZoneVentilationWindAndStackOpenArea`,
+  `ZoneInfiltrationDesignFlowRate`, `People`, `ScheduleDayHourly`,
+  `ScheduleWeekDaily`, `ScheduleYear`, `ZoneList` and their base `BaseObj`
+  (with its `extract()` readers). Write objects with idfkit's `doc.add` and
+  idfkit's snake_case field names instead, or with
+  `epinterface.document.add_or_replace`, which reuses an identical object of
+  the same name and replaces a different one. `field_name` picks a field's
+  name for the document's EnergyPlus version, `add_construction` writes a
+  layered construction, and `add_site_ground_temperature`, `add_zone_list`
+  and `BaseMaterial.add_layer_to_idf` replace
+  `SiteGroundTemperature.FromValues`, `ZoneList` and `BaseMaterial.as_layer`.
+  The literal types, the default material library and the schedule helpers
+  stay in `epinterface.interface`. The written models are unchanged.
+- **Breaking:** methods that returned those classes now write and return the
+  idfkit object: `ConstructionLayerComponent.ep_material` is replaced by
+  `add_to_idf(doc)`, climate_studio's
+  `OpaqueConstructionLayer.dereference_to_material` by
+  `add_material_to_idf(idf, material_defs)`, and
+  `ZoneOperationsComponent.add_thermostat_to_idf_zone` returns the
+  `HVACTemplate:Thermostat` object. `AddedZoneLists` holds lists of zone names,
+  climate_studio's zone lists are the written `ZoneList` objects, and
+  `TypeLimits` entries are `TypeLimitsSpec` dataclasses with the same
+  `Lower_Limit_Value` and `Upper_Limit_Value` attributes.
 
 ### Fixed
 
