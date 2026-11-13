@@ -2,8 +2,7 @@
 
 from logging import getLogger
 
-from archetypal.idfclass import IDF
-from archetypal.schedule import Schedule, ScheduleTypeLimits
+from idfkit import IDFDocument
 
 from epinterface.constants import assumed_constants
 from epinterface.geometry import get_zone_floor_area, get_zone_glazed_area
@@ -11,10 +10,12 @@ from epinterface.interface import (
     HVACTemplateThermostat,
     HVACTemplateZoneIdealLoadsAirSystem,
     ScheduleDayHourly,
+    ScheduleTypeLimits,
     WaterUseEquipment,
     ZoneVentilationWindAndStackOpenArea,
 )
 from epinterface.sbem.common import MetadataMixin, NamedObject
+from epinterface.sbem.components.schedules import add_constant_year_schedule
 from epinterface.sbem.components.space_use import ZoneSpaceUseComponent
 from epinterface.sbem.components.systems import DHWComponent, ZoneHVACComponent
 
@@ -32,7 +33,9 @@ class ZoneOperationsComponent(
     HVAC: ZoneHVACComponent
     DHW: DHWComponent
 
-    def add_water_use_to_idf_zone(self, idf: IDF, target_zone_name: str) -> IDF:
+    def add_water_use_to_idf_zone(
+        self, doc: IDFDocument, target_zone_name: str
+    ) -> IDFDocument:
         """Handle adding water use to the zone based on both DHW and Operations.SpaceUse.WaterUse.
 
         We choose to execute this from the zone component interface because it requires context from both
@@ -56,16 +59,16 @@ class ZoneOperationsComponent(
         # that hook should probably be moved up.
 
         Args:
-            idf (IDF): The IDF object to add the operations to.
+            doc (IDFDocument): The IDF document to add the operations to.
             target_zone_name (str): The name of the zone to add the operations to.
 
         Returns:
-            idf (IDF): The updated IDF object.
+            doc (IDFDocument): The updated IDF document.
         """
         # TODO: should IsOn definitely live in DHW? should dhw be nullable?
         # should it live in spaceuse.wateruse for consistency?
         if not self.DHW.IsOn:
-            return idf
+            return doc
 
         # Acquire the relevant data fields
         flow_rate_per_person_per_day = (
@@ -79,12 +82,10 @@ class ZoneOperationsComponent(
 
         # determine zone area to then compute total people
         # we will do this by finding all matching surfaces and computing their areas.
-        zone = next(
-            (x for x in idf.idfobjects["ZONE"] if x.Name == target_zone_name), None
-        )
+        zone = doc["Zone"].get(target_zone_name)
         if zone is None:
             raise ValueError(f"NO_ZONE:{target_zone_name}")
-        area = get_zone_floor_area(idf, zone.Name)
+        area = get_zone_floor_area(doc, zone.name)
         total_ppl = occupant_density * area
 
         # Compute final flow rates.
@@ -92,45 +93,37 @@ class ZoneOperationsComponent(
         avg_flow_per_s = total_flow_per_day / (3600 * 24)  # m3/s
         # TODO: Update this rather than being constant rate
 
-        lim = "Temperature"
-        if not idf.getobject("SCHEDULETYPELIMITS", lim):
-            lim = ScheduleTypeLimits(
+        if "Temperature" not in doc["ScheduleTypeLimits"]:
+            ScheduleTypeLimits(
                 Name="Temperature",
-                LowerLimit=-60,
-                UpperLimit=200,
-            )
-            lim.to_epbunch(idf)
+                Lower_Limit_Value=-100,
+                Upper_Limit_Value=100,
+                Numeric_Type="Continuous",
+                Unit_Type="Dimensionless",
+            ).add(doc)
 
         # TODO: should we be using time-varying temperatures?
-        target_temperature_schedule = Schedule.constant_schedule(
-            value=water_supply_temperature,  # pyright: ignore [reportArgumentType]
-            Name=f"{water_use_name}_TargetWaterTemperatureSch",
-            Type="Temperature",
+        target_temperature_yr_schedule = add_constant_year_schedule(
+            doc,
+            f"{water_use_name}_TargetWaterTemperatureSch",
+            water_supply_temperature,
+            "Temperature",
         )
-        inlet_temperature_schedule = Schedule.constant_schedule(
-            value=water_temperature_inlet,  # pyright: ignore [reportArgumentType]
-            Name=f"{water_use_name}_InletWaterTemperatureSch",
-            Type="Temperature",
+        inlet_temperature_yr_schedule = add_constant_year_schedule(
+            doc,
+            f"{water_use_name}_InletWaterTemperatureSch",
+            water_temperature_inlet,
+            "Temperature",
         )
-
-        target_temperature_yr_schedule, *_ = (
-            target_temperature_schedule.to_year_week_day()
-        )
-        inlet_temperature_yr_schedule, *_ = (
-            inlet_temperature_schedule.to_year_week_day()
-        )
-
-        target_temperature_yr_schedule.to_epbunch(idf)
-        inlet_temperature_yr_schedule.to_epbunch(idf)
 
         if water_use_frac_sched.schedule_type_limits != "Fraction":
             msg = f"WATER_USE_FRACTION_SCHEDULE_TYPE_NOT_FRACTION:{water_use_name}"
             raise ValueError(msg)
 
-        idf, water_use_frac_sch_name = water_use_frac_sched.add_year_to_idf(
-            idf, name_prefix=None
+        doc, water_use_frac_sch_name = water_use_frac_sched.add_year_to_idf(
+            doc, name_prefix=None
         )
-        # sch_obj = idf.getobject("SCHEDULE:YEAR", water_use_frac_sch_name)
+        # sch_obj = doc["Schedule:Year"][water_use_frac_sch_name]
         # arch_sch = Schedule.from_epbunch(sch_obj)
         # values = np.array(arch_sch.Values)
         # avg_fractional_value = np.sum(values) / 8760
@@ -145,26 +138,26 @@ class ZoneOperationsComponent(
             Peak_Flow_Rate=peak_flow_rate_per_s,
             Flow_Rate_Fraction_Schedule_Name=water_use_frac_sch_name,
             Zone_Name=target_zone_name,
-            Target_Temperature_Schedule_Name=target_temperature_yr_schedule.Name,
-            Hot_Water_Supply_Temperature_Schedule_Name=target_temperature_schedule.Name,
-            Cold_Water_Supply_Temperature_Schedule_Name=inlet_temperature_schedule.Name,
+            Target_Temperature_Schedule_Name=target_temperature_yr_schedule.name,
+            Hot_Water_Supply_Temperature_Schedule_Name=target_temperature_yr_schedule.name,
+            Cold_Water_Supply_Temperature_Schedule_Name=inlet_temperature_yr_schedule.name,
             Sensible_Fraction_Schedule_Name=None,
             Latent_Fraction_Schedule_Name=None,
         )
-        idf = hot_water.add(idf)
-        return idf
+        doc = hot_water.add(doc)
+        return doc
 
     def add_thermostat_to_idf_zone(
-        self, idf: IDF, target_zone_name: str
+        self, doc: IDFDocument, target_zone_name: str
     ) -> HVACTemplateThermostat:
         """Add a thermostat to the zone.
 
         Args:
-            idf (IDF): The IDF object to add the thermostat to.
+            doc (IDFDocument): The IDF document to add the thermostat to.
             target_zone_name (str): The name of the zone to add the thermostat to.
 
         Returns:
-            idf (IDF): The updated IDF object.
+            doc (IDFDocument): The updated IDF document.
         """
         thermostat_name = (
             f"{target_zone_name}_{self.SpaceUse.Thermostat.safe_name}_THERMOSTAT"
@@ -204,9 +197,9 @@ class ZoneOperationsComponent(
                 Hour_23=heat_high,
                 Hour_24=heat_high,
             )
-            idf = heating_design_day.add(idf)
-            idf, heating_schedule_name = heating_schedule.add_year_to_idf(
-                idf,
+            doc = heating_design_day.add(doc)
+            doc, heating_schedule_name = heating_schedule.add_year_to_idf(
+                doc,
                 name_prefix=None,
                 winter_design_day_sch_name=heating_design_day.Name,
                 summer_design_day_sch_name=heating_design_day.Name,
@@ -242,9 +235,9 @@ class ZoneOperationsComponent(
                 Hour_24=cool_low,
             )
 
-            idf = cooling_design_day.add(idf)
-            idf, cooling_schedule_name = cooling_schedule.add_year_to_idf(
-                idf,
+            doc = cooling_design_day.add(doc)
+            doc, cooling_schedule_name = cooling_schedule.add_year_to_idf(
+                doc,
                 name_prefix=None,
                 winter_design_day_sch_name=cooling_design_day.Name,
                 summer_design_day_sch_name=cooling_design_day.Name,
@@ -262,13 +255,15 @@ class ZoneOperationsComponent(
             else None,
         )
 
-        idf = thermostat.add(idf)
+        doc = thermostat.add(doc)
 
         return thermostat
 
-    def add_conditioning_to_idf_zone(self, idf: IDF, target_zone_name: str) -> IDF:
+    def add_conditioning_to_idf_zone(
+        self, doc: IDFDocument, target_zone_name: str
+    ) -> IDFDocument:
         """Add conditioning to an IDF zone."""
-        thermostat = self.add_thermostat_to_idf_zone(idf, target_zone_name)
+        thermostat = self.add_thermostat_to_idf_zone(doc, target_zone_name)
         if self.HVAC.Ventilation.DCV != "NoDCV":
             # check the design spec outdoor air for the DCV
             raise NotImplementedError("DCV not implemented.")
@@ -306,22 +301,22 @@ class ZoneOperationsComponent(
             or self.HVAC.Ventilation.Provider == "Both"
             else "None",
         )
-        idf = hvac_template.add(idf)
+        doc = hvac_template.add(doc)
 
         if self.HVAC.Ventilation.Provider == "Natural":
-            # total_window_area = calculate_window_area_for_zone(idf, target_zone_name)
-            total_window_area = get_zone_glazed_area(idf, target_zone_name)
+            # total_window_area = calculate_window_area_for_zone(doc, target_zone_name)
+            total_window_area = get_zone_glazed_area(doc, target_zone_name)
 
             if total_window_area == 0:
                 logger.warning(
                     f"No windows found for natural ventilation in zone {target_zone_name}"
                 )
-                return idf
+                return doc
             vent_wind_stack_name = f"{target_zone_name}_{self.SpaceUse.Thermostat.safe_name}_{self.HVAC.Ventilation.safe_name}_VENTILATION_WIND_AND_STACK_OPEN_AREA"
 
-            idf, vent_wind_stack_name_sch = (
+            doc, vent_wind_stack_name_sch = (
                 self.HVAC.Ventilation.Schedule.add_year_to_idf(
-                    idf,
+                    doc,
                     name_prefix=None,
                     summer_design_day_sch_name="d_AllOff_00",
                     winter_design_day_sch_name="d_AllOff_00",
@@ -337,6 +332,6 @@ class ZoneOperationsComponent(
                 Opening_Area=total_window_area,
                 Opening_Area_Fraction_Schedule_Name=vent_wind_stack_name_sch,
             )
-            idf = ventilation_wind_and_stack_open_area.add(idf)
+            doc = ventilation_wind_and_stack_open_area.add(doc)
 
-        return idf
+        return doc

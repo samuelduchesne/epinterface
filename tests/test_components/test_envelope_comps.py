@@ -1,7 +1,7 @@
-"""Tests for adding envelope components to an IDF."""
+"""Tests for adding envelope components to an IDF document."""
 
 import pytest
-from archetypal.idfclass import IDF
+from idfkit import IDFDocument
 
 from epinterface.interface import InfDesignFlowRateCalculationMethodType
 from epinterface.sbem.components.envelope import InfiltrationComponent
@@ -15,7 +15,7 @@ from epinterface.sbem.components.envelope import InfiltrationComponent
     ],
 )
 def test_infiltration_comp(
-    idf: IDF,
+    doc: IDFDocument,
     is_on: bool,
     rates: tuple[float, float],
     calculation_method_main: InfDesignFlowRateCalculationMethodType,
@@ -42,8 +42,8 @@ def test_infiltration_comp(
         WindVelocitySquaredCoefficient=0,
         AFNAirMassFlowCoefficientCrack=0,
     )
-    assert not idf.getobject("ZONEINFILTRATION:DESIGNFLOWRATE", expected_main_inf_name)
-    assert not idf.getobject("ZONEINFILTRATION:DESIGNFLOWRATE", expected_attic_inf_name)
+    assert expected_main_inf_name not in doc["ZoneInfiltration:DesignFlowRate"]
+    assert expected_attic_inf_name not in doc["ZoneInfiltration:DesignFlowRate"]
     attic_infiltration = infiltration.model_copy(
         deep=True,
         update={
@@ -53,22 +53,20 @@ def test_infiltration_comp(
             "CalculationMethod": calculation_method_attic,
         },
     )
-    idf = infiltration.add_infiltration_to_idf_zone(idf, main_zone_name)
-    idf = attic_infiltration.add_infiltration_to_idf_zone(idf, attic_zone_name)
+    doc = infiltration.add_infiltration_to_idf_zone(doc, main_zone_name)
+    doc = attic_infiltration.add_infiltration_to_idf_zone(doc, attic_zone_name)
 
-    main_inf = idf.getobject("ZONEINFILTRATION:DESIGNFLOWRATE", expected_main_inf_name)
-    attic_inf = idf.getobject(
-        "ZONEINFILTRATION:DESIGNFLOWRATE", expected_attic_inf_name
-    )
+    main_inf = doc["ZoneInfiltration:DesignFlowRate"].get(expected_main_inf_name)
+    attic_inf = doc["ZoneInfiltration:DesignFlowRate"].get(expected_attic_inf_name)
     if is_on:
         assert main_inf is not None
-        assert main_inf.Air_Changes_per_Hour == main_ach
-        assert main_inf.Flow_Rate_per_Exterior_Surface_Area == main_flow_rate
-        assert main_inf.Design_Flow_Rate_Calculation_Method == calculation_method_main
+        assert main_inf.air_changes_per_hour == main_ach
+        assert main_inf.flow_rate_per_exterior_surface_area == main_flow_rate
+        assert main_inf.design_flow_rate_calculation_method == calculation_method_main
         assert attic_inf is not None
-        assert attic_inf.Flow_Rate_per_Exterior_Surface_Area == attic_flow_rate
-        assert attic_inf.Air_Changes_per_Hour == attic_ach
-        assert attic_inf.Design_Flow_Rate_Calculation_Method == calculation_method_attic
+        assert attic_inf.flow_rate_per_exterior_surface_area == attic_flow_rate
+        assert attic_inf.air_changes_per_hour == attic_ach
+        assert attic_inf.design_flow_rate_calculation_method == calculation_method_attic
     else:
         assert main_inf is None
         assert attic_inf is None

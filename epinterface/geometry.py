@@ -6,8 +6,8 @@ from typing import Literal, cast
 
 import numpy as np
 from archetypal.idfclass import IDF
-from geomeppy.geom.polygons import Polygon3D
 from geomeppy.geom.vectors import Vector2D
+from idfkit import IDFDocument, calculate_surface_area
 from numpy.typing import ArrayLike
 from pydantic import BaseModel, Field
 from shapely import LineString, Polygon, from_wkt
@@ -768,14 +768,14 @@ class ShoeboxGeometry(BaseModel):
         return idf
 
 
-def get_zone_floor_area(idf: IDF, zone_name: str) -> float:
+def get_zone_floor_area(doc: IDFDocument, zone_name: str) -> float:
     """Get the floor area of a zone by iterating over building surfaces that are of type 'floor'.
 
     If more than one floor is found, for now we will return an error; it could be possible in an
     attic where the floor below has perim/core zoning...
 
     Args:
-        idf (IDF): The IDF model to get the floor area from.
+        doc (IDFDocument): The IDF document to get the floor area from.
         zone_name (str): The name of the zone to get the floor area from.
 
     Returns:
@@ -783,13 +783,13 @@ def get_zone_floor_area(idf: IDF, zone_name: str) -> float:
     """
     area = 0
     area_ct = 0
-    for srf in idf.idfobjects["BUILDINGSURFACE:DETAILED"]:
+    for srf in doc["BuildingSurface:Detailed"]:
         # TODO: ensure that this still works for basements and attics.
-        if srf.Zone_Name == zone_name and srf.Surface_Type.lower() == "floor":
-            poly = Polygon3D(srf.coords)
-            if poly.area == 0:
-                raise ValueError(f"INVALID_FLOOR:{zone_name}:{srf.Name}")
-            area += float(poly.area)
+        if srf.zone_name == zone_name and (srf.surface_type or "").lower() == "floor":
+            srf_area = calculate_surface_area(srf)
+            if srf_area == 0:
+                raise ValueError(f"INVALID_FLOOR:{zone_name}:{srf.name}")
+            area += srf_area
             area_ct += 1
     if area_ct not in [1, 5]:
         raise ValueError(f"TOO_MANY_FLOORS:{zone_name}:{area_ct}")
@@ -872,11 +872,11 @@ def get_zone_glazed_area_alt(idf: IDF, zone_name: str) -> float:
     return total_window_area
 
 
-def get_zone_glazed_area(idf: IDF, zone_name: str) -> float:
-    """Calculate the total area of windows for a specific zone in the IDF model.
+def get_zone_glazed_area(doc: IDFDocument, zone_name: str) -> float:
+    """Calculate the total area of windows for a specific zone in the IDF document.
 
     Args:
-        idf (IDF): The IDF model.
+        doc (IDFDocument): The IDF document.
         zone_name (str): The name of the zone to calculate the window area for.
 
     Returns:
@@ -885,19 +885,16 @@ def get_zone_glazed_area(idf: IDF, zone_name: str) -> float:
     total_window_area = 0.0
     total_windows = 0
 
-    for window in idf.idfobjects["FENESTRATIONSURFACE:DETAILED"]:
-        parent_srf = idf.getobject(
-            "BUILDINGSURFACE:DETAILED", window.Building_Surface_Name
-        )
+    for window in doc["FenestrationSurface:Detailed"]:
+        parent_name = window.building_surface_name or ""
+        parent_srf = doc["BuildingSurface:Detailed"].get(parent_name)
         if parent_srf is None:
-            msg = f"BUILDINGSURFACE:DETAILED:{window.Building_Surface_Name} not found"
+            msg = f"BuildingSurface:Detailed:{parent_name} not found"
             raise ValueError(msg)
-        if (
-            parent_srf.Zone_Name.lower() == zone_name.lower()
-            and window.Surface_Type.lower() == "window"
-        ):
-            poly = Polygon3D(window.coords)
-            total_window_area += float(poly.area)
+        if (parent_srf.zone_name or "").lower() == zone_name.lower() and (
+            window.surface_type or ""
+        ).lower() == "window":
+            total_window_area += calculate_surface_area(window)
             total_windows += 1
 
     if total_windows not in [0, 1, 4]:

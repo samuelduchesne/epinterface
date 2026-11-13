@@ -2,8 +2,7 @@
 
 from typing import Literal
 
-from archetypal.idfclass import IDF
-from archetypal.schedule import Schedule
+from idfkit import IDFDocument
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from epinterface.interface import (
@@ -12,6 +11,7 @@ from epinterface.interface import (
     Material,
     SimpleGlazingMaterial,
     ZoneInfiltrationDesignFlowRate,
+    ensure_fraction_type_limits,
 )
 from epinterface.sbem.common import BoolStr, MetadataMixin, NamedObject, NanStr
 from epinterface.sbem.components.materials import (
@@ -19,6 +19,7 @@ from epinterface.sbem.components.materials import (
     ConstructionMaterialComponent,
     StandardMaterialMetadataMixin,
 )
+from epinterface.sbem.components.schedules import add_constant_year_schedule
 
 WindowType = Literal["Single", "Double", "Triple"]
 
@@ -40,14 +41,14 @@ class GlazingConstructionSimpleComponent(
     TVis: float = Field(..., title="Visible transmittance", ge=0, le=1)
     Type: WindowType = Field(..., title="Type of the glazing construction")
 
-    def add_to_idf(self, idf: IDF) -> IDF:
-        """Adds the glazing construction to an IDF object.
+    def add_to_idf(self, doc: IDFDocument) -> IDFDocument:
+        """Adds the glazing construction to an IDF document.
 
         Args:
-            idf (IDF): The IDF object to add the construction to.
+            doc (IDFDocument): The IDF document to add the construction to.
 
         Returns:
-            IDF: The updated IDF object.
+            IDFDocument: The updated IDF document.
         """
         glazing_mat = SimpleGlazingMaterial(
             Name=self.Name,
@@ -61,8 +62,8 @@ class GlazingConstructionSimpleComponent(
             layers=[glazing_mat],
         )
 
-        idf = construction.add(idf)
-        return idf
+        doc = construction.add(doc)
+        return doc
 
 
 class InfiltrationComponent(
@@ -112,19 +113,19 @@ class InfiltrationComponent(
     )
 
     def add_infiltration_to_idf_zone(
-        self, idf: IDF, target_zone_or_zone_list_name: str
+        self, doc: IDFDocument, target_zone_or_zone_list_name: str
     ):
         """Add infiltration to an IDF zone.
 
         Args:
-            idf (IDF): The IDF object to add the infiltration to.
+            doc (IDFDocument): The IDF document to add the infiltration to.
             target_zone_or_zone_list_name (str): The name of the zone or zone list to add the infiltration to.
 
         Returns:
-            idf (IDF): The updated IDF object.
+            doc (IDFDocument): The updated IDF document.
         """
         if not self.IsOn:
-            return idf
+            return doc
 
         infiltration_schedule_name = (
             f"{target_zone_or_zone_list_name}_{self.safe_name}_INFILTRATION_Schedule"
@@ -132,15 +133,14 @@ class InfiltrationComponent(
         infiltration_name = (
             f"{target_zone_or_zone_list_name}_{self.safe_name}_INFILTRATION"
         )
-        schedule = Schedule.constant_schedule(
-            value=1, Name=infiltration_schedule_name, Type="Fraction"
+        ensure_fraction_type_limits(doc)
+        inf_schedule = add_constant_year_schedule(
+            doc, infiltration_schedule_name, 1, "Fraction"
         )
-        inf_schedule, *_ = schedule.to_year_week_day()
-        inf_schedule.to_epbunch(idf)
         inf = ZoneInfiltrationDesignFlowRate(
             Name=infiltration_name,
             Zone_or_ZoneList_Name=target_zone_or_zone_list_name,
-            Schedule_Name=inf_schedule.Name,
+            Schedule_Name=inf_schedule.name,
             Design_Flow_Rate_Calculation_Method=self.CalculationMethod,
             Flow_Rate_per_Exterior_Surface_Area=self.FlowPerExteriorSurfaceArea,
             Air_Changes_per_Hour=self.AirChangesPerHour,
@@ -151,8 +151,8 @@ class InfiltrationComponent(
             # Velocity_Term_Coefficient=self.WindVelocityCoefficient,
             # Velocity_Squared_Term_Coefficient=self.WindVelocitySquaredCoefficient,
         )
-        idf = inf.add(idf)
-        return idf
+        doc = inf.add(doc)
+        return doc
 
 
 class ConstructionLayerComponent(BaseModel, extra="forbid"):
@@ -237,16 +237,16 @@ class ConstructionAssemblyComponent(
             raise ValueError(msg)
         return v
 
-    def add_to_idf(self, idf: IDF) -> IDF:
-        """Adds an opaque construction to an IDF object.
+    def add_to_idf(self, doc: IDFDocument) -> IDFDocument:
+        """Adds an opaque construction to an IDF document.
 
         Note that this will add the individual materials as well.
 
         Args:
-            idf (IDF): The IDF object to add the construction to.
+            doc (IDFDocument): The IDF document to add the construction to.
 
         Returns:
-            idf (IDF): The updated IDF object.
+            doc (IDFDocument): The updated IDF document.
         """
         layers = [layer.ep_material for layer in self.Layers]
 
@@ -254,8 +254,8 @@ class ConstructionAssemblyComponent(
             name=self.Name,
             layers=layers,
         )
-        idf = construction.add(idf)
-        return idf
+        doc = construction.add(doc)
+        return doc
 
     @property
     def sorted_layers(self):

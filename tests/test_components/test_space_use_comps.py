@@ -1,7 +1,7 @@
 """Test the space use components."""
 
 import pytest
-from archetypal.idfclass.idf import IDF
+from idfkit import IDFDocument
 from prisma import Prisma
 
 from epinterface.sbem.components.schedules import YearComponent
@@ -21,14 +21,16 @@ from epinterface.sbem.prisma.client import deep_fetcher
 @pytest.fixture(scope="function")
 def schedule(preseeded_readonly_db: Prisma):
     """Get the schedule name for the default zone."""
-    year, year_comp = deep_fetcher.Year.get_deep_object(
+    _year, year_comp = deep_fetcher.Year.get_deep_object(
         "Lights_Year", preseeded_readonly_db
     )
     return year_comp
 
 
 @pytest.mark.parametrize("is_on", [True, False])
-def test_add_lighting_to_idf_zone(idf: IDF, schedule: YearComponent, is_on: bool):
+def test_add_lighting_to_idf_zone(
+    doc: IDFDocument, schedule: YearComponent, is_on: bool
+):
     """Test the add_lighting_to_idf_zone method."""
     component_name = "new_office"
     schedule_name = schedule.Name
@@ -44,27 +46,27 @@ def test_add_lighting_to_idf_zone(idf: IDF, schedule: YearComponent, is_on: bool
         IsOn=is_on,
         DimmingType="Off",
     )
-    assert not idf.idfobjects["LIGHTS"]
-    assert not idf.idfobjects["SCHEDULE:YEAR"]
-    idf = lighting.add_lights_to_idf_zone(idf, zone_name)
+    assert not doc["Lights"]
+    assert not doc["Schedule:Year"]
+    doc = lighting.add_lights_to_idf_zone(doc, zone_name)
     if is_on:
-        assert idf.idfobjects["LIGHTS"]
-        assert idf.idfobjects["LIGHTS"][0].Name == expected_idf_obj_name
-        assert idf.idfobjects["LIGHTS"][0].Schedule_Name == expected_schedule_name
+        assert doc["Lights"]
+        assert next(iter(doc["Lights"])).name == expected_idf_obj_name
+        assert next(iter(doc["Lights"])).schedule_name == expected_schedule_name
         assert (
-            idf.idfobjects["LIGHTS"][0].Zone_or_ZoneList_or_Space_or_SpaceList_Name
+            next(iter(doc["Lights"])).zone_or_zonelist_or_space_or_spacelist_name
             == zone_name
         )
-        assert idf.idfobjects["SCHEDULE:YEAR"]
-        assert idf.idfobjects["SCHEDULE:YEAR"][0].Name == expected_schedule_name
+        assert doc["Schedule:Year"]
+        assert next(iter(doc["Schedule:Year"])).name == expected_schedule_name
     else:
-        assert not idf.idfobjects["LIGHTS"]
-        assert not idf.idfobjects["SCHEDULE:YEAR"]
+        assert not doc["Lights"]
+        assert not doc["Schedule:Year"]
 
 
 @pytest.mark.parametrize("dimming_type", ["Stepped", "Continuous"])
 def test_add_lighting_to_idf_zone_with_dimming(
-    idf: IDF, schedule: YearComponent, dimming_type: DimmingTypeType
+    doc: IDFDocument, schedule: YearComponent, dimming_type: DimmingTypeType
 ):
     """Test the add_lighting_to_idf_zone method with dimming."""
     lighting = LightingComponent(
@@ -75,12 +77,12 @@ def test_add_lighting_to_idf_zone_with_dimming(
         DimmingType=dimming_type,
     )
     with pytest.raises(NotImplementedParameter):
-        lighting.add_lights_to_idf_zone(idf, "default_zone")
+        lighting.add_lights_to_idf_zone(doc, "default_zone")
 
 
 @pytest.mark.parametrize("is_on,density", [(True, 10), (False, 0)])
 def test_add_people_to_idf_zone(
-    idf: IDF, schedule: YearComponent, is_on: bool, density: float
+    doc: IDFDocument, schedule: YearComponent, is_on: bool, density: float
 ):
     """Test the add_people_to_idf_zone method."""
     component_name = "new_office"
@@ -100,32 +102,32 @@ def test_add_people_to_idf_zone(
         MetabolicRate=1.3,
     )
 
-    assert not idf.idfobjects["PEOPLE"]
-    assert not idf.idfobjects["SCHEDULE:YEAR"]
-    idf = occupancy.add_people_to_idf_zone(idf, zone_name)
+    assert not doc["People"]
+    assert not doc["Schedule:Year"]
+    doc = occupancy.add_people_to_idf_zone(doc, zone_name)
     if is_on:
-        assert idf.idfobjects["PEOPLE"]
-        assert idf.idfobjects["PEOPLE"][0].Name == expected_idf_obj_name
-        assert idf.idfobjects["PEOPLE"][0].People_per_Floor_Area == density
+        assert doc["People"]
+        assert next(iter(doc["People"])).name == expected_idf_obj_name
+        assert next(iter(doc["People"])).people_per_floor_area == density
         assert (
-            idf.idfobjects["PEOPLE"][0].Number_of_People_Schedule_Name
+            next(iter(doc["People"])).number_of_people_schedule_name
             == expected_schedule_name
         )
         assert (
-            idf.idfobjects["PEOPLE"][0].Zone_or_ZoneList_or_Space_or_SpaceList_Name
+            next(iter(doc["People"])).zone_or_zonelist_or_space_or_spacelist_name
             == zone_name
         )
-        assert idf.idfobjects["SCHEDULE:YEAR"]
-        assert (
-            idf.getobject("SCHEDULE:YEAR", expected_activity_schedule_name) is not None
-        )
-        assert idf.getobject("SCHEDULE:YEAR", expected_schedule_name) is not None
+        assert doc["Schedule:Year"]
+        assert doc["Schedule:Year"].get(expected_activity_schedule_name) is not None
+        assert doc["Schedule:Year"].get(expected_schedule_name) is not None
     else:
-        assert not idf.idfobjects["PEOPLE"]
+        assert not doc["People"]
 
 
 @pytest.mark.parametrize("is_on", [True, False])
-def test_add_equipment_to_idf_zone(idf: IDF, schedule: YearComponent, is_on: bool):
+def test_add_equipment_to_idf_zone(
+    doc: IDFDocument, schedule: YearComponent, is_on: bool
+):
     """Test the add_equipment_to_idf_zone method."""
     component_name = "new_office"
     schedule.Name = "some_equip_schedule"
@@ -140,42 +142,40 @@ def test_add_equipment_to_idf_zone(idf: IDF, schedule: YearComponent, is_on: boo
         Schedule=schedule,
         IsOn=is_on,
     )
-    assert not idf.idfobjects["ELECTRICEQUIPMENT"]
-    assert not idf.idfobjects["SCHEDULE:YEAR"]
-    idf = equipment.add_equipment_to_idf_zone(idf, zone_name)
+    assert not doc["ElectricEquipment"]
+    assert not doc["Schedule:Year"]
+    doc = equipment.add_equipment_to_idf_zone(doc, zone_name)
     if is_on:
-        assert idf.idfobjects["ELECTRICEQUIPMENT"]
-        assert idf.idfobjects["ELECTRICEQUIPMENT"][0].Name == expected_idf_obj_name
+        assert doc["ElectricEquipment"]
+        assert next(iter(doc["ElectricEquipment"])).name == expected_idf_obj_name
         assert (
-            idf.idfobjects["ELECTRICEQUIPMENT"][0].Schedule_Name
-            == expected_schedule_name
+            next(iter(doc["ElectricEquipment"])).schedule_name == expected_schedule_name
         )
-        print(idf.idfobjects["ELECTRICEQUIPMENT"][0].__dict__)
         assert (
-            idf.idfobjects["ELECTRICEQUIPMENT"][
-                0
-            ].Zone_or_ZoneList_or_Space_or_SpaceList_Name
+            next(
+                iter(doc["ElectricEquipment"])
+            ).zone_or_zonelist_or_space_or_spacelist_name
             == zone_name
         )
-        assert idf.idfobjects["SCHEDULE:YEAR"]
-        assert idf.idfobjects["SCHEDULE:YEAR"][0].Name == expected_schedule_name
+        assert doc["Schedule:Year"]
+        assert next(iter(doc["Schedule:Year"])).name == expected_schedule_name
     else:
-        assert not idf.idfobjects["ELECTRICEQUIPMENT"]
+        assert not doc["ElectricEquipment"]
 
 
 @pytest.mark.skip(reason="Not implemented")
-def test_add_thermostat_to_idf_zone(idf: IDF):
+def test_add_thermostat_to_idf_zone(doc: IDFDocument):
     """Test the add_thermostat_to_idf_zone method."""
     pass
 
 
 @pytest.mark.skip(reason="Not implemented")
-def test_add_water_to_idf_zone(idf: IDF):
+def test_add_water_to_idf_zone(doc: IDFDocument):
     """Test the add_water_to_idf_zone method."""
     pass
 
 
-def test_add_space_use_to_idf_zone(idf: IDF, schedule: YearComponent):
+def test_add_space_use_to_idf_zone(doc: IDFDocument, schedule: YearComponent):
     """Test the add_loads_to_idf_zone method."""
     zone_name = "default_zone"
 
@@ -282,39 +282,62 @@ def test_add_space_use_to_idf_zone(idf: IDF, schedule: YearComponent):
         WaterUse=water,
     )
 
-    assert not idf.idfobjects["LIGHTS"]
-    assert not idf.idfobjects["ELECTRICEQUIPMENT"]
-    assert not idf.idfobjects["PEOPLE"]
-    assert not idf.idfobjects["HVACTEMPLATE:THERMOSTAT"]
-    assert not idf.idfobjects["SCHEDULE:YEAR"]
-    assert not idf.idfobjects["WATERUSE:EQUIPMENT"]
+    assert not doc["Lights"]
+    assert not doc["ElectricEquipment"]
+    assert not doc["People"]
+    assert not doc["HVACTemplate:Thermostat"]
+    assert not doc["Schedule:Year"]
+    assert not doc["WaterUse:Equipment"]
 
-    idf = space_use.add_loads_to_idf_zone(idf, zone_name)
+    doc = space_use.add_loads_to_idf_zone(doc, zone_name)
 
-    assert idf.idfobjects["LIGHTS"]
-    assert idf.idfobjects["ELECTRICEQUIPMENT"]
-    assert idf.idfobjects["PEOPLE"]
-    assert idf.idfobjects["SCHEDULE:YEAR"]
+    assert doc["Lights"]
+    assert doc["ElectricEquipment"]
+    assert doc["People"]
+    assert doc["Schedule:Year"]
 
-    lights_obj = idf.getobject("LIGHTS", expected_lighting_name)
-    equip_obj = idf.getobject("ELECTRICEQUIPMENT", expected_equip_name)
-    occupancy_obj = idf.getobject("PEOPLE", expected_occupancy_name)
+    lights_obj = doc["Lights"].get(expected_lighting_name)
+    equip_obj = doc["ElectricEquipment"].get(expected_equip_name)
+    occupancy_obj = doc["People"].get(expected_occupancy_name)
     assert lights_obj is not None
-    assert lights_obj.Name == expected_lighting_name
-    assert lights_obj.Schedule_Name == expected_lighting_schedule_name
+    assert lights_obj.name == expected_lighting_name
+    assert lights_obj.schedule_name == expected_lighting_schedule_name
     assert equip_obj is not None
-    assert equip_obj.Name == expected_equip_name
-    assert equip_obj.Schedule_Name == expected_equipment_schedule_name
+    assert equip_obj.name == expected_equip_name
+    assert equip_obj.schedule_name == expected_equipment_schedule_name
     assert occupancy_obj is not None
-    assert occupancy_obj.Name == expected_occupancy_name
+    assert occupancy_obj.name == expected_occupancy_name
     assert (
-        occupancy_obj.Number_of_People_Schedule_Name == expected_occupancy_schedule_name
+        occupancy_obj.number_of_people_schedule_name == expected_occupancy_schedule_name
     )
 
-    assert idf.getobject("SCHEDULE:YEAR", expected_lighting_schedule_name) is not None
-    assert idf.getobject("SCHEDULE:YEAR", expected_equipment_schedule_name) is not None
-    assert idf.getobject("SCHEDULE:YEAR", expected_occupancy_schedule_name) is not None
+    assert doc["Schedule:Year"].get(expected_lighting_schedule_name) is not None
+    assert doc["Schedule:Year"].get(expected_equipment_schedule_name) is not None
+    assert doc["Schedule:Year"].get(expected_occupancy_schedule_name) is not None
 
 
 # TODO: test with spaces/invalid chars in names
 # TODO: test with incorrect schedule types
+
+
+def test_shared_schedule_across_zones_does_not_duplicate(
+    doc: IDFDocument, schedule: YearComponent
+):
+    """Two zones using one schedule reuse its year/week/day/limits objects."""
+    lighting = LightingComponent(
+        Name="shared",
+        PowerDensity=10,
+        Schedule=schedule,
+        IsOn=True,
+        DimmingType="Off",
+    )
+    doc = lighting.add_lights_to_idf_zone(doc, "zone_a")
+    n_days = len(doc["Schedule:Day:Hourly"])
+    doc = lighting.add_lights_to_idf_zone(doc, "zone_b")
+
+    assert len(doc["Lights"]) == 2
+    assert len(doc["Schedule:Year"]) == 1
+    assert len(doc["Schedule:Day:Hourly"]) == n_days
+    assert len(doc["ScheduleTypeLimits"]) == len({
+        lim.name for lim in doc["ScheduleTypeLimits"]
+    })

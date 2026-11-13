@@ -3,14 +3,16 @@
 import logging
 from typing import Literal
 
-from archetypal.idfclass import IDF
-from archetypal.schedule import Schedule, ScheduleTypeLimits
+from idfkit import IDFDocument
 from pydantic import Field
 
 from epinterface.constants import assumed_constants, physical_constants
-from epinterface.interface import ElectricEquipment, Lights, People
+from epinterface.interface import ElectricEquipment, Lights, People, ScheduleTypeLimits
 from epinterface.sbem.common import BoolStr, MetadataMixin, NamedObject
-from epinterface.sbem.components.schedules import YearComponent
+from epinterface.sbem.components.schedules import (
+    YearComponent,
+    add_constant_year_schedule,
+)
 from epinterface.sbem.exceptions import NotImplementedParameter
 
 logger = logging.getLogger(__name__)
@@ -41,41 +43,36 @@ class OccupancyComponent(NamedObject, MetadataMixin, extra="forbid"):
         return self.MetabolicRate * avg_human_weight_kg * conversion_factor
 
     def add_people_to_idf_zone(
-        self, idf: IDF, target_zone_or_zone_list_name: str
-    ) -> IDF:
+        self, doc: IDFDocument, target_zone_or_zone_list_name: str
+    ) -> IDFDocument:
         """Add people to an IDF zone.
 
         Args:
-            idf (IDF): The IDF object to add the people to.
+            doc (IDFDocument): The IDF document to add the people to.
             target_zone_or_zone_list_name (str): The name of the zone or zone list to add the people to.
 
         Returns:
-            IDF: The updated IDF object.
+            IDFDocument: The updated IDF document.
         """
         if not self.IsOn:
-            return idf
+            return doc
 
         activity_sch_name = (
             f"{target_zone_or_zone_list_name}_{self.safe_name}_PEOPLE_Activity_Schedule"
         )
-        lim = ScheduleTypeLimits(
-            Name="AnyNumber",
-            LowerLimit=None,
-            UpperLimit=None,
+        if "AnyNumber" not in doc["ScheduleTypeLimits"]:
+            ScheduleTypeLimits(
+                Name="AnyNumber",
+                Numeric_Type="Continuous",
+                Unit_Type="Dimensionless",
+            ).add(doc)
+        activity_sch_year = add_constant_year_schedule(
+            doc, activity_sch_name, self.MetabolicRate_met_to_W, "AnyNumber"
         )
-        if not idf.getobject("SCHEDULETYPELIMITS", lim.Name):
-            lim.to_epbunch(idf)
-        activity_sch = Schedule.from_values(
-            Values=[self.MetabolicRate_met_to_W] * 8760,
-            Name=activity_sch_name,
-            Type=lim,  # pyright: ignore [reportArgumentType]
-        )
-        activity_sch_year, *_ = activity_sch.to_year_week_day()
-        activity_sch_year.to_epbunch(idf)
 
         name_prefix = f"{target_zone_or_zone_list_name}_{self.safe_name}_PEOPLE"
-        idf, year_name = self.Schedule.add_year_to_idf(
-            idf,
+        doc, year_name = self.Schedule.add_year_to_idf(
+            doc,
             name_prefix=None,
             summer_design_day_sch_name="d_AllOn_00",
             winter_design_day_sch_name="d_AllOn_00",
@@ -90,11 +87,11 @@ class OccupancyComponent(NamedObject, MetadataMixin, extra="forbid"):
             People_per_Floor_Area=self.PeopleDensity,
             Fraction_Radiant=assumed_constants.FractionRadiantPeople,
             Sensible_Heat_Fraction="autocalculate",
-            Activity_Level_Schedule_Name=activity_sch_year.Name,
+            Activity_Level_Schedule_Name=activity_sch_year.name,
         )
 
-        idf = people.add(idf)
-        return idf
+        doc = people.add(doc)
+        return doc
 
 
 DimmingTypeType = Literal["Off", "Stepped", "Continuous"]
@@ -117,28 +114,28 @@ class LightingComponent(NamedObject, MetadataMixin, extra="forbid"):
     IsOn: BoolStr = Field(..., title="Lights are on")
 
     def add_lights_to_idf_zone(
-        self, idf: IDF, target_zone_or_zone_list_name: str
-    ) -> IDF:
+        self, doc: IDFDocument, target_zone_or_zone_list_name: str
+    ) -> IDFDocument:
         """Add lights to an IDF zone.
 
         Note that this makes some assumptions about the fraction visible/radiant/replaceable.
 
         Args:
-            idf (IDF): The IDF object to add the lights to.
+            doc (IDFDocument): The IDF document to add the lights to.
             target_zone_or_zone_list_name (str): The name of the zone or zone list to add the lights to.
 
         Returns:
-            IDF: The updated IDF object.
+            IDFDocument: The updated IDF document.
         """
         if not self.IsOn:
-            return idf
+            return doc
 
         if self.DimmingType != "Off":
             raise NotImplementedParameter("DimmingType:On", self.Name, "Lights")
 
         name_prefix = f"{target_zone_or_zone_list_name}_{self.safe_name}_LIGHTS"
-        idf, year_name = self.Schedule.add_year_to_idf(
-            idf,
+        doc, year_name = self.Schedule.add_year_to_idf(
+            doc,
             name_prefix=None,
             summer_design_day_sch_name="d_AllOn_00",
             winter_design_day_sch_name="d_AllOn_00",
@@ -157,8 +154,8 @@ class LightingComponent(NamedObject, MetadataMixin, extra="forbid"):
             Fraction_Replaceable=assumed_constants.FractionReplaceableLights,
             EndUse_Subcategory=None,
         )
-        idf = lights.add(idf)
-        return idf
+        doc = lights.add(doc)
+        return doc
 
 
 class EquipmentComponent(NamedObject, MetadataMixin, extra="forbid"):
@@ -171,23 +168,23 @@ class EquipmentComponent(NamedObject, MetadataMixin, extra="forbid"):
     IsOn: BoolStr = Field(..., title="Equipment is on")
 
     def add_equipment_to_idf_zone(
-        self, idf: IDF, target_zone_or_zone_list_name: str
-    ) -> IDF:
+        self, doc: IDFDocument, target_zone_or_zone_list_name: str
+    ) -> IDFDocument:
         """Add equipment to an IDF zone.
 
         Args:
-            idf (IDF): The IDF object to add the equipment to.
+            doc (IDFDocument): The IDF document to add the equipment to.
             target_zone_or_zone_list_name (str): The name of the zone or zone list to add the equipment to.
 
         Returns:
-            IDF: The updated IDF object.
+            IDFDocument: The updated IDF document.
         """
         if not self.IsOn:
-            return idf
+            return doc
 
         name_prefix = f"{target_zone_or_zone_list_name}_{self.safe_name}_EQUIPMENT"
-        idf, year_name = self.Schedule.add_year_to_idf(
-            idf,
+        doc, year_name = self.Schedule.add_year_to_idf(
+            doc,
             name_prefix=None,
             summer_design_day_sch_name="d_AllOn_00",
             winter_design_day_sch_name="d_AllOn_00",
@@ -204,8 +201,8 @@ class EquipmentComponent(NamedObject, MetadataMixin, extra="forbid"):
             Fraction_Lost=assumed_constants.FractionLostEquipment,
             EndUse_Subcategory=None,
         )
-        idf = equipment.add(idf)
-        return idf
+        doc = equipment.add(doc)
+        return doc
 
 
 # TODO: Potentially duplicative with HVACTempelateThermostat in epinterface > interface
@@ -250,21 +247,23 @@ class ZoneSpaceUseComponent(NamedObject, MetadataMixin, extra="forbid"):
 
     # TODO: Is this really necessary, or should it be lifted up to the ZoneComponent?
     # it currently is acting as a very bare bones passthrough.
-    def add_loads_to_idf_zone(self, idf: IDF, target_zone_name: str) -> IDF:
+    def add_loads_to_idf_zone(
+        self, doc: IDFDocument, target_zone_name: str
+    ) -> IDFDocument:
         """Add the loads to an IDF zone.
 
         This will add the people, equipment, and lights to the zone.
 
         Args:
-            idf (IDF): The IDF object to add the loads to.
+            doc (IDFDocument): The IDF document to add the loads to.
             target_zone_name (str): The name of the zone to add the loads to.
 
         Returns:
-            IDF: The updated IDF object.
+            IDFDocument: The updated IDF document.
         """
-        idf = self.Lighting.add_lights_to_idf_zone(idf, target_zone_name)
-        idf = self.Occupancy.add_people_to_idf_zone(idf, target_zone_name)
-        idf = self.Equipment.add_equipment_to_idf_zone(idf, target_zone_name)
-        # idf = self.Thermostat.add_thermostat_to_idf_zone(idf, target_zone_name)
+        doc = self.Lighting.add_lights_to_idf_zone(doc, target_zone_name)
+        doc = self.Occupancy.add_people_to_idf_zone(doc, target_zone_name)
+        doc = self.Equipment.add_equipment_to_idf_zone(doc, target_zone_name)
+        # doc = self.Thermostat.add_thermostat_to_idf_zone(doc, target_zone_name)
         # raise NotImplementedError
-        return idf
+        return doc

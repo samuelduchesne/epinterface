@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from archetypal.idfclass import IDF
+from idfkit import IDFDocument
 from pydantic import Field, model_validator
 
 from epinterface.sbem.common import BoolStr, MetadataMixin, NamedObject
@@ -194,7 +194,9 @@ class ZoneHVACComponent(
     # TODO: change the structure like ZoneSpaceUse
     """Zone conditioning object."""
 
-    def add_conditioning_to_idf_zone(self, idf: IDF, target_zone_name: str) -> IDF:
+    def add_conditioning_to_idf_zone(
+        self, doc: IDFDocument, target_zone_name: str
+    ) -> IDFDocument:
         """Add conditioning to an IDF zone.
 
         This constructs HVAC template objects which get assigned to the zone.
@@ -203,15 +205,15 @@ class ZoneHVACComponent(
         particularly the ones related to humidity control.
 
         Args:
-            idf (IDF): The IDF object to add the conditioning to.
+            doc (IDFDocument): The IDF document to add the conditioning to.
             target_zone_name (str): The name of the zone to add the conditioning to.
 
         Returns:
-            IDF: The updated IDF object.
+            IDFDocument: The updated IDF document.
         """
         # TODO: add the idf conversion functions
 
-        return idf
+        return doc
 
 
 DHWFuelType = Literal["Electricity", "NaturalGas", "Propane", "FuelOil", "Steam"]
