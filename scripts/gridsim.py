@@ -3,6 +3,7 @@
 import json
 
 import pandas as pd
+from idfkit import save_idf
 
 from epinterface.climate_studio.builder import Model, ShoeboxGeometry
 from epinterface.climate_studio.interface import ClimateStudioLibraryV2
@@ -66,7 +67,7 @@ def run():
                     envelope_name=f"MA_{size}_{yr_bracket}",
                     lib=lib,
                 )
-                idf, results, warning_text = model.run()
+                doc, results, _warning_text = model.run()
 
                 df = results.to_frame().T
                 df.index = pd.MultiIndex.from_tuples(
@@ -81,8 +82,9 @@ def run():
                     names=["size", "year", "has_basement", "conditioned_basement"],
                 )
                 all_results.append(df)
-                idf.saveas(
-                    f"notebooks/cache/everett_{size}_{yr_bracket}_HB{has_basement}_BC{basement_conditioned}.idf"
+                save_idf(
+                    doc,
+                    f"notebooks/cache/everett_{size}_{yr_bracket}_HB{has_basement}_BC{basement_conditioned}.idf",
                 )
 
     all_results_df = pd.concat(all_results).round()

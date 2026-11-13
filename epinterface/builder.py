@@ -4,11 +4,10 @@ import logging
 from pathlib import Path
 
 import pandas as pd
-from idfkit import IDFDocument
+from idfkit import IDFDocument, load_idf
 
-from epinterface.data import EnergyPlusArtifactDir
 from epinterface.ddy_injector_bayes import DDYSizingSpec
-from epinterface.document import load_base_document
+from epinterface.document import minimal_document
 from epinterface.geometry import ShoeboxGeometry
 from epinterface.interface import (
     Construction,
@@ -73,8 +72,8 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
         )
 
         version = energyplus_settings.version_tuple
-        idf = load_base_document(EnergyPlusArtifactDir / "Minimal.idf", version)
-        ddy = load_base_document(ddy_path, version)
+        idf = minimal_document(version).copy()
+        ddy = load_idf(str(ddy_path), version=version)
         ddyspec = DDYSizingSpec(match=True)
         ddyspec.inject_ddy(idf, ddy)
 
@@ -82,7 +81,8 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
         sim_control = SimulationControl(
             Do_Zone_Sizing_Calculation="Yes",
             Do_System_Sizing_Calculation="Yes",
-            Do_Plant_Sizing_Calculation="Yes",
+            # The model has no plant loops; plant sizing would require Sizing:Plant.
+            Do_Plant_Sizing_Calculation="No",
             Run_Simulation_for_Sizing_Periods="Yes",
             Run_Simulation_for_Weather_File_Run_Periods="Yes",
             Do_HVAC_Sizing_Simulation_for_Sizing_Periods="Yes",
@@ -159,10 +159,9 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
         )
         wall_construction.add(idf)
         for surface in idf["BuildingSurface:Detailed"]:
-            if (
-                surface.surface_type.lower() == "wall"
-                and surface.outside_boundary_condition.lower() == "outdoors"
-            ):
+            if (surface.surface_type or "").lower() == "wall" and (
+                surface.outside_boundary_condition or ""
+            ).lower() == "outdoors":
                 surface.construction_name = wall_construction.name
 
         # Handle Roof Constructions

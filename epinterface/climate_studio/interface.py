@@ -7,15 +7,12 @@ from typing import Annotated, Any, Literal, TypeVar, cast
 
 import numpy as np
 import pandas as pd
-from archetypal.idfclass import IDF
-from archetypal.schedule import Schedule, ScheduleTypeLimits
+from idfkit import IDFDocument, IDFObject
 from pydantic import (
     AliasChoices,
     BaseModel,
     BeforeValidator,
     Field,
-    field_serializer,
-    field_validator,
     model_validator,
     validate_call,
 )
@@ -32,12 +29,15 @@ from epinterface.interface import (
     Material,
     OutdoorAirEconomizerTypeType,
     People,
+    ScheduleTypeLimits,
     SimpleGlazingMaterial,
     SizingParameters,
     WaterUseEquipment,
     ZoneInfiltrationDesignFlowRate,
     ZoneList,
+    add_constant_schedule,
 )
+from epinterface.schedules import HOURS_PER_YEAR, add_values_schedule
 
 logger = logging.getLogger(__name__)
 
@@ -351,14 +351,14 @@ class GlazingConstructionSimple(
     TVis: float = Field(..., title="Visible transmittance", ge=0, le=1)
     Type: WindowType = Field(..., title="Type of the glazing construction")
 
-    def add_to_idf(self, idf: IDF) -> IDF:
-        """Adds the glazing construction to an IDF object.
+    def add_to_idf(self, idf: IDFDocument) -> IDFDocument:
+        """Adds the glazing construction to an IDF document.
 
         Args:
-            idf (IDF): The IDF object to add the construction to.
+            idf (IDFDocument): The IDF document to add the construction to.
 
         Returns:
-            IDF: The updated IDF object.
+            IDFDocument: The updated IDF document.
         """
         glazing_mat = SimpleGlazingMaterial(
             Name=self.Name,
@@ -689,17 +689,19 @@ class OpaqueConstruction(
     )
     Type: OpaqueConstructionType = Field(..., title="Type of the opaque construction")
 
-    def add_to_idf(self, idf: IDF, material_defs: dict[str, OpaqueMaterial]) -> IDF:
-        """Adds an opaque construction to an IDF object.
+    def add_to_idf(
+        self, idf: IDFDocument, material_defs: dict[str, OpaqueMaterial]
+    ) -> IDFDocument:
+        """Adds an opaque construction to an IDF document.
 
         Note that this will add the individual materials as well.
 
         Args:
-            idf (IDF): The IDF object to add the construction to.
+            idf (IDFDocument): The IDF document to add the construction to.
             material_defs (list[OpaqueMaterial]): List of opaque material definitions.
 
         Returns:
-            IDF: The updated IDF object.
+            IDFDocument: The updated IDF document.
         """
         layers = [layer.dereference_to_material(material_defs) for layer in self.Layers]
 
@@ -937,7 +939,9 @@ class ZoneConditioning(
 
         return cond_scheds
 
-    def add_conditioning_to_idf_zone(self, idf: IDF, target_zone_name: str) -> IDF:
+    def add_conditioning_to_idf_zone(
+        self, idf: IDFDocument, target_zone_name: str
+    ) -> IDFDocument:
         """Add conditioning to an IDF zone.
 
         This constructs HVAC template objects which get assigned to the zone.
@@ -946,11 +950,11 @@ class ZoneConditioning(
         particularly the ones related to humidity control.
 
         Args:
-            idf (IDF): The IDF object to add the conditioning to.
+            idf (IDFDocument): The IDF document to add the conditioning to.
             target_zone_name (str): The name of the zone to add the conditioning to.
 
         Returns:
-            IDF: The updated IDF object.
+            IDFDocument: The updated IDF document.
         """
         if self.HumidistatIsOn:
             raise NotImplementedClimateStudioParameter(
@@ -1138,16 +1142,16 @@ class ZoneInfiltration(
     )
 
     def add_infiltration_to_idf_zone(
-        self, idf: IDF, target_zone_or_zone_list_name: str
+        self, idf: IDFDocument, target_zone_or_zone_list_name: str
     ):
         """Add infiltration to an IDF zone.
 
         Args:
-            idf (IDF): The IDF object to add the infiltration to.
+            idf (IDFDocument): The IDF document to add the infiltration to.
             target_zone_or_zone_list_name (str): The name of the zone or zone list to add the infiltration to.
 
         Returns:
-            idf (IDF): The updated IDF object.
+            idf (IDFDocument): The updated IDF document.
         """
         if not self.InfiltrationIsOn:
             return idf
@@ -1155,15 +1159,13 @@ class ZoneInfiltration(
         infiltration_schedule_name = (
             f"{target_zone_or_zone_list_name}_{self.Name}_Infiltration_Schedule"
         )
-        schedule = Schedule.constant_schedule(
-            value=1, Name=infiltration_schedule_name, Type="Fraction"
+        inf_schedule = add_constant_schedule(
+            idf, infiltration_schedule_name, 1, "Fraction"
         )
-        inf_schedule, *_ = schedule.to_year_week_day()
-        inf_schedule.to_epbunch(idf)
         inf = ZoneInfiltrationDesignFlowRate(
             Name=f"{target_zone_or_zone_list_name}_{self.Name}_Infiltration",
             Zone_or_ZoneList_Name=target_zone_or_zone_list_name,
-            Schedule_Name=inf_schedule.Name,
+            Schedule_Name=inf_schedule.name,
             Design_Flow_Rate_Calculation_Method=self.CalculationMethod,
             Flow_Rate_per_Exterior_Surface_Area=self.InfiltrationFlowPerExteriorSurfaceArea,
             Air_Changes_per_Hour=self.InfiltrationAch,
@@ -1317,18 +1319,18 @@ class ZoneLoad(
         return self.MetabolicRate * avg_human_weight_kg * conversion_factor
 
     def add_lights_to_idf_zone(
-        self, idf: IDF, target_zone_or_zone_list_name: str
-    ) -> IDF:
+        self, idf: IDFDocument, target_zone_or_zone_list_name: str
+    ) -> IDFDocument:
         """Add lights to an IDF zone.
 
         Note that this makes some assumptions about the fraction visible/radiant/replaceable.
 
         Args:
-            idf (IDF): The IDF object to add the lights to.
+            idf (IDFDocument): The IDF document to add the lights to.
             target_zone_or_zone_list_name (str): The name of the zone or zone list to add the lights to.
 
         Returns:
-            IDF: The updated IDF object.
+            IDFDocument: The updated IDF document.
         """
         if not self.LightsIsOn:
             return idf
@@ -1363,16 +1365,16 @@ class ZoneLoad(
         return idf
 
     def add_people_to_idf_zone(
-        self, idf: IDF, target_zone_or_zone_list_name: str
-    ) -> IDF:
+        self, idf: IDFDocument, target_zone_or_zone_list_name: str
+    ) -> IDFDocument:
         """Add people to an IDF zone.
 
         Args:
-            idf (IDF): The IDF object to add the people to.
+            idf (IDFDocument): The IDF document to add the people to.
             target_zone_or_zone_list_name (str): The name of the zone or zone list to add the people to.
 
         Returns:
-            IDF: The updated IDF object.
+            IDFDocument: The updated IDF document.
         """
         if not self.PeopleIsOn:
             return idf
@@ -1380,21 +1382,15 @@ class ZoneLoad(
         activity_sch_name = (
             f"{target_zone_or_zone_list_name}_{self.Name}_Activity_Schedule"
         )
-        lim = "AnyNumber"
-        if not idf.getobject("SCHEDULETYPELIMITS", lim):
-            lim = ScheduleTypeLimits(
+        if "AnyNumber" not in idf["ScheduleTypeLimits"]:
+            ScheduleTypeLimits(
                 Name="AnyNumber",
-                LowerLimit=None,
-                UpperLimit=None,
-            )
-            lim.to_epbunch(idf)
-        activity_sch = Schedule.from_values(
-            Values=[self.MetabolicRate_W] * 8760,
-            Name=activity_sch_name,
-            Type=lim,  # pyright: ignore [reportArgumentType]
+                Numeric_Type="Continuous",
+                Unit_Type="Dimensionless",
+            ).add(idf)
+        activity_sch_year = add_constant_schedule(
+            idf, activity_sch_name, self.MetabolicRate_W, "AnyNumber"
         )
-        activity_sch_year, *_ = activity_sch.to_year_week_day()
-        activity_sch_year.to_epbunch(idf)
 
         logger.warning(
             f"Adding people to zone with schedule {self.OccupancySchedule}.  Make sure this schedule exists."
@@ -1412,23 +1408,23 @@ class ZoneLoad(
             People_per_Floor_Area=self.PeopleDensity,
             Fraction_Radiant=0.3,
             Sensible_Heat_Fraction="autocalculate",
-            Activity_Level_Schedule_Name=activity_sch_year.Name,
+            Activity_Level_Schedule_Name=activity_sch_year.name,
         )
 
         idf = people.add(idf)
         return idf
 
     def add_equipment_to_idf_zone(
-        self, idf: IDF, target_zone_or_zone_list_name: str
-    ) -> IDF:
+        self, idf: IDFDocument, target_zone_or_zone_list_name: str
+    ) -> IDFDocument:
         """Add equipment to an IDF zone.
 
         Args:
-            idf (IDF): The IDF object to add the equipment to.
+            idf (IDFDocument): The IDF document to add the equipment to.
             target_zone_or_zone_list_name (str): The name of the zone or zone list to add the equipment to.
 
         Returns:
-            IDF: The updated IDF object.
+            IDFDocument: The updated IDF document.
         """
         if not self.EquipmentIsOn:
             return idf
@@ -1452,7 +1448,9 @@ class ZoneLoad(
         idf = equipment.add(idf)
         return idf
 
-    def add_loads_to_idf_zone(self, idf: IDF, target_zone_name: str) -> IDF:
+    def add_loads_to_idf_zone(
+        self, idf: IDFDocument, target_zone_name: str
+    ) -> IDFDocument:
         """Add the loads to an IDF zone.
 
         This will add the people, equipment, and lights to the zone.
@@ -1460,11 +1458,11 @@ class ZoneLoad(
         nb: remember to add the schedules.
 
         Args:
-            idf (IDF): The IDF object to add the loads to.
+            idf (IDFDocument): The IDF document to add the loads to.
             target_zone_name (str): The name of the zone to add the loads to.
 
         Returns:
-            IDF: The updated IDF object.
+            IDFDocument: The updated IDF document.
         """
         idf = self.add_lights_to_idf_zone(idf, target_zone_name)
         idf = self.add_people_to_idf_zone(idf, target_zone_name)
@@ -1519,17 +1517,17 @@ class ZoneHotWater(
         return {self.WaterSchedule} if self.IsOn else set()
 
     def add_water_to_idf_zone(
-        self, idf: IDF, target_zone_name: str, total_ppl: float
-    ) -> IDF:
+        self, idf: IDFDocument, target_zone_name: str, total_ppl: float
+    ) -> IDFDocument:
         """Add the hot water to an IDF zone.
 
         Args:
-            idf (IDF): The IDF object to add the hot water to.
+            idf (IDFDocument): The IDF document to add the hot water to.
             target_zone_name (str): The name of the zone to add the hot water to.
             total_ppl (float): The total number of people in the zone.
 
         Returns:
-            IDF: The updated IDF object.
+            IDFDocument: The updated IDF document.
         """
         if not self.IsOn:
             return idf
@@ -1537,35 +1535,27 @@ class ZoneHotWater(
         total_flow_rate = self.FlowRatePerPerson * total_ppl  # m3/hr
         total_flow_rate_per_s = total_flow_rate / 3600  # m3/s
 
-        lim = "Temperature"
-        if not idf.getobject("SCHEDULETYPELIMITS", lim):
-            lim = ScheduleTypeLimits(
+        if "Temperature" not in idf["ScheduleTypeLimits"]:
+            ScheduleTypeLimits(
                 Name="Temperature",
-                LowerLimit=-60,
-                UpperLimit=200,
-            )
-            lim.to_epbunch(idf)
+                Lower_Limit_Value=-60,
+                Upper_Limit_Value=200,
+                Numeric_Type="Continuous",
+                Unit_Type="Dimensionless",
+            ).add(idf)
 
-        target_temperature_schedule = Schedule.constant_schedule(
-            value=self.WaterSupplyTemperature,  # pyright: ignore [reportArgumentType]
-            Name=f"{target_zone_name}_{self.Name}_TargetWaterTemperatureSch",
-            Type="Temperature",
+        target_temperature_yr_schedule = add_constant_schedule(
+            idf,
+            f"{target_zone_name}_{self.Name}_TargetWaterTemperatureSch",
+            self.WaterSupplyTemperature,
+            "Temperature",
         )
-        inlet_temperature_schedule = Schedule.constant_schedule(
-            value=self.WaterTemperatureInlet,  # pyright: ignore [reportArgumentType]
-            Name=f"{target_zone_name}_{self.Name}_InletWaterTemperatureSch",
-            Type="Temperature",
+        inlet_temperature_yr_schedule = add_constant_schedule(
+            idf,
+            f"{target_zone_name}_{self.Name}_InletWaterTemperatureSch",
+            self.WaterTemperatureInlet,
+            "Temperature",
         )
-
-        target_temperature_yr_schedule, *_ = (
-            target_temperature_schedule.to_year_week_day()
-        )
-        inlet_temperature_yr_schedule, *_ = (
-            inlet_temperature_schedule.to_year_week_day()
-        )
-
-        target_temperature_yr_schedule.to_epbunch(idf)
-        inlet_temperature_yr_schedule.to_epbunch(idf)
 
         hot_water = WaterUseEquipment(
             Name=f"{target_zone_name}_{self.Name}_HotWater",
@@ -1573,9 +1563,9 @@ class ZoneHotWater(
             Peak_Flow_Rate=total_flow_rate_per_s,
             Flow_Rate_Fraction_Schedule_Name=self.WaterSchedule,
             Zone_Name=target_zone_name,
-            Target_Temperature_Schedule_Name=target_temperature_yr_schedule.Name,
-            Hot_Water_Supply_Temperature_Schedule_Name=target_temperature_schedule.Name,
-            Cold_Water_Supply_Temperature_Schedule_Name=inlet_temperature_schedule.Name,
+            Target_Temperature_Schedule_Name=target_temperature_yr_schedule.name,
+            Hot_Water_Supply_Temperature_Schedule_Name=target_temperature_yr_schedule.name,
+            Cold_Water_Supply_Temperature_Schedule_Name=inlet_temperature_yr_schedule.name,
             Sensible_Fraction_Schedule_Name=None,
             Latent_Fraction_Schedule_Name=None,
         )
@@ -1592,7 +1582,9 @@ class ZoneUse(
     Loads: ZoneLoad
     HotWater: ZoneHotWater
 
-    def add_loads_to_idf_zone(self, idf: IDF, target_zone_name: str) -> IDF:
+    def add_loads_to_idf_zone(
+        self, idf: IDFDocument, target_zone_name: str
+    ) -> IDFDocument:
         """Add the loads to an IDF zone.
 
         This will add the people, equipment, and lights to the zone.
@@ -1600,40 +1592,42 @@ class ZoneUse(
         nb: remember to add the schedules.
 
         Args:
-            idf (IDF): The IDF object to add the loads to.
+            idf (IDFDocument): The IDF document to add the loads to.
             target_zone_name (str): The name of the zone to add the loads to.
 
         Returns:
-            IDF: The updated IDF object.
+            IDFDocument: The updated IDF document.
         """
         idf = self.Loads.add_loads_to_idf_zone(idf, target_zone_name)
         return idf
 
-    def add_conditioning_to_idf_zone(self, idf: IDF, target_zone_name: str) -> IDF:
+    def add_conditioning_to_idf_zone(
+        self, idf: IDFDocument, target_zone_name: str
+    ) -> IDFDocument:
         """Add the conditioning to an IDF zone.
 
         Args:
-            idf (IDF): The IDF object to add the conditioning to.
+            idf (IDFDocument): The IDF document to add the conditioning to.
             target_zone_name (str): The name of the zone to add the conditioning to.
 
         Returns:
-            IDF: The updated IDF object.
+            IDFDocument: The updated IDF document.
         """
         idf = self.Conditioning.add_conditioning_to_idf_zone(idf, target_zone_name)
         return idf
 
     def add_hot_water_to_idf_zone(
-        self, idf: IDF, target_zone_name: str, zone_area: float
-    ) -> IDF:
+        self, idf: IDFDocument, target_zone_name: str, zone_area: float
+    ) -> IDFDocument:
         """Add the hot water to an IDF zone.
 
         Args:
-            idf (IDF): The IDF object to add the hot water to.
+            idf (IDFDocument): The IDF document to add the hot water to.
             target_zone_name (str): The name of the zone to add the hot water to.
             zone_area (float): The area of the zone.
 
         Returns:
-            idf (IDF): The updated IDF object.
+            idf (IDFDocument): The updated IDF document.
 
         """
         total_people = self.Loads.PeopleDensity * zone_area
@@ -1642,17 +1636,19 @@ class ZoneUse(
         )
         return idf
 
-    def add_space_use_to_idf_zone(self, idf: IDF, target_zone: str | ZoneList) -> IDF:
+    def add_space_use_to_idf_zone(
+        self, idf: IDFDocument, target_zone: str | ZoneList
+    ) -> IDFDocument:
         """Add the use to an IDF zone.
 
         This will add the loads and conditioning to the zone.
 
         Args:
-            idf (IDF): The IDF object to add the use to.
+            idf (IDFDocument): The IDF document to add the use to.
             target_zone (str | ZoneList): The name of the zone to add the use to.
 
         Returns:
-            IDF: The updated IDF object.
+            IDFDocument: The updated IDF document.
         """
         loads_target = target_zone if isinstance(target_zone, str) else target_zone.Name
         idf = self.add_loads_to_idf_zone(idf, loads_target)
@@ -1680,7 +1676,55 @@ class ZoneUse(
 NamedType = TypeVar("NamedType", bound=NamedObject)
 
 
-class ClimateStudioLibraryV2(BaseModel, arbitrary_types_allowed=True):
+class LibraryScheduleTypeLimits(BaseModel):
+    """The type limits of a library schedule (as stored in library JSON files)."""
+
+    Name: str
+    LowerLimit: float | None = None
+    UpperLimit: float | None = None
+    NumericType: Literal["Continuous", "Discrete"] | None = "Continuous"
+    UnitType: str = "Dimensionless"
+
+    def add_to_idf(self, idf: IDFDocument) -> IDFObject:
+        """Write the `ScheduleTypeLimits` object (an identical one is kept as is).
+
+        Args:
+            idf (IDFDocument): The IDF document to add the type limits to.
+
+        Returns:
+            IDFObject: The `ScheduleTypeLimits` object.
+        """
+        ScheduleTypeLimits(
+            Name=self.Name,
+            Lower_Limit_Value=self.LowerLimit,
+            Upper_Limit_Value=self.UpperLimit,
+            Numeric_Type=self.NumericType,
+            Unit_Type=self.UnitType,  # pyright: ignore [reportArgumentType]
+        ).add(idf)
+        return idf["ScheduleTypeLimits"][self.Name]
+
+
+class LibrarySchedule(BaseModel):
+    """An hourly year schedule of a climate studio library."""
+
+    Name: str
+    Type: LibraryScheduleTypeLimits
+    Values: list[float]
+
+    def add_to_idf(self, idf: IDFDocument) -> IDFObject:
+        """Write the schedule as `Schedule:Year` (with week/day objects) and its type limits.
+
+        Args:
+            idf (IDFDocument): The IDF document to add the schedule to.
+
+        Returns:
+            IDFObject: The `Schedule:Year` object.
+        """
+        self.Type.add_to_idf(idf)
+        return add_values_schedule(idf, self.Name, self.Values, self.Type.Name)
+
+
+class ClimateStudioLibraryV2(BaseModel):
     """Climate Studio library object."""
 
     SpaceUses: dict[str, ZoneUse]
@@ -1688,66 +1732,10 @@ class ClimateStudioLibraryV2(BaseModel, arbitrary_types_allowed=True):
     GlazingConstructions: dict[str, GlazingConstructionSimple]
     OpaqueConstructions: dict[str, OpaqueConstruction]
     OpaqueMaterials: dict[str, OpaqueMaterial]
-    Schedules: dict[str, Schedule]
-
-    @field_validator("Schedules", mode="before")
-    @classmethod
-    def validate_schedules(cls, value: dict[str, Any]):
-        """Validate the schedules."""
-        for key, val in value.items():
-            if isinstance(val, dict):
-                transfer = ScheduleTransferObject.model_validate(val)
-                limit_type = ScheduleTypeLimits.from_dict(transfer.Type)
-                value[key] = Schedule.from_values(
-                    Name=transfer.Name,
-                    Type=limit_type,  # pyright: ignore [reportArgumentType]
-                    Values=transfer.Values,
-                )
-            elif isinstance(val, ScheduleTransferObject):
-                limit_type = ScheduleTypeLimits.from_dict(val.Type)
-                value[key] = Schedule.from_values(
-                    Name=val.Name,
-                    Type=limit_type,  # pyright: ignore [reportArgumentType]
-                    Values=val.Values,
-                )
-            elif not isinstance(val, Schedule):
-                raise TypeError(f"SCHEDULE_LOAD_ERROR:{type(val)}")
-            else:
-                continue
-        return value
-
-    @field_serializer("Schedules")
-    def serialize_schedules(
-        self, schedules: dict[str, Schedule]
-    ) -> dict[str, "ScheduleTransferObject"]:
-        """Serialize the schedules to a dataframe.
-
-        Args:
-            schedules (dict[str, Schedule]): The schedules to serialize.
-
-        Returns:
-            serialized_schedules (dict[str, list[float]])
-        """
-        out_result: dict[str, ScheduleTransferObject] = {}
-        for name, sch in schedules.items():
-            out_result[name] = ScheduleTransferObject(
-                Name=sch.Name,
-                Type=sch.Type.to_dict(),
-                Values=list(cast(np.ndarray, sch.Values)),
-            )
-
-        return out_result
+    Schedules: dict[str, LibrarySchedule]
 
 
-class ScheduleTransferObject(BaseModel):
-    """Schedule transfer object for help with de/serialization."""
-
-    Name: str
-    Type: dict
-    Values: list[float]
-
-
-class ClimateStudioLibraryV1(BaseModel, arbitrary_types_allowed=True):
+class ClimateStudioLibraryV1(BaseModel):
     """Climate Studio library object."""
 
     # DaySchedules: dict[str, DaySchedule]
@@ -1764,7 +1752,7 @@ class ClimateStudioLibraryV1(BaseModel, arbitrary_types_allowed=True):
     ZoneDefinition: dict[str, ZoneDefinition]
     ZoneInfiltration: dict[str, ZoneInfiltration]
     ZoneLoad: dict[str, ZoneLoad]
-    Schedules: dict[str, Schedule]
+    Schedules: dict[str, LibrarySchedule]
 
     @classmethod
     @validate_call
@@ -1839,7 +1827,27 @@ class ClimateStudioLibraryV1(BaseModel, arbitrary_types_allowed=True):
         return obj_dict
 
 
-def extract_sch(year_schedules: pd.DataFrame, schedule_name: str) -> Schedule:
+def _type_limits_for(sched_type: str) -> LibraryScheduleTypeLimits:
+    """The type limits of a climate studio schedule type (as archetypal resolved them)."""
+    lowered = sched_type.lower()
+    if lowered in ("any number", "anynumber"):
+        return LibraryScheduleTypeLimits(Name=sched_type)
+    if lowered == "temperature":
+        return LibraryScheduleTypeLimits(
+            Name="Temperature", LowerLimit=-100, UpperLimit=100
+        )
+    if lowered == "on/off":
+        return LibraryScheduleTypeLimits(
+            Name="On/Off",
+            LowerLimit=0,
+            UpperLimit=1,
+            NumericType="Discrete",
+            UnitType="Availability",
+        )
+    return LibraryScheduleTypeLimits(Name="Fraction", LowerLimit=0, UpperLimit=1)
+
+
+def extract_sch(year_schedules: pd.DataFrame, schedule_name: str) -> LibrarySchedule:
     """Extract a schedule from a climate studio schedule dataframe.
 
     Args:
@@ -1847,7 +1855,7 @@ def extract_sch(year_schedules: pd.DataFrame, schedule_name: str) -> Schedule:
         schedule_name (str): Name of the schedule
 
     Returns:
-        Schedule: Extracted schedule
+        LibrarySchedule: Extracted schedule
     """
     sched_meta = year_schedules.head(5)
     sched_meta.index = pd.Index([
@@ -1881,18 +1889,13 @@ def extract_sch(year_schedules: pd.DataFrame, schedule_name: str) -> Schedule:
         "on/off",
     ]:
         raise ScheduleParseError(f"{schedule_name}:{meta['Type']}")
-    if sched_type.lower() in ["any number", "anynumber"]:
-        meta["Type"] = ScheduleTypeLimits(
-            Name=meta["Type"], LowerLimit=None, UpperLimit=None
-        )
-    n_repeats_needed = 8760 // len(sched_vals) + 1
-    repeated_schedule = np.tile(sched_vals, n_repeats_needed)[:8760]
-    sched = Schedule.from_values(
+    n_repeats_needed = HOURS_PER_YEAR // len(sched_vals) + 1
+    repeated_schedule = np.tile(sched_vals, n_repeats_needed)[:HOURS_PER_YEAR]
+    return LibrarySchedule(
         Name=schedule_name,
         Values=repeated_schedule.tolist(),
-        Type=meta["Type"],  # pyright: ignore [reportArgumentType]
+        Type=_type_limits_for(sched_type),
     )
-    return sched
 
 
 if __name__ == "__main__":
@@ -1914,26 +1917,26 @@ class SurfaceHandler(BaseModel):
     surface_group: Literal["glazing", "opaque"]
 
     def assign_srfs(
-        self, idf: IDF, lib: ClimateStudioLibraryV2, construction_name: str
-    ) -> IDF:
+        self, idf: IDFDocument, lib: ClimateStudioLibraryV2, construction_name: str
+    ) -> IDFDocument:
         """Adds a construction (and its materials) to an IDF and assigns it to matching surfaces.
 
         Args:
-            idf (IDF): The IDF model to add the construction to.
+            idf (IDFDocument): The IDF model to add the construction to.
             lib (ClimateStudioLibraryV2): The library of constructions.
             construction_name (str): The name of the construction to add.
         """
         srf_key = (
-            "FENESTRATIONSURFACE:DETAILED"
+            "FenestrationSurface:Detailed"
             if self.surface_group == "glazing"
-            else "BUILDINGSURFACE:DETAILED"
+            else "BuildingSurface:Detailed"
         )
         if self.boundary_condition is not None and self.surface_group == "glazing":
             raise NotImplementedClimateStudioParameter(
                 "BoundaryCondition", self.surface_group, "Glazing"
             )
 
-        srfs = [srf for srf in idf.idfobjects[srf_key] if self.check_srf(srf)]
+        srfs = [srf for srf in idf[srf_key] if self.check_srf(srf)]
         construction_lib = (
             lib.OpaqueConstructions
             if self.surface_group != "glazing"
@@ -1950,14 +1953,14 @@ class SurfaceHandler(BaseModel):
             else construction.add_to_idf(idf, lib.OpaqueMaterials)
         )
         for srf in srfs:
-            srf.Construction_Name = construction.Name
+            srf.construction_name = construction.Name
         return idf
 
-    def check_srf(self, srf):
+    def check_srf(self, srf: IDFObject):
         """Check if the surface matches the filters.
 
         Args:
-            srf (eppy.IDF.BLOCK): The surface to check.
+            srf (IDFObject): The surface to check.
 
         Returns:
             match (bool): True if the surface matches the filters.
@@ -1968,11 +1971,11 @@ class SurfaceHandler(BaseModel):
             and self.check_construction_name(srf)
         )
 
-    def check_construction_type(self, srf):
+    def check_construction_type(self, srf: IDFObject):
         """Check if the surface matches the construction type.
 
         Args:
-            srf (eppy.IDF.BLOCK): The surface to check.
+            srf (IDFObject): The surface to check.
 
         Returns:
             match (bool): True if the surface matches the construction type.
@@ -1984,13 +1987,13 @@ class SurfaceHandler(BaseModel):
             # Ignore the construction type check when filter not provided
             return True
         # Check the construction type
-        return self.original_surface_type.lower() == srf.Surface_Type.lower()
+        return self.original_surface_type.lower() == (srf.surface_type or "").lower()
 
-    def check_boundary(self, srf):
+    def check_boundary(self, srf: IDFObject):
         """Check if the surface matches the boundary condition.
 
         Args:
-            srf (eppy.IDF.BLOCK): The surface to check.
+            srf (IDFObject): The surface to check.
 
         Returns:
             match (bool): True if the surface matches the boundary condition.
@@ -2002,13 +2005,15 @@ class SurfaceHandler(BaseModel):
             # Ignore the bc filter when filter not provided
             return True
         # Check the boundary condition
-        return srf.Outside_Boundary_Condition.lower() == self.boundary_condition.lower()
+        return (
+            srf.outside_boundary_condition or ""
+        ).lower() == self.boundary_condition.lower()
 
-    def check_construction_name(self, srf):
+    def check_construction_name(self, srf: IDFObject):
         """Check if the surface matches the original construction name.
 
         Args:
-            srf (eppy.IDF.BLOCK): The surface to check.
+            srf (IDFObject): The surface to check.
 
         Returns:
             match (bool): True if the surface matches the original construction name.
@@ -2017,7 +2022,9 @@ class SurfaceHandler(BaseModel):
             # Ignore the original construction name check when filter not provided
             return True
         # Check the original construction name
-        return srf.Construction_Name.lower() == self.original_construction_name.lower()
+        return (
+            srf.construction_name or ""
+        ).lower() == self.original_construction_name.lower()
 
 
 class SurfaceHandlers(BaseModel):
@@ -2097,7 +2104,7 @@ class SurfaceHandlers(BaseModel):
 
     def handle_envelope(
         self,
-        idf: IDF,
+        idf: IDFDocument,
         lib: ClimateStudioLibraryV2,
         constructions: ZoneConstruction,
         window: WindowDefinition | None,
@@ -2107,13 +2114,13 @@ class SurfaceHandlers(BaseModel):
         Note that this will add a "reversed" construction for the floorsystem slab/ceiling
 
         Args:
-            idf (IDF): The IDF model to add the envelope to.
+            idf (IDFDocument): The IDF model to add the envelope to.
             lib (ClimateStudioLibraryV2): The library of constructions.
             constructions (ZoneConstruction): The construction names for the envelope.
             window (WindowDefinition | None): The window definition.
 
         Returns:
-            idf (IDF): The updated IDF model.
+            idf (IDFDocument): The updated IDF model.
         """
 
         # outside walls are the ones with outdoor boundary condition and vertical orientation

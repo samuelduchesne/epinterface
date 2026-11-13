@@ -9,7 +9,6 @@ import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from functools import cache
 from pathlib import Path
 from typing import Literal, cast, get_args
 from uuid import uuid4
@@ -37,7 +36,7 @@ from epinterface.analysis.overheating import (
 from epinterface.constants import assumed_constants, physical_constants
 from epinterface.data import EnergyPlusArtifactDir
 from epinterface.ddy_injector_bayes import DDYSizingSpec
-from epinterface.document import load_base_document
+from epinterface.document import minimal_document
 from epinterface.geometry import ShoeboxGeometry, get_zone_floor_area
 from epinterface.interface import (
     InternalMass,
@@ -87,12 +86,6 @@ class SimulationPathConfig(BaseModel):
         default_factory=lambda: EnergyPlusArtifactDir / "cache" / "weather",
         description="The directory to store the weather files.",
     )
-
-
-@cache
-def _minimal_document(version: tuple[int, int, int]) -> IDFDocument:
-    """The base model at `version`, migrated once per process (callers copy it)."""
-    return load_base_document(EnergyPlusArtifactDir / "Minimal.idf", version)
 
 
 # The outputs archetypal's `prep_outputs` added on top of the requested ones
@@ -978,7 +971,7 @@ class Model(BaseWeather, validate_assignment=True):
         config.output_dir.mkdir(parents=True, exist_ok=True)
         epw_path, ddy_path = self.fetch_weather(config.weather_dir)
         ep_version = energyplus_settings.version_tuple
-        doc = _minimal_document(ep_version).copy()
+        doc = minimal_document(ep_version).copy()
         add_output_objects(
             doc, DESIRED_METERS_FOR_VERSION[energyplus_settings.supported_major]
         )
