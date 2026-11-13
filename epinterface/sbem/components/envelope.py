@@ -11,7 +11,7 @@ from epinterface.interface import (
     Material,
     SimpleGlazingMaterial,
     ZoneInfiltrationDesignFlowRate,
-    ensure_fraction_type_limits,
+    add_constant_schedule,
 )
 from epinterface.sbem.common import BoolStr, MetadataMixin, NamedObject, NanStr
 from epinterface.sbem.components.materials import (
@@ -19,7 +19,6 @@ from epinterface.sbem.components.materials import (
     ConstructionMaterialComponent,
     StandardMaterialMetadataMixin,
 )
-from epinterface.sbem.components.schedules import add_constant_year_schedule
 
 WindowType = Literal["Single", "Double", "Triple"]
 
@@ -133,8 +132,7 @@ class InfiltrationComponent(
         infiltration_name = (
             f"{target_zone_or_zone_list_name}_{self.safe_name}_INFILTRATION"
         )
-        ensure_fraction_type_limits(doc)
-        inf_schedule = add_constant_year_schedule(
+        inf_schedule = add_constant_schedule(
             doc, infiltration_schedule_name, 1, "Fraction"
         )
         inf = ZoneInfiltrationDesignFlowRate(

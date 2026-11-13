@@ -1,10 +1,9 @@
 """This module contains the definitions for the schedules."""
 
 import calendar
-import re
 from typing import Literal
 
-from idfkit import IDFDocument, IDFObject
+from idfkit import IDFDocument
 from pydantic import Field, field_validator, model_validator
 
 from epinterface.interface import (
@@ -15,7 +14,6 @@ from epinterface.interface import (
     ScheduleYear,
 )
 from epinterface.sbem.common import NamedObject
-from epinterface.schedules import HOURS_PER_YEAR, add_values_schedule
 
 # TODO: handle schedule type limits in a consistent way once?
 ScheduleTypeLimitType = Literal["Fraction", "Temperature", "AnyNumber"]
@@ -42,33 +40,6 @@ TypeLimits: dict[ScheduleTypeLimitType, ScheduleTypeLimits] = {
         Numeric_Type="Continuous",
     ),
 }
-
-
-def add_constant_year_schedule(
-    doc: IDFDocument, name: str, value: float, type_limits: ScheduleTypeLimitType
-) -> IDFObject:
-    """Add a constant `Schedule:Year` (with its week/day objects), replacing any of that name.
-
-    Matches archetypal, where writing a schedule whose name already exists
-    replaces it, so adding the same zone's schedules twice never raises.
-
-    Args:
-        doc (IDFDocument): The IDF document to add the schedule to.
-        name (str): The name of the `Schedule:Year`.
-        value (float): The value held all year.
-        type_limits (ScheduleTypeLimitType): The name of an existing `ScheduleTypeLimits`.
-
-    Returns:
-        IDFObject: The `Schedule:Year` object.
-    """
-    if name in doc["Schedule:Year"]:
-        doc.removeidfobject(doc["Schedule:Year"][name])
-        generated = re.compile(rf"[dw]_{re.escape(name)}_\d\d", re.IGNORECASE)
-        for obj_type in ("Schedule:Week:Daily", "Schedule:Day:Hourly"):
-            for obj in list(doc[obj_type]):
-                if generated.fullmatch(obj.name):
-                    doc.removeidfobject(obj)
-    return add_values_schedule(doc, name, [value] * HOURS_PER_YEAR, type_limits)
 
 
 class DayComponent(NamedObject, extra="forbid"):

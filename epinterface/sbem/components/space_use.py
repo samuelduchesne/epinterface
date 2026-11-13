@@ -7,11 +7,16 @@ from idfkit import IDFDocument
 from pydantic import Field
 
 from epinterface.constants import assumed_constants, physical_constants
-from epinterface.interface import ElectricEquipment, Lights, People, ScheduleTypeLimits
+from epinterface.interface import (
+    ElectricEquipment,
+    Lights,
+    People,
+    ScheduleTypeLimits,
+    add_constant_schedule,
+)
 from epinterface.sbem.common import BoolStr, MetadataMixin, NamedObject
 from epinterface.sbem.components.schedules import (
     YearComponent,
-    add_constant_year_schedule,
 )
 from epinterface.sbem.exceptions import NotImplementedParameter
 
@@ -66,7 +71,7 @@ class OccupancyComponent(NamedObject, MetadataMixin, extra="forbid"):
                 Numeric_Type="Continuous",
                 Unit_Type="Dimensionless",
             ).add(doc)
-        activity_sch_year = add_constant_year_schedule(
+        activity_sch_year = add_constant_schedule(
             doc, activity_sch_name, self.MetabolicRate_met_to_W, "AnyNumber"
         )
 

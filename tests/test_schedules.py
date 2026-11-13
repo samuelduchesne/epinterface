@@ -7,6 +7,7 @@ import idfkit
 import numpy as np
 import pytest
 
+from epinterface.interface import add_constant_schedule, add_default_schedules
 from epinterface.schedules import add_values_schedule
 
 REGRESSION = Path(__file__).parent / "data" / "regression"
@@ -181,3 +182,53 @@ def test_add_values_schedule_rejects_wrong_length(doc):
     """Only 8760 values are accepted."""
     with pytest.raises(ValueError, match="8760"):
         add_values_schedule(doc, "x", [1.0] * 24, "Fraction")
+
+
+def _schedule_names(doc):
+    """Names of every schedule object, in collection order."""
+    return {
+        t: [o.name for o in doc[t]]
+        for t in ("Schedule:Year", "Schedule:Week:Daily", "Schedule:Day:Hourly")
+    }
+
+
+def test_identical_repeat_leaves_schedule_untouched(doc):
+    """Writing the same schedule again reuses it, without reordering."""
+    first = add_constant_schedule(doc, "A", 1)
+    add_constant_schedule(doc, "B", 0)
+    before = _schedule_names(doc)
+
+    again = add_constant_schedule(doc, "A", 1)
+
+    assert again.name == first.name
+    assert _schedule_names(doc) == before
+
+
+def test_different_repeat_replaces_schedule(doc):
+    """A different schedule under the same name replaces the old one."""
+    add_constant_schedule(doc, "A", 1)
+    add_constant_schedule(doc, "A", 0.5)
+
+    assert [o.name for o in doc["Schedule:Year"]] == ["A"]
+    assert len(doc["Schedule:Day:Hourly"]) == 1
+    day = doc["Schedule:Day:Hourly"]["d_A_00"]
+    assert day.hour_1 == 0.5
+    assert day.hour_24 == 0.5
+
+
+def test_orphan_generated_objects_do_not_raise(doc):
+    """A leftover day object with no year of that name is replaced, not an error."""
+    doc.add("Schedule:Day:Hourly", "d_A_00", {"schedule_type_limits_name": "Fraction"})
+
+    add_constant_schedule(doc, "A", 1)
+
+    assert doc["Schedule:Day:Hourly"]["d_A_00"].hour_1 == 1
+    assert len(doc["Schedule:Day:Hourly"]) == 1
+
+
+def test_default_schedules_twice(doc):
+    """Adding the default schedules repeatedly is a no-op."""
+    add_default_schedules(doc)
+    before = _schedule_names(doc)
+    add_default_schedules(doc)
+    assert _schedule_names(doc) == before

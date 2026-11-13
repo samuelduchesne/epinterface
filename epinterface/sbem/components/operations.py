@@ -13,9 +13,9 @@ from epinterface.interface import (
     ScheduleTypeLimits,
     WaterUseEquipment,
     ZoneVentilationWindAndStackOpenArea,
+    add_constant_schedule,
 )
 from epinterface.sbem.common import MetadataMixin, NamedObject
-from epinterface.sbem.components.schedules import add_constant_year_schedule
 from epinterface.sbem.components.space_use import ZoneSpaceUseComponent
 from epinterface.sbem.components.systems import DHWComponent, ZoneHVACComponent
 
@@ -103,13 +103,13 @@ class ZoneOperationsComponent(
             ).add(doc)
 
         # TODO: should we be using time-varying temperatures?
-        target_temperature_yr_schedule = add_constant_year_schedule(
+        target_temperature_yr_schedule = add_constant_schedule(
             doc,
             f"{water_use_name}_TargetWaterTemperatureSch",
             water_supply_temperature,
             "Temperature",
         )
-        inlet_temperature_yr_schedule = add_constant_year_schedule(
+        inlet_temperature_yr_schedule = add_constant_schedule(
             doc,
             f"{water_use_name}_InletWaterTemperatureSch",
             water_temperature_inlet,
