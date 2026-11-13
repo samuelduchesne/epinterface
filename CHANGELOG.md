@@ -26,8 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `EnergyPlusSettings.version_tuple`.
 - The default EnergyPlus version is the newest installed supported major
   version. Set `EPINTERFACE_ENERGYPLUS_VERSION` to pin one.
-- Simulation outputs match the archetypal-based 1.x results within a stated
-  tolerance; the committed fixtures in `tests/data/regression` are the evidence.
+- Simulation outputs match the archetypal-based 1.x results on EnergyPlus
+  25.2.0 within a relative tolerance of 1e-3 and an absolute tolerance of 1e-6;
+  per-zone geometry matches within a relative tolerance of 1e-9 and an absolute
+  tolerance of 0.01. The committed fixtures in `tests/data/regression` are the
+  evidence.
+- idfkit is pinned to `>=1.2,<1.3`, the minor version the regression tests
+  were run against.
 
 ### Added
 
@@ -40,7 +45,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - **Breaking:** `ddy_interface_bayes` (unused).
-- archetypal, eppy and geomeppy objects in the public interface (see Changed).
 
 ### Fixed
 
@@ -51,6 +55,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   end to end. It no longer requests plant sizing.
 - climate_studio results use the "District Heating" label on all EnergyPlus
   versions. Before, they failed on EnergyPlus 23 and later.
+- `Model.run()` (sbem and climate_studio) no longer leaves the results file
+  open in its temporary run directory, which made the directory's deletion
+  fail on Windows. Without `eplus_parent_dir`, sbem's `ModelRunResults.sql`
+  now reads a copy of the results file in the system temporary directory,
+  deleted when the result is closed.
 
 ### Notes
 
