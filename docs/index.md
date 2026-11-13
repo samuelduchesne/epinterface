@@ -5,4 +5,4 @@
 [![Commit activity](https://img.shields.io/github/commit-activity/m/szvsw/epinterface)](https://img.shields.io/github/commit-activity/m/szvsw/epinterface)
 [![License](https://img.shields.io/github/license/szvsw/epinterface)](https://img.shields.io/github/license/szvsw/epinterface)
 
-Dynamically generate EnergyPlus models in Python with idfkit.
+Dynamically generate EnergyPlus models in Python with [idfkit](https://github.com/idfkit/idfkit).
