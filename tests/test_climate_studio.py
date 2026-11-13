@@ -16,6 +16,7 @@ from epinterface.climate_studio.interface import (
 from epinterface.data import DefaultEPWZipPath
 from epinterface.geometry import ShoeboxGeometry
 from epinterface.settings import energyplus_settings
+from tests.conftest import SQLCleanupSpy
 
 LIB_PATH = Path(__file__).parent / "data" / "test_lib.json"
 
@@ -139,9 +140,16 @@ def test_build_returns_idfkit_document(lib: ClimateStudioLibraryV2, tmp_path):
     energyplus_settings.energyplus_version != "25.2.0",
     reason="simulation checked against EnergyPlus 25.2.0",
 )
-def test_run_simulates_and_postprocesses(lib: ClimateStudioLibraryV2):
-    """The model simulates with EnergyPlus and reports end uses per m2."""
+def test_run_simulates_and_postprocesses(
+    lib: ClimateStudioLibraryV2, sql_cleanup_spy: SQLCleanupSpy
+):
+    """The model simulates with EnergyPlus and reports end uses per m2.
+
+    The results file is closed before the temporary run directory is deleted.
+    """
     doc, results, err_text = _model(lib).run(move_energy=True)
+    assert sql_cleanup_spy.checked
+    assert sql_cleanup_spy.still_open == []
     assert "EnergyPlus Completed Successfully" in err_text
     assert results.name == "kWh/m2"
     assert results["Electricity"] > 0

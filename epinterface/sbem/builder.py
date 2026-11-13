@@ -16,9 +16,8 @@ from uuid import uuid4
 import numpy as np
 import pandas as pd
 import yaml
-from idfkit import IDFDocument, IDFObject, SimulationError, load_idf
+from idfkit import IDFDocument, IDFObject, load_idf
 from idfkit.geometry import Polygon3D, get_surface_coords, set_surface_coords
-from idfkit.simulation import find_energyplus, simulate
 from idfkit.simulation.parsers.sql import SQLResult
 from ladybug.epw import EPW
 from numpy.typing import NDArray
@@ -60,19 +59,25 @@ from epinterface.sbem.components.zones import ZoneComponent
 from epinterface.sbem.exceptions import NotImplementedParameter
 from epinterface.sbem.prisma.client import PrismaSettings
 from epinterface.settings import energyplus_settings
+
+# AVAILABLE_HOURLY_VARIABLES, AvailableHourlyVariables and add_output_objects
+# live in epinterface.simulation and are re-exported here for existing imports.
+from epinterface.simulation import (
+    AVAILABLE_HOURLY_VARIABLES as AVAILABLE_HOURLY_VARIABLES,
+)
+from epinterface.simulation import (
+    AvailableHourlyVariables as AvailableHourlyVariables,
+)
+from epinterface.simulation import (
+    SQLResultFile,
+    add_output_objects,
+    detach_sql,
+    read_warnings,
+    run_energyplus,
+)
 from epinterface.weather import BaseWeather
 
 logger = logging.getLogger(__name__)
-
-# TODO: add the meters for HVAC systems
-AvailableHourlyVariables = Literal[
-    "Zone Mean Air Temperature",
-    "Zone Air Relative Humidity",
-    "Site Outdoor Air Drybulb Temperature",
-    "Zone Mean Radiant Temperature",
-]
-
-AVAILABLE_HOURLY_VARIABLES = get_args(AvailableHourlyVariables)
 
 
 class SimulationPathConfig(BaseModel):
@@ -86,120 +91,6 @@ class SimulationPathConfig(BaseModel):
         default_factory=lambda: EnergyPlusArtifactDir / "cache" / "weather",
         description="The directory to store the weather files.",
     )
-
-
-# The outputs archetypal's `prep_outputs` added on top of the requested ones
-# (`add_umi_template_outputs`, `add_profile_gas_elect_outputs`). They are kept
-# so that a model requests the same outputs as before the idfkit migration.
-_UMI_TEMPLATE_VARIABLES = (
-    "Air System Outdoor Air Minimum Flow Fraction",
-    "Air System Total Cooling Energy",
-    "Air System Total Heating Energy",
-    "Heat Exchanger Latent Effectiveness",
-    "Heat Exchanger Sensible Effectiveness",
-    "Heat Exchanger Total Heating Rate",
-    "Water Heater Heating Energy",
-    "Zone Ideal Loads Zone Total Cooling Energy",
-    "Zone Ideal Loads Zone Total Heating Energy",
-    "Zone Thermostat Cooling Setpoint Temperature",
-    "Zone Thermostat Heating Setpoint Temperature",
-)
-_UMI_TEMPLATE_AND_PROFILE_METERS = (
-    "Baseboard:EnergyTransfer",
-    "Cooling:DistrictCooling",
-    "Cooling:Electricity",
-    "Cooling:EnergyTransfer",
-    "Cooling:Gas",
-    "CoolingCoils:EnergyTransfer",
-    "Fans:Electricity",
-    "HeatRejection:Electricity",
-    "HeatRejection:EnergyTransfer",
-    "Heating:DistrictHeating",
-    "Heating:Electricity",
-    "Heating:EnergyTransfer",
-    "Heating:Gas",
-    "HeatingCoils:EnergyTransfer",
-    "Pumps:Electricity",
-    "Refrigeration:Electricity",
-    "Refrigeration:EnergyTransfer",
-    "WaterSystems:EnergyTransfer",
-    "Electricity:Facility",
-    "Gas:Facility",
-    "WaterSystems:Electricity",
-)
-
-
-def _filter_like_archetypal(
-    items: Sequence[tuple[str, str]], wanted: Sequence[str]
-) -> list[tuple[str, str]]:
-    """Drop unwanted outputs the way the archetypal-based builder did.
-
-    It removed unwanted objects from the list it was iterating over, so the
-    object right after each removed one was never checked and always kept.
-    Reproducing that keeps the requested outputs (and the run's output
-    files) identical to the archetypal baseline.
-    """
-    kept: list[tuple[str, str]] = []
-    skip_next = False
-    for item in items:
-        if skip_next or item[0] in wanted:
-            kept.append(item)
-            skip_next = False
-        else:
-            skip_next = True
-    return kept
-
-
-def add_output_objects(doc: IDFDocument, desired_meters: Sequence[str]) -> None:
-    """Request the simulation outputs archetypal's `prep_outputs` requested.
-
-    The SQLite output (with tabular data), the HTML/CSV summary reports and the
-    schedule and variable dictionaries, then the desired meters (monthly and
-    hourly) and `AVAILABLE_HOURLY_VARIABLES` (hourly), filtered as before.
-
-    Args:
-        doc (IDFDocument): The document to add the outputs to (modified in place).
-        desired_meters (Sequence[str]): The meters the results postprocessing reads.
-    """
-    for obj_type, fields in (
-        ("OutputControl:Table:Style", {"column_separator": "CommaAndHTML"}),
-        ("Output:Table:SummaryReports", {"reports": [{"report_name": "AllSummary"}]}),
-        ("Output:SQLite", {"option_type": "SimpleAndTabular"}),
-    ):
-        for existing in list(doc[obj_type]):
-            doc.removeidfobject(existing)
-        doc.add(obj_type, "", fields)
-    doc.add("Output:Schedules", "", {"key_field": "Hourly"})
-    doc.add("Output:VariableDictionary", "", {"key_field": "IDF"})
-
-    variables = sorted({
-        (variable, "Hourly")
-        for variable in (*AVAILABLE_HOURLY_VARIABLES, *_UMI_TEMPLATE_VARIABLES)
-    })
-    meters = sorted(
-        {
-            (meter, frequency)
-            for meter in desired_meters
-            for frequency in ("Monthly", "Hourly")
-        }
-        | {(meter, "Monthly") for meter in _UMI_TEMPLATE_AND_PROFILE_METERS}
-    )
-    for variable, frequency in _filter_like_archetypal(
-        variables, AVAILABLE_HOURLY_VARIABLES
-    ):
-        doc.add(
-            "Output:Variable",
-            "",
-            {
-                "key_value": "*",
-                "variable_name": variable,
-                "reporting_frequency": frequency,
-            },
-        )
-    for meter, frequency in _filter_like_archetypal(meters, desired_meters):
-        doc.add(
-            "Output:Meter", "", {"key_name": meter, "reporting_frequency": frequency}
-        )
 
 
 class SurfaceHandler(BaseModel):
@@ -1135,7 +1026,7 @@ class Model(BaseWeather, validate_assignment=True):
         self,
         config: SimulationPathConfig,
         post_geometry_callback: Callable[[IDFDocument], IDFDocument] | None = None,
-    ) -> tuple[IDFDocument, SQLResult]:
+    ) -> tuple[IDFDocument, SQLResultFile]:
         """Build and simulate the model.
 
         Args:
@@ -1144,7 +1035,7 @@ class Model(BaseWeather, validate_assignment=True):
 
         Returns:
             doc (IDFDocument): The built energy model.
-            sql (SQLResult): The sql results file with simulation data.
+            sql (SQLResultFile): The open sql results file with simulation data.
 
         Raises:
             SimulationError: If EnergyPlus fails.
@@ -1152,19 +1043,7 @@ class Model(BaseWeather, validate_assignment=True):
         """
         doc = self.build(config, post_geometry_callback)
         epw_path, _ = self.fetch_weather(config.weather_dir)
-        result = simulate(
-            doc,
-            weather=epw_path,
-            output_dir=config.output_dir,
-            energyplus=find_energyplus(version=energyplus_settings.version_tuple),
-        )
-        if not result.success:
-            msg = f"EnergyPlus failed in {result.run_dir}:\n{self.get_warnings(result.run_dir)}"
-            raise SimulationError(msg, exit_code=result.exit_code, stderr=result.stderr)
-        sql = result.sql
-        if sql is None:
-            msg = "Simulation produced no SQLite results file."
-            raise FileNotFoundError(msg)
+        sql = run_energyplus(doc, epw_path, config.output_dir)
         return doc, sql
 
     def get_warnings(self, output_dir: Path) -> str:
@@ -1176,8 +1055,7 @@ class Model(BaseWeather, validate_assignment=True):
         Returns:
             str: The concatenated text of every `*.err` file under `output_dir`.
         """
-        err_files = sorted(output_dir.rglob("*.err"))
-        return "\n".join(f.read_text() for f in err_files)
+        return read_warnings(output_dir)
 
     def standard_results_postprocess(
         self, sql: SQLResult, ep_version_major: int
@@ -1230,6 +1108,15 @@ class Model(BaseWeather, validate_assignment=True):
     ) -> "ModelRunResults":
         """Build and simualte the idf model.
 
+        With `eplus_parent_dir` set, `ModelRunResults.sql` reads the
+        results `.sql` file kept in `eplus_parent_dir / "eplus_simulation"`.
+        Without it, the run directory is temporary and deleted before this
+        returns: the results file is first closed, then copied to a
+        `tempfile.mkstemp` file in the system temporary directory, which
+        `ModelRunResults.sql` reads and deletes when closed or garbage
+        collected. No file in the deleted run directory is left open, which
+        Windows would otherwise refuse to delete.
+
         Args:
             weather_dir (Path): The directory to store the weather files.
             post_geometry_callback (Callable[[IDFDocument], IDFDocument] | None): A callback to run after the geometry is added.
@@ -1259,27 +1146,34 @@ class Model(BaseWeather, validate_assignment=True):
                 config,
                 post_geometry_callback=post_geometry_callback,
             )
-            results = self.standard_results_postprocess(
-                sql, ep_version_major=doc.version[0]
-            )
-            zone_weights, zone_names = self.get_zone_weights_and_names(doc)
-
-            overheating_results = (
-                overheating_results_postprocess(
-                    sql,
-                    zone_weights=zone_weights,
-                    zone_names=zone_names,
-                    config=overheating_config,
+            try:
+                results = self.standard_results_postprocess(
+                    sql, ep_version_major=doc.version[0]
                 )
-                if overheating_config is not None
-                else None
-            )
+                zone_weights, zone_names = self.get_zone_weights_and_names(doc)
+
+                overheating_results = (
+                    overheating_results_postprocess(
+                        sql,
+                        zone_weights=zone_weights,
+                        zone_names=zone_names,
+                        config=overheating_config,
+                    )
+                    if overheating_config is not None
+                    else None
+                )
+            except BaseException:
+                sql.close()
+                raise
 
             err_text = self.get_warnings(output_dir)
 
             gc.collect()
             # if eplus_parent_dir is not None, we return the path to the output directory
             output_dir_result = output_dir if eplus_parent_dir is not None else None
+            if eplus_parent_dir is None:
+                # the temporary run directory is deleted on leaving this block
+                sql = detach_sql(sql)
 
             return ModelRunResults(
                 idf=doc,

@@ -8,8 +8,7 @@ from typing import cast
 from uuid import uuid4
 
 import pandas as pd
-from idfkit import IDFDocument, SimulationError, load_idf
-from idfkit.simulation import find_energyplus, simulate
+from idfkit import IDFDocument, load_idf
 from idfkit.simulation.parsers.sql import SQLResult
 from pydantic import BaseModel, Field
 
@@ -41,8 +40,8 @@ from epinterface.interface import (
     add_default_sim_controls,
 )
 from epinterface.results import tabular_frame
-from epinterface.sbem.builder import add_output_objects
 from epinterface.settings import energyplus_settings, require_supported_major
+from epinterface.simulation import add_output_objects, read_warnings, run_energyplus
 from epinterface.weather import BaseWeather
 
 
@@ -479,19 +478,7 @@ class Model(BaseWeather, validate_assignment=True):
         if post_build_callback is not None:
             doc = post_build_callback(doc)
         epw_path, _ = self.fetch_weather(config.weather_dir)
-        result = simulate(
-            doc,
-            weather=epw_path,
-            output_dir=config.output_dir,
-            energyplus=find_energyplus(version=energyplus_settings.version_tuple),
-        )
-        if not result.success:
-            msg = f"EnergyPlus failed in {result.run_dir}:\n{self.get_warnings(result.run_dir)}"
-            raise SimulationError(msg, exit_code=result.exit_code, stderr=result.stderr)
-        sql = result.sql
-        if sql is None:
-            msg = "Simulation produced no SQLite results file."
-            raise FileNotFoundError(msg)
+        sql = run_energyplus(doc, epw_path, config.output_dir)
         return doc, sql
 
     def get_warnings(self, output_dir: Path) -> str:
@@ -503,8 +490,7 @@ class Model(BaseWeather, validate_assignment=True):
         Returns:
             str: The concatenated text of every `*.err` file under `output_dir`.
         """
-        err_files = sorted(output_dir.rglob("*.err"))
-        return "\n".join(f.read_text() for f in err_files)
+        return read_warnings(output_dir)
 
     def standard_results_postprocess(
         self, sql: SQLResult, move_energy: bool, ep_version_major: int
@@ -596,9 +582,14 @@ class Model(BaseWeather, validate_assignment=True):
                 config,
                 post_build_callback=post_build_callback,
             )
-            results = self.standard_results_postprocess(
-                sql, move_energy=move_energy, ep_version_major=doc.version[0]
-            )
+            try:
+                results = self.standard_results_postprocess(
+                    sql, move_energy=move_energy, ep_version_major=doc.version[0]
+                )
+            finally:
+                # release the results .sql file before the temporary directory is deleted
+                # (Windows refuses to delete an open file)
+                sql.close()
             err_text = self.get_warnings(output_dir)
             return doc, results, err_text
 

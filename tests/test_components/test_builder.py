@@ -17,6 +17,7 @@ from epinterface.sbem.builder import (
 from epinterface.sbem.flat_model import FlatModel
 from epinterface.sbem.prisma.client import deep_fetcher
 from epinterface.settings import energyplus_settings
+from tests.conftest import SQLCleanupSpy
 
 
 def _lower(value: str | None) -> str:
@@ -53,9 +54,18 @@ def _model(db: Prisma, **geometry) -> Model:
     )
 
 
-def test_builder(preseeded_readonly_db: Prisma):
-    """A model runs and returns its idfkit document and EnergyPlus warnings."""
+def test_builder(preseeded_readonly_db: Prisma, sql_cleanup_spy: SQLCleanupSpy):
+    """A model runs in a temp dir and returns its document, warnings and results.
+
+    The results stay queryable after the temporary run directory is deleted,
+    and no results file is left open in it at deletion (Windows refuses that).
+    """
     r = _model(preseeded_readonly_db).run()
+    assert sql_cleanup_spy.checked
+    assert sql_cleanup_spy.still_open == []
+    hourly = r.hourly_timeseries(["Zone Mean Air Temperature"])
+    assert hourly.shape[0] == 8760
+    assert hourly.shape[1] > 0
     assert r.idf.version == energyplus_settings.version_tuple
     assert "EnergyPlus Completed Successfully" in r.err_text
 
