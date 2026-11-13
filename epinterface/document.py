@@ -16,9 +16,7 @@ _DESIGN_DAY_COMMON: dict[str, Any] = {
 }
 
 # Field values of the objects the former packaged `Minimal.idf` held, keyed by
-# the field names idfkit uses in the newest schema. Fields a given EnergyPlus
-# version's schema does not have are dropped when the document is built.
-# `new_document` also pre-adds SimulationControl, which `Minimal.idf` never had:
+# the field names idfkit uses in the newest schema. # `new_document` also pre-adds SimulationControl, which `Minimal.idf` never had:
 # it is removed, as the run configuration is the simulation's concern.
 _MINIMAL_OBJECTS: tuple[tuple[str, str, dict[str, Any]], ...] = (
     (
@@ -161,6 +159,33 @@ _MINIMAL_OBJECTS: tuple[tuple[str, str, dict[str, Any]], ...] = (
 )
 
 
+# Fields a version's schema lacks, as (object type, field) -> first version that has it.
+# Anything else not in the schema is a typo and must fail loudly in `doc.add`.
+_FIELD_ADDED_IN: dict[tuple[str, str], tuple[int, int, int]] = {
+    ("Output:SQLite", "unit_conversion_for_tabular_data"): (9, 5, 0),
+}
+
+
+def _add_objects(
+    doc: IDFDocument,
+    objects: tuple[tuple[str, str, dict[str, Any]], ...] = _MINIMAL_OBJECTS,
+) -> None:
+    """Add `objects` to `doc`, skipping only the fields in `_FIELD_ADDED_IN`."""
+    for obj_type, name, fields in objects:
+        supported = {
+            k: v
+            for k, v in fields.items()
+            if doc.version >= _FIELD_ADDED_IN.get((obj_type, k), (0, 0, 0))
+        }
+        if supported.get("solar_model_indicator") == "ASHRAETau2017" and doc.version < (
+            9,
+            0,
+            0,
+        ):
+            supported["solar_model_indicator"] = "ASHRAETau"  # 2017 model is newer
+        doc.add(obj_type, name, supported)
+
+
 def minimal_document(version: tuple[int, int, int]) -> IDFDocument:
     """A new base document at EnergyPlus `version`: the minimal objects to run.
 
@@ -172,17 +197,5 @@ def minimal_document(version: tuple[int, int, int]) -> IDFDocument:
     for baseline_type in ("SimulationControl", "Building", "GlobalGeometryRules"):
         for obj in list(doc[baseline_type]):
             doc.removeidfobject(obj)
-    for obj_type, name, fields in _MINIMAL_OBJECTS:
-        known = set(doc.schema.get_all_field_names(obj_type)) if doc.schema else set()
-        # extensible-only types (the summary reports) list no named fields
-        supported = {
-            k: v for k, v in fields.items() if k in known or not known or k == "reports"
-        }
-        if supported.get("solar_model_indicator") == "ASHRAETau2017" and version < (
-            9,
-            0,
-            0,
-        ):
-            supported["solar_model_indicator"] = "ASHRAETau"  # 2017 model is newer
-        doc.add(obj_type, name, supported)
+    _add_objects(doc)
     return doc

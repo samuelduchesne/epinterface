@@ -9,7 +9,7 @@ import idfkit
 import pytest
 from idfkit import IDFDocument
 
-from epinterface.document import minimal_document
+from epinterface.document import _add_objects, minimal_document
 from epinterface.settings import energyplus_settings
 
 # The objects of the original EnergyPlus 22.2 Minimal.idf (tests/data/Minimal_22_2.idf)
@@ -107,3 +107,11 @@ def test_minimal_document_is_fast():
     start = time.perf_counter()
     minimal_document(energyplus_settings.version_tuple)
     assert time.perf_counter() - start < 1.0
+
+
+@pytest.mark.parametrize("version", [(22, 1, 0), (25, 2, 0)], ids=idfkit.version_string)
+def test_unknown_field_fails_loudly(version):
+    """A mistyped field name is an error, not silently dropped."""
+    doc = idfkit.new_document(version)
+    with pytest.raises(Exception, match="typo_field"):
+        _add_objects(doc, (("Sizing:Parameters", "", {"typo_field": 1.15}),))
