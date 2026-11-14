@@ -1,9 +1,9 @@
 """A module for testing the operations component."""
 
 import pytest
-from idfkit import IDFDocument
 from prisma import Prisma
 
+from epinterface.document import EPDocument
 from epinterface.sbem.prisma.client import deep_fetcher
 
 
@@ -13,7 +13,7 @@ from epinterface.sbem.prisma.client import deep_fetcher
     [(False, 10, 55, 0.1), (True, 10, 55, 0.1)],
 )
 def test_operations_add_hot_water_to_idf(
-    doc: IDFDocument,
+    doc: EPDocument,
     preseeded_readonly_db: Prisma,
     is_on: bool,
     supply_temp: float,

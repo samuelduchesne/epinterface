@@ -2,10 +2,14 @@
 
 from typing import Literal
 
-from idfkit import IDFDocument, IDFObject
+from idfkit import IDFObject
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from epinterface.document import add_construction, add_or_replace
+from epinterface.document import (
+    EPDocument,
+    add_construction,
+    add_or_replace,
+)
 from epinterface.interface import (
     InfDesignFlowRateCalculationMethodType,
     add_constant_schedule,
@@ -37,14 +41,14 @@ class GlazingConstructionSimpleComponent(
     TVis: float = Field(..., title="Visible transmittance", ge=0, le=1)
     Type: WindowType = Field(..., title="Type of the glazing construction")
 
-    def add_to_idf(self, doc: IDFDocument) -> IDFDocument:
+    def add_to_idf(self, doc: EPDocument) -> EPDocument:
         """Adds the glazing construction to an IDF document.
 
         Args:
-            doc (IDFDocument): The IDF document to add the construction to.
+            doc (EPDocument): The IDF document to add the construction to.
 
         Returns:
-            IDFDocument: The updated IDF document.
+            EPDocument: The updated IDF document.
         """
         add_or_replace(
             doc,
@@ -105,16 +109,16 @@ class InfiltrationComponent(
     )
 
     def add_infiltration_to_idf_zone(
-        self, doc: IDFDocument, target_zone_or_zone_list_name: str
+        self, doc: EPDocument, target_zone_or_zone_list_name: str
     ):
         """Add infiltration to an IDF zone.
 
         Args:
-            doc (IDFDocument): The IDF document to add the infiltration to.
+            doc (EPDocument): The IDF document to add the infiltration to.
             target_zone_or_zone_list_name (str): The name of the zone or zone list to add the infiltration to.
 
         Returns:
-            doc (IDFDocument): The updated IDF document.
+            doc (EPDocument): The updated IDF document.
         """
         if not self.IsOn:
             return doc
@@ -170,14 +174,14 @@ class ConstructionLayerComponent(BaseModel, extra="forbid"):
         # return f"{self.LayerOrder}_{self.ConstructionMaterial.Name}_{self.Thickness}m"
         return f"{self.ConstructionMaterial.Name}_{self.Thickness}m"
 
-    def add_to_idf(self, doc: IDFDocument) -> IDFObject:
+    def add_to_idf(self, doc: EPDocument) -> IDFObject:
         """Write the layer as a `Material` object named `self.name`.
 
         An identical material already in the document (e.g. the same layer of
         another construction) is reused.
 
         Args:
-            doc (IDFDocument): The IDF document to write to.
+            doc (EPDocument): The IDF document to write to.
 
         Returns:
             IDFObject: The `Material` object.
@@ -242,16 +246,16 @@ class ConstructionAssemblyComponent(
             raise ValueError(msg)
         return v
 
-    def add_to_idf(self, doc: IDFDocument) -> IDFDocument:
+    def add_to_idf(self, doc: EPDocument) -> EPDocument:
         """Adds an opaque construction to an IDF document.
 
         Note that this will add the individual materials as well.
 
         Args:
-            doc (IDFDocument): The IDF document to add the construction to.
+            doc (EPDocument): The IDF document to add the construction to.
 
         Returns:
-            doc (IDFDocument): The updated IDF document.
+            doc (EPDocument): The updated IDF document.
         """
         for layer in self.Layers:
             layer.add_to_idf(doc)

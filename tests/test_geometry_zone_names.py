@@ -6,8 +6,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-from idfkit import IDFDocument, calculate_surface_area
+from idfkit import calculate_surface_area
 
+from epinterface.document import EPDocument
 from tests.regression.configs import (
     GEOMEPPY_MISMATCHED_KEY,
     GEOMETRY_GRID,
@@ -39,7 +40,7 @@ def test_neighbor_with_zero_height_adds_no_shading(doc):
     assert n_shading == BASELINE["shading_counts"]["by_storey_neighbors"]
 
 
-def _zone_geometry(doc: IDFDocument) -> pd.DataFrame:
+def _zone_geometry(doc: EPDocument) -> pd.DataFrame:
     """Per-zone floor area, gross exterior wall area and window glass area."""
     zones = {z.name.upper(): z for z in doc["Zone"]}
     rows = {name: {"area": 0.0, "gross_wall_area": 0.0} for name in zones}

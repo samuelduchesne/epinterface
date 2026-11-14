@@ -1,10 +1,79 @@
 """The base idfkit document every model is built on."""
 
 from collections.abc import Sequence
-from typing import Any
+from pathlib import Path
+from typing import Any, TypeAlias
 
 import idfkit
-from idfkit import IDFDocument, IDFObject
+from idfkit import IDFObject
+from idfkit.document import AnyIDFDocument
+from idfkit.versioned import (
+    IDFDocumentV22_2,
+    IDFDocumentV23_1,
+    IDFDocumentV23_2,
+    IDFDocumentV24_1,
+    IDFDocumentV24_2,
+    IDFDocumentV25_1,
+    IDFDocumentV25_2,
+    as_version,
+)
+
+# The EnergyPlus releases epinterface builds models for, oldest first. It keeps
+# per-version meter and table definitions for these majors only (see
+# `epinterface.settings.SUPPORTED_ENERGYPLUS_MAJORS`). 22.1 is left out: it
+# names several fields epinterface writes differently (the zone and flow fields
+# of `ZoneInfiltration:DesignFlowRate`, the zone of
+# `ZoneVentilation:WindandStackOpenArea`), and epinterface writes 22.2's names.
+SUPPORTED_DOCUMENT_TYPES = (
+    IDFDocumentV22_2,
+    IDFDocumentV23_1,
+    IDFDocumentV23_2,
+    IDFDocumentV24_1,
+    IDFDocumentV24_2,
+    IDFDocumentV25_1,
+    IDFDocumentV25_2,
+)
+
+# `TypeAlias`, not a `type` statement, while Python 3.10 and 3.11 are supported.
+EPDocument: TypeAlias = (  # noqa: UP040
+    IDFDocumentV22_2
+    | IDFDocumentV23_1
+    | IDFDocumentV23_2
+    | IDFDocumentV24_1
+    | IDFDocumentV24_2
+    | IDFDocumentV25_1
+    | IDFDocumentV25_2
+)
+"""A document of any EnergyPlus release epinterface supports.
+
+Through it, a type checker offers only the object types and fields that every
+supported release has, and accepts only values every one of them accepts.
+"""
+
+
+def as_supported(doc: AnyIDFDocument) -> EPDocument:
+    """Type `doc` as a document of a supported EnergyPlus release.
+
+    Returns `doc` itself, after checking its version at run time.
+
+    Raises:
+        TypeError: If `doc` is of a release epinterface does not support.
+    """
+    return as_version(doc, SUPPORTED_DOCUMENT_TYPES)
+
+
+def load_document(path: Path | str, version: tuple[int, int, int]) -> EPDocument:
+    """Load an IDF or DDY file as a document of a supported EnergyPlus release.
+
+    Args:
+        path (Path | str): The file to load.
+        version (tuple[int, int, int]): The EnergyPlus version to read it as.
+
+    Raises:
+        TypeError: If `version` is not a release epinterface supports.
+    """
+    return as_supported(idfkit.load_idf(str(path), version=version))
+
 
 _DESIGN_DAY_COMMON: dict[str, Any] = {
     "daily_dry_bulb_temperature_range": 0.0,
@@ -171,7 +240,7 @@ _FIELD_ADDED_IN: dict[tuple[str, str], tuple[int, int, int]] = {
 
 
 def _add_objects(
-    doc: IDFDocument,
+    doc: AnyIDFDocument,
     objects: tuple[tuple[str, str, dict[str, Any]], ...] = _MINIMAL_OBJECTS,
 ) -> None:
     """Add `objects` to `doc`, skipping only the fields in `_FIELD_ADDED_IN`."""
@@ -190,45 +259,53 @@ def _add_objects(
         doc.add(obj_type, name, supported)
 
 
-def minimal_document(version: tuple[int, int, int]) -> IDFDocument:
+def _fill_minimal(doc: AnyIDFDocument) -> None:
+    """Replace `new_document`'s baseline objects in `doc` with the minimal objects.
+
+    Works for a document of any release idfkit knows, not only the supported ones.
+    """
+    for baseline_type in ("SimulationControl", "Building", "GlobalGeometryRules"):
+        for obj in list(doc.get_collection(baseline_type)):
+            doc.removeidfobject(obj)
+    _add_objects(doc)
+
+
+def minimal_document(version: tuple[int, int, int]) -> EPDocument:
     """A new base document at EnergyPlus `version`: the minimal objects to run.
 
     The document is built programmatically from the version's own schema, so any
-    version idfkit supports can be requested directly (no migration step).
+    supported version can be requested directly (no migration step).
     Every call returns a fresh document that the caller may edit freely.
+
+    Raises:
+        TypeError: If `version` is not a release epinterface supports.
     """
-    doc = idfkit.new_document(version)
-    for baseline_type in ("SimulationControl", "Building", "GlobalGeometryRules"):
-        for obj in list(doc[baseline_type]):
-            doc.removeidfobject(obj)
-    _add_objects(doc)
+    doc = as_supported(idfkit.new_document(version))
+    _fill_minimal(doc)
     return doc
 
 
-def field_name(doc: IDFDocument, obj_type: str, *candidates: str) -> str:
-    """The first of `candidates` that `doc`'s schema knows for `obj_type`.
+def watts_per_area(doc: EPDocument, value: float) -> dict[str, float]:
+    """The Watts/Area design level of `Lights` or `ElectricEquipment` for `doc`.
 
-    A few fields were renamed between the EnergyPlus versions epinterface
-    supports (e.g. `Lights`' `watts_per_zone_floor_area` up to 23.2, then
-    `watts_per_floor_area`). List the names, newest first, and the one this
-    document's version uses is returned.
+    EnergyPlus 24.1 renamed the field `watts_per_zone_floor_area` to
+    `watts_per_floor_area`. Pass the result as keyword fields:
+    `add_or_replace(doc, "Lights", name, **watts_per_area(doc, 8.0), ...)`.
 
-    Raises:
-        ValueError: If the schema knows none of `candidates` for `obj_type`.
+    Args:
+        doc (EPDocument): The document the object is written to.
+        value (float): The design level [W/m2].
+
+    Returns:
+        dict[str, float]: The value under the field name of `doc`'s release.
     """
-    known = set(doc.schema.get_all_field_names(obj_type)) if doc.schema else set()
-    for candidate in candidates:
-        if candidate in known:
-            return candidate
-    msg = (
-        f"{obj_type} has none of the fields {candidates} in EnergyPlus "
-        f"{idfkit.version_string(doc.version)}"
-    )
-    raise ValueError(msg)
+    if doc.version < (24, 1, 0):
+        return {"watts_per_zone_floor_area": value}
+    return {"watts_per_floor_area": value}
 
 
 def add_or_replace(
-    doc: IDFDocument, obj_type: str, name: str = "", /, **fields: Any
+    doc: EPDocument, obj_type: str, name: str = "", /, **fields: Any
 ) -> IDFObject:
     """Add one object, reusing or replacing an existing one as archetypal did.
 
@@ -246,7 +323,7 @@ def add_or_replace(
     snake_case names); an unknown field raises in `doc.add`.
 
     Args:
-        doc (IDFDocument): The document to write to.
+        doc (EPDocument): The document to write to.
         obj_type (str): The EnergyPlus object type, e.g. "Material".
         name (str): The object's name; empty for unnamed types.
         **fields (Any): The object's fields by idfkit name.
@@ -272,7 +349,7 @@ def add_or_replace(
 
 
 def add_construction(
-    doc: IDFDocument, name: str, layer_names: Sequence[str]
+    doc: EPDocument, name: str, layer_names: Sequence[str]
 ) -> IDFObject:
     """Write a `Construction` of the named layers, outside first.
 
@@ -280,7 +357,7 @@ def add_construction(
     reused and a different one of the same name replaced (see `add_or_replace`).
 
     Args:
-        doc (IDFDocument): The document to write to.
+        doc (EPDocument): The document to write to.
         name (str): The construction's name.
         layer_names (Sequence[str]): The material names, from outside to inside.
 

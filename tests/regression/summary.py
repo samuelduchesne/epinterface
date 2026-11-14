@@ -5,8 +5,10 @@ import sqlite3
 from pathlib import Path
 
 import pandas as pd
-from idfkit import IDFDocument, IDFObject, calculate_surface_area
+from idfkit import IDFObject, calculate_surface_area
 from idfkit.geometry import get_surface_coords
+
+from epinterface.document import EPDocument
 
 _EXCLUDED_ROWS = (
     "Total",
@@ -71,7 +73,7 @@ def zone_names(doc_text: str) -> list[str]:
     ]
 
 
-def surface_records(doc: IDFDocument) -> list[dict]:
+def surface_records(doc: EPDocument) -> list[dict]:
     """Describe every surface without relying on surface names or vertex order.
 
     Building surfaces, windows and shading surfaces are each described by their
@@ -79,7 +81,7 @@ def surface_records(doc: IDFDocument) -> list[dict]:
     `Surface` boundary, construction, area and centroid.
 
     Args:
-        doc (IDFDocument): The document to describe.
+        doc (EPDocument): The document to describe.
 
     Returns:
         list[dict]: One record per surface, sorted.

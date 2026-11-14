@@ -3,9 +3,9 @@
 from typing import Any
 
 import pytest
-from idfkit import IDFDocument
 from prisma import Prisma
 
+from epinterface.document import EPDocument
 from epinterface.geometry import get_zone_floor_area, get_zone_glazed_area
 from epinterface.sbem.prisma.client import deep_fetcher
 
@@ -21,7 +21,7 @@ def _vertices(points: list[tuple[float, float, float]]):
     ]
 
 
-def _add_box_zone(doc: IDFDocument, zone_name: str):
+def _add_box_zone(doc: EPDocument, zone_name: str):
     """Add a zone with a 5 x 4 m floor and a 2 m2 window on a 5 x 3 m wall."""
     doc.add("Zone", zone_name)
     doc.add(
@@ -64,7 +64,7 @@ def _add_box_zone(doc: IDFDocument, zone_name: str):
     )
 
 
-def test_zone_floor_and_glazed_area(doc: IDFDocument):
+def test_zone_floor_and_glazed_area(doc: EPDocument):
     """Floor and window areas are read from the document's surfaces."""
     _add_box_zone(doc, "Box")
     doc.add("Zone", "Empty")
@@ -76,7 +76,7 @@ def test_zone_floor_and_glazed_area(doc: IDFDocument):
         get_zone_floor_area(doc, "Empty")
 
 
-def test_add_water_use_to_zone(doc: IDFDocument, preseeded_readonly_db: Prisma):
+def test_add_water_use_to_zone(doc: EPDocument, preseeded_readonly_db: Prisma):
     """Water use is sized from the zone floor area and writes its schedules."""
     _record, zone = deep_fetcher.Zone.get_deep_object(
         "default_zone", preseeded_readonly_db

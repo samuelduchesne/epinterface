@@ -5,8 +5,9 @@ from typing import Any
 
 import pandas as pd
 import pytest
-from idfkit import IDFDocument, IDFObject, load_idf
+from idfkit import IDFObject
 
+from epinterface.document import EPDocument, load_document
 from epinterface.sbem.builder import SimulationPathConfig
 from epinterface.settings import energyplus_settings
 from tests.regression.configs import REGRESSION_CONFIGS
@@ -26,7 +27,7 @@ def _normalise_value(value: Any) -> str:
         return text.lower()
 
 
-def _canonical(doc: IDFDocument, obj: IDFObject) -> str:
+def _canonical(doc: EPDocument, obj: IDFObject) -> str:
     """An orderable form of an object, ignoring blank and schema-default fields.
 
     Fields archetypal filled with their schema default and idfkit leaves blank
@@ -52,7 +53,7 @@ def _canonical(doc: IDFDocument, obj: IDFObject) -> str:
     return repr(sorted(fields.items()))
 
 
-def _output_objects(doc: IDFDocument) -> dict[str, list[str]]:
+def _output_objects(doc: EPDocument) -> dict[str, list[str]]:
     return {
         obj_type.lower(): sorted(_canonical(doc, o) for o in objs)
         for obj_type, objs in doc.items()
@@ -69,7 +70,7 @@ def test_output_objects_match_baseline(key, preseeded_readonly_db, tmp_path):
     """The built model requests exactly the outputs archetypal's prep_outputs did."""
     model, _ = REGRESSION_CONFIGS[key](preseeded_readonly_db)
     doc = model.build(SimulationPathConfig(output_dir=tmp_path))
-    base = load_idf(str(FIXTURES / key / "built.idf"), version=BASELINE_VERSION)
+    base = load_document(FIXTURES / key / "built.idf", BASELINE_VERSION)
     assert _output_objects(doc) == _output_objects(base)
 
 

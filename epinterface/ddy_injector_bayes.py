@@ -4,8 +4,10 @@ from collections.abc import Sequence
 from enum import Enum
 from typing import Literal
 
-from idfkit import IDFDocument, IDFObject
+from idfkit import IDFObject
 from pydantic import BaseModel, Field
+
+from epinterface.document import EPDocument
 
 
 class DDYField(Enum):
@@ -167,7 +169,7 @@ class DDYSizingSpec(BaseModel):
         description="If True, will raise an error if a design day or weather file condition type is not found in the DDY file.",
     )
 
-    def inject_ddy(self, doc: IDFDocument, ddy: IDFDocument):
+    def inject_ddy(self, doc: EPDocument, ddy: EPDocument):
         """Copies the DDY file into the IDF document according to the spec.
 
         Currently, only the following DDY fields are supported:
@@ -183,8 +185,8 @@ class DDYSizingSpec(BaseModel):
 
 
         Args:
-            doc (IDFDocument): The document to inject the DDY file into.
-            ddy (IDFDocument): The DDY file to inject into the document.
+            doc (EPDocument): The document to inject the DDY file into.
+            ddy (EPDocument): The DDY file to inject into the document.
         """
         for obj_type, sequence in ddy.items():
             if not len(sequence):
@@ -206,8 +208,8 @@ class DDYSizingSpec(BaseModel):
 
     def remove_and_replace(
         self,
-        doc: IDFDocument,
-        ddy: IDFDocument,
+        doc: EPDocument,
+        ddy: EPDocument,
         field: DDYField,
         copy_names: Sequence[str],
     ):
@@ -216,8 +218,8 @@ class DDYSizingSpec(BaseModel):
         Raises an error if the object is not found in the DDY file and `self.raise_on_not_found` is True.
 
         Args:
-            doc (IDFDocument): The document to remove and replace objects from.
-            ddy (IDFDocument): The DDY file to copy objects from.
+            doc (EPDocument): The document to remove and replace objects from.
+            ddy (EPDocument): The DDY file to copy objects from.
             field (DDYField): The field to remove and replace objects from.
             copy_names (Sequence[WeatherFileConditionType] | Sequence[DesignDayName]): The names of the objects to copy,
                 in the order they are added (EnergyPlus runs sizing periods in file order); duplicates are ignored.
@@ -231,24 +233,24 @@ class DDYSizingSpec(BaseModel):
                 continue
             _copy_object(doc, obj)
 
-    def handle_site_location(self, doc: IDFDocument, ddy: IDFDocument):
+    def handle_site_location(self, doc: EPDocument, ddy: EPDocument):
         """Handles the Site:Location object in the DDY file.
 
         Args:
-            doc (IDFDocument): The document to inject the DDY file into.
-            ddy (IDFDocument): The DDY file to inject into the document.
+            doc (EPDocument): The document to inject the DDY file into.
+            ddy (EPDocument): The DDY file to inject into the document.
         """
         field = DDYField.site_location
         _remove_all(doc, field)
         for obj in ddy[field.value]:
             _copy_object(doc, obj)
 
-    def handle_design_days(self, doc: IDFDocument, ddy: IDFDocument):
+    def handle_design_days(self, doc: EPDocument, ddy: EPDocument):
         """Handles the SizingPeriod:DesignDay objects in the DDY file.
 
         Args:
-            doc (IDFDocument): The document to inject the DDY file into.
-            ddy (IDFDocument): The DDY file to inject into the document.
+            doc (EPDocument): The document to inject the DDY file into.
+            ddy (EPDocument): The DDY file to inject into the document.
         """
         field = DDYField.design_day
         sequence = list(ddy[field.value])
@@ -269,12 +271,12 @@ class DDYSizingSpec(BaseModel):
             obj_names.extend(desired_objects)
         self.remove_and_replace(doc, ddy, field, obj_names)
 
-    def handle_weather_file_condition_types(self, doc: IDFDocument, ddy: IDFDocument):
+    def handle_weather_file_condition_types(self, doc: EPDocument, ddy: EPDocument):
         """Handles the SizingPeriod:WeatherFileConditionType objects in the DDY file.
 
         Args:
-            doc (IDFDocument): The document to inject the DDY file into.
-            ddy (IDFDocument): The DDY file to inject into the document.
+            doc (EPDocument): The document to inject the DDY file into.
+            ddy (EPDocument): The DDY file to inject into the document.
         """
         field = DDYField.weather_file_condition_type
         all_condition_types = [c.name for c in ddy[field.value]]
@@ -293,13 +295,13 @@ class DDYSizingSpec(BaseModel):
         self.remove_and_replace(doc, ddy, field, obj_names)
 
 
-def _remove_all(doc: IDFDocument, field: DDYField) -> None:
+def _remove_all(doc: EPDocument, field: DDYField) -> None:
     """Remove every object of the field's type from the document."""
     for obj in list(doc[field.value]):
         doc.removeidfobject(obj)
 
 
-def _copy_object(doc: IDFDocument, obj: IDFObject) -> IDFObject:
+def _copy_object(doc: EPDocument, obj: IDFObject) -> IDFObject:
     """Add a copy of a DDY object to the document (idfkit's own copy primitive)."""
     return doc.copyidfobject(obj)
 
@@ -323,8 +325,7 @@ class DDYFieldNotFoundError(Exception):
 if __name__ == "__main__":
     from pathlib import Path
 
-    from idfkit import load_idf
-
+    from epinterface.document import load_document
     from epinterface.settings import energyplus_settings
 
     idf_path = Path("US+SF+CZ4A+oilfurnace+unheatedbsmt+IECC_2021.idf")
@@ -333,8 +334,8 @@ if __name__ == "__main__":
     )
 
     ddy_path = epw_path.with_suffix(".ddy")
-    doc = load_idf(str(idf_path), version=energyplus_settings.version_tuple)
-    ddy = load_idf(str(ddy_path), version=energyplus_settings.version_tuple)
+    doc = load_document(idf_path, energyplus_settings.version_tuple)
+    ddy = load_document(ddy_path, energyplus_settings.version_tuple)
 
     ddyspec = DDYSizingSpec(
         design_days=["January 10% Condns WB=>MCDB"],

@@ -1,7 +1,6 @@
 """Zone components."""
 
-from idfkit import IDFDocument
-
+from epinterface.document import EPDocument
 from epinterface.sbem.common import NamedObject
 from epinterface.sbem.components.envelope import ZoneEnvelopeComponent
 from epinterface.sbem.components.operations import ZoneOperationsComponent
@@ -13,7 +12,7 @@ class ZoneComponent(NamedObject):
     Operations: ZoneOperationsComponent
     Envelope: ZoneEnvelopeComponent
 
-    def add_to_idf_zone(self, doc: IDFDocument, zone_name: str) -> IDFDocument:
+    def add_to_idf_zone(self, doc: EPDocument, zone_name: str) -> EPDocument:
         """Add the zone to the IDF."""
         # TODO: consider lifting up the individual loads since the pass through method here
         # does not actually handle all of space use, given that it must synthesize

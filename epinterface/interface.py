@@ -8,10 +8,10 @@ snake_case field names.
 from typing import Annotated, Literal
 
 import numpy as np
-from idfkit import IDFDocument, IDFObject, create_schedule_type_limits
+from idfkit import IDFObject, create_schedule_type_limits
 from pydantic import BaseModel, BeforeValidator, Field
 
-from epinterface.document import add_or_replace
+from epinterface.document import EPDocument, add_or_replace
 from epinterface.schedules import HOURS_PER_YEAR, add_values_schedule
 
 IdealLoadsLimitType = Literal[
@@ -110,14 +110,14 @@ class BaseMaterial(BaseModel, extra="ignore", populate_by_name=True):
         """The name of this material's `Material` object at `thickness` [m]."""
         return f"{self.Name}_{thickness}m"
 
-    def add_layer_to_idf(self, doc: IDFDocument, thickness: float) -> IDFObject:
+    def add_layer_to_idf(self, doc: EPDocument, thickness: float) -> IDFObject:
         """Write this material as a `Material` object of the given thickness.
 
         An identical layer already in the document is reused (see
         `epinterface.document.add_or_replace`).
 
         Args:
-            doc (IDFDocument): The IDF document to write to.
+            doc (EPDocument): The IDF document to write to.
             thickness (float): The thickness of the layer [m].
 
         Returns:
@@ -214,7 +214,7 @@ class DefaultMaterialLibrary(BaseModel):
     stucco: BaseMaterial = stucco
 
 
-def add_default_sim_controls(doc: IDFDocument) -> IDFDocument:
+def add_default_sim_controls(doc: EPDocument) -> EPDocument:
     """Helper to add default simulation controls to the IDF model.
 
     Writes (replacing any existing ones) `SimulationControl`, a `RunPeriod`
@@ -222,10 +222,10 @@ def add_default_sim_controls(doc: IDFDocument) -> IDFDocument:
     `Timestep` and 1.15 heating/cooling `Sizing:Parameters`.
 
     Args:
-        doc (IDFDocument): The IDF model to add the simulation controls to.
+        doc (EPDocument): The IDF model to add the simulation controls to.
 
     Returns:
-        IDFDocument: The IDF model with the added simulation controls.
+        EPDocument: The IDF model with the added simulation controls.
     """
     add_or_replace(
         doc,
@@ -279,13 +279,13 @@ _MONTHS = (
 )
 
 
-def add_site_ground_temperature(doc: IDFDocument, values: list[float]) -> IDFObject:
+def add_site_ground_temperature(doc: EPDocument, values: list[float]) -> IDFObject:
     """Write `Site:GroundTemperature:BuildingSurface` from 12 monthly values.
 
     The document holds one such object; an existing one is replaced.
 
     Args:
-        doc (IDFDocument): The IDF document to write to.
+        doc (EPDocument): The IDF document to write to.
         values (list[float]): The ground temperatures [degC], January first.
 
     Returns:
@@ -306,11 +306,11 @@ def add_site_ground_temperature(doc: IDFDocument, values: list[float]) -> IDFObj
     )
 
 
-def add_zone_list(doc: IDFDocument, name: str, zone_names: list[str]) -> IDFObject:
+def add_zone_list(doc: EPDocument, name: str, zone_names: list[str]) -> IDFObject:
     """Write a `ZoneList` of the (non-empty) `zone_names`.
 
     Args:
-        doc (IDFDocument): The IDF document to write to.
+        doc (EPDocument): The IDF document to write to.
         name (str): The name of the zone list.
         zone_names (list[str]): The zones in the list; empty names are skipped.
 
@@ -327,7 +327,7 @@ def zone_list_names(zone_list: IDFObject) -> list[str]:
     return [group["zone_name"] for group in zone_list.to_dict().get("zones", [])]
 
 
-def ensure_fraction_type_limits(doc: IDFDocument) -> IDFObject:
+def ensure_fraction_type_limits(doc: EPDocument) -> IDFObject:
     """Return the `Fraction` ScheduleTypeLimits, creating it (0 to 1) if missing.
 
     archetypal wrote this object together with every schedule that used it.
@@ -340,12 +340,12 @@ def ensure_fraction_type_limits(doc: IDFDocument) -> IDFObject:
 
 
 def add_constant_schedule(
-    doc: IDFDocument, name: str, value: float, type_limits: str = "Fraction"
+    doc: EPDocument, name: str, value: float, type_limits: str = "Fraction"
 ) -> IDFObject:
     """Add a constant schedule as `Schedule:Year`/`Week:Daily`/`Day:Hourly` objects.
 
     Args:
-        doc (IDFDocument): The IDF document to add the schedule to.
+        doc (EPDocument): The IDF document to add the schedule to.
         name (str): The name of the `Schedule:Year`.
         value (float): The value held all year.
         type_limits (str): The name of an existing `ScheduleTypeLimits`.
@@ -367,14 +367,14 @@ DEFAULT_CONSTANT_SCHEDULE_PAIRS = (
 )
 
 
-def add_default_schedules(doc: IDFDocument) -> tuple[IDFDocument, dict[str, IDFObject]]:
+def add_default_schedules(doc: EPDocument) -> tuple[EPDocument, dict[str, IDFObject]]:
     """Helper to add default schedules to the IDF model.
 
     Args:
-        doc (IDFDocument): The IDF model to add the schedules to.
+        doc (EPDocument): The IDF model to add the schedules to.
 
     Returns:
-        doc (IDFDocument): The IDF model with the added schedules.
+        doc (EPDocument): The IDF model with the added schedules.
         scheds (dict[str, IDFObject]): The added `Schedule:Year` objects by name.
     """
     all_scheds: dict[str, IDFObject] = {}

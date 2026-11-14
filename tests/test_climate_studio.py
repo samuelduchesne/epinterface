@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import pytest
-from idfkit import IDFDocument
 from idfkit.schedules import values as schedule_values
 
 from epinterface.climate_studio.builder import Model, SimulationPathConfig
@@ -14,6 +13,7 @@ from epinterface.climate_studio.interface import (
     extract_sch,
 )
 from epinterface.data import DefaultEPWZipPath
+from epinterface.document import EPDocument
 from epinterface.geometry import ShoeboxGeometry
 from epinterface.settings import energyplus_settings
 from tests.conftest import SQLCleanupSpy
@@ -75,7 +75,7 @@ def test_library_serializes_to_the_same_json(lib_data: dict):
     assert ClimateStudioLibraryV2.model_validate(dumped) == lib
 
 
-def test_library_schedule_writes_year_schedule(doc: IDFDocument, lib_data: dict):
+def test_library_schedule_writes_year_schedule(doc: EPDocument, lib_data: dict):
     """A library schedule becomes a Schedule:Year with its type limits and values."""
     lib = ClimateStudioLibraryV2.model_validate(lib_data)
     occ = lib.Schedules["MA_OCC_SCH"]

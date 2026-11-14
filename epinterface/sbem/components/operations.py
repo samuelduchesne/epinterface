@@ -2,10 +2,10 @@
 
 from logging import getLogger
 
-from idfkit import IDFDocument, IDFObject
+from idfkit import IDFObject
 
 from epinterface.constants import assumed_constants
-from epinterface.document import add_or_replace
+from epinterface.document import EPDocument, add_or_replace
 from epinterface.geometry import get_zone_floor_area, get_zone_glazed_area
 from epinterface.interface import add_constant_schedule
 from epinterface.sbem.common import MetadataMixin, NamedObject
@@ -28,8 +28,8 @@ class ZoneOperationsComponent(
     DHW: DHWComponent
 
     def add_water_use_to_idf_zone(
-        self, doc: IDFDocument, target_zone_name: str
-    ) -> IDFDocument:
+        self, doc: EPDocument, target_zone_name: str
+    ) -> EPDocument:
         """Handle adding water use to the zone based on both DHW and Operations.SpaceUse.WaterUse.
 
         We choose to execute this from the zone component interface because it requires context from both
@@ -53,11 +53,11 @@ class ZoneOperationsComponent(
         # that hook should probably be moved up.
 
         Args:
-            doc (IDFDocument): The IDF document to add the operations to.
+            doc (EPDocument): The IDF document to add the operations to.
             target_zone_name (str): The name of the zone to add the operations to.
 
         Returns:
-            doc (IDFDocument): The updated IDF document.
+            doc (EPDocument): The updated IDF document.
         """
         # TODO: should IsOn definitely live in DHW? should dhw be nullable?
         # should it live in spaceuse.wateruse for consistency?
@@ -143,12 +143,12 @@ class ZoneOperationsComponent(
         return doc
 
     def add_thermostat_to_idf_zone(
-        self, doc: IDFDocument, target_zone_name: str
+        self, doc: EPDocument, target_zone_name: str
     ) -> IDFObject:
         """Add a thermostat to the zone.
 
         Args:
-            doc (IDFDocument): The IDF document to add the thermostat to.
+            doc (EPDocument): The IDF document to add the thermostat to.
             target_zone_name (str): The name of the zone to add the thermostat to.
 
         Returns:
@@ -202,8 +202,8 @@ class ZoneOperationsComponent(
         )
 
     def add_conditioning_to_idf_zone(
-        self, doc: IDFDocument, target_zone_name: str
-    ) -> IDFDocument:
+        self, doc: EPDocument, target_zone_name: str
+    ) -> EPDocument:
         """Add conditioning to an IDF zone."""
         thermostat = self.add_thermostat_to_idf_zone(doc, target_zone_name)
         if self.HVAC.Ventilation.DCV != "NoDCV":

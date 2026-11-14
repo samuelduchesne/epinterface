@@ -7,7 +7,7 @@ from typing import Annotated, Any, Literal, TypeVar, cast
 
 import numpy as np
 import pandas as pd
-from idfkit import IDFDocument, IDFObject
+from idfkit import IDFObject
 from pydantic import (
     AliasChoices,
     BaseModel,
@@ -17,7 +17,12 @@ from pydantic import (
     validate_call,
 )
 
-from epinterface.document import add_construction, add_or_replace, field_name
+from epinterface.document import (
+    EPDocument,
+    add_construction,
+    add_or_replace,
+    watts_per_area,
+)
 from epinterface.interface import (
     HeatRecoveryTypeType,
     IdealLoadsLimitType,
@@ -340,14 +345,14 @@ class GlazingConstructionSimple(
     TVis: float = Field(..., title="Visible transmittance", ge=0, le=1)
     Type: WindowType = Field(..., title="Type of the glazing construction")
 
-    def add_to_idf(self, doc: IDFDocument) -> IDFDocument:
+    def add_to_idf(self, doc: EPDocument) -> EPDocument:
         """Adds the glazing construction to an IDF document.
 
         Args:
-            doc (IDFDocument): The IDF document to add the construction to.
+            doc (EPDocument): The IDF document to add the construction to.
 
         Returns:
-            IDFDocument: The updated IDF document.
+            EPDocument: The updated IDF document.
         """
         add_or_replace(
             doc,
@@ -595,14 +600,14 @@ class OpaqueConstructionLayer(MaterialWithThickness, NamedObject, extra="forbid"
     """Layer of an opaque construction."""
 
     def add_material_to_idf(
-        self, doc: IDFDocument, material_defs: dict[str, OpaqueMaterial]
+        self, doc: EPDocument, material_defs: dict[str, OpaqueMaterial]
     ) -> IDFObject:
         """Write the referenced material as a `Material` of this layer's thickness.
 
         An identical material already in the document is reused.
 
         Args:
-            doc (IDFDocument): The IDF document to write to.
+            doc (EPDocument): The IDF document to write to.
             material_defs (dict[str, OpaqueMaterial]): Opaque material definitions by name.
 
         Returns:
@@ -678,18 +683,18 @@ class OpaqueConstruction(
     Type: OpaqueConstructionType = Field(..., title="Type of the opaque construction")
 
     def add_to_idf(
-        self, doc: IDFDocument, material_defs: dict[str, OpaqueMaterial]
-    ) -> IDFDocument:
+        self, doc: EPDocument, material_defs: dict[str, OpaqueMaterial]
+    ) -> EPDocument:
         """Adds an opaque construction to an IDF document.
 
         Note that this will add the individual materials as well.
 
         Args:
-            doc (IDFDocument): The IDF document to add the construction to.
+            doc (EPDocument): The IDF document to add the construction to.
             material_defs (list[OpaqueMaterial]): List of opaque material definitions.
 
         Returns:
-            IDFDocument: The updated IDF document.
+            EPDocument: The updated IDF document.
         """
         layer_names = [
             layer.add_material_to_idf(doc, material_defs).name for layer in self.Layers
@@ -925,8 +930,8 @@ class ZoneConditioning(
         return cond_scheds
 
     def add_conditioning_to_idf_zone(
-        self, doc: IDFDocument, target_zone_name: str
-    ) -> IDFDocument:
+        self, doc: EPDocument, target_zone_name: str
+    ) -> EPDocument:
         """Add conditioning to an IDF zone.
 
         This constructs HVAC template objects which get assigned to the zone.
@@ -935,11 +940,11 @@ class ZoneConditioning(
         particularly the ones related to humidity control.
 
         Args:
-            doc (IDFDocument): The IDF document to add the conditioning to.
+            doc (EPDocument): The IDF document to add the conditioning to.
             target_zone_name (str): The name of the zone to add the conditioning to.
 
         Returns:
-            IDFDocument: The updated IDF document.
+            EPDocument: The updated IDF document.
         """
         if self.HumidistatIsOn:
             raise NotImplementedClimateStudioParameter(
@@ -1136,16 +1141,16 @@ class ZoneInfiltration(
     )
 
     def add_infiltration_to_idf_zone(
-        self, doc: IDFDocument, target_zone_or_zone_list_name: str
+        self, doc: EPDocument, target_zone_or_zone_list_name: str
     ):
         """Add infiltration to an IDF zone.
 
         Args:
-            doc (IDFDocument): The IDF document to add the infiltration to.
+            doc (EPDocument): The IDF document to add the infiltration to.
             target_zone_or_zone_list_name (str): The name of the zone or zone list to add the infiltration to.
 
         Returns:
-            doc (IDFDocument): The updated IDF document.
+            doc (EPDocument): The updated IDF document.
         """
         if not self.InfiltrationIsOn:
             return doc
@@ -1312,18 +1317,18 @@ class ZoneLoad(
         return self.MetabolicRate * avg_human_weight_kg * conversion_factor
 
     def add_lights_to_idf_zone(
-        self, doc: IDFDocument, target_zone_or_zone_list_name: str
-    ) -> IDFDocument:
+        self, doc: EPDocument, target_zone_or_zone_list_name: str
+    ) -> EPDocument:
         """Add lights to an IDF zone.
 
         Note that this makes some assumptions about the fraction visible/radiant/replaceable.
 
         Args:
-            doc (IDFDocument): The IDF document to add the lights to.
+            doc (EPDocument): The IDF document to add the lights to.
             target_zone_or_zone_list_name (str): The name of the zone or zone list to add the lights to.
 
         Returns:
-            IDFDocument: The updated IDF document.
+            EPDocument: The updated IDF document.
         """
         if not self.LightsIsOn:
             return doc
@@ -1347,11 +1352,7 @@ class ZoneLoad(
             zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
             schedule_name=self.LightsAvailabilitySchedule,
             design_level_calculation_method="Watts/Area",
-            **{
-                field_name(
-                    doc, "Lights", "watts_per_floor_area", "watts_per_zone_floor_area"
-                ): self.LightingPowerDensity
-            },
+            **watts_per_area(doc, self.LightingPowerDensity),
             return_air_fraction=0.0,
             fraction_radiant=0.42,
             fraction_visible=0.18,
@@ -1360,16 +1361,16 @@ class ZoneLoad(
         return doc
 
     def add_people_to_idf_zone(
-        self, doc: IDFDocument, target_zone_or_zone_list_name: str
-    ) -> IDFDocument:
+        self, doc: EPDocument, target_zone_or_zone_list_name: str
+    ) -> EPDocument:
         """Add people to an IDF zone.
 
         Args:
-            doc (IDFDocument): The IDF document to add the people to.
+            doc (EPDocument): The IDF document to add the people to.
             target_zone_or_zone_list_name (str): The name of the zone or zone list to add the people to.
 
         Returns:
-            IDFDocument: The updated IDF document.
+            EPDocument: The updated IDF document.
         """
         if not self.PeopleIsOn:
             return doc
@@ -1411,16 +1412,16 @@ class ZoneLoad(
         return doc
 
     def add_equipment_to_idf_zone(
-        self, doc: IDFDocument, target_zone_or_zone_list_name: str
-    ) -> IDFDocument:
+        self, doc: EPDocument, target_zone_or_zone_list_name: str
+    ) -> EPDocument:
         """Add equipment to an IDF zone.
 
         Args:
-            doc (IDFDocument): The IDF document to add the equipment to.
+            doc (EPDocument): The IDF document to add the equipment to.
             target_zone_or_zone_list_name (str): The name of the zone or zone list to add the equipment to.
 
         Returns:
-            IDFDocument: The updated IDF document.
+            EPDocument: The updated IDF document.
         """
         if not self.EquipmentIsOn:
             return doc
@@ -1436,14 +1437,7 @@ class ZoneLoad(
             zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
             schedule_name=self.EquipmentAvailabilitySchedule,
             design_level_calculation_method="Watts/Area",
-            **{
-                field_name(
-                    doc,
-                    "ElectricEquipment",
-                    "watts_per_floor_area",
-                    "watts_per_zone_floor_area",
-                ): self.EquipmentPowerDensity
-            },
+            **watts_per_area(doc, self.EquipmentPowerDensity),
             fraction_latent=0.0,
             fraction_radiant=0.2,
             fraction_lost=0.0,
@@ -1451,8 +1445,8 @@ class ZoneLoad(
         return doc
 
     def add_loads_to_idf_zone(
-        self, doc: IDFDocument, target_zone_name: str
-    ) -> IDFDocument:
+        self, doc: EPDocument, target_zone_name: str
+    ) -> EPDocument:
         """Add the loads to an IDF zone.
 
         This will add the people, equipment, and lights to the zone.
@@ -1460,11 +1454,11 @@ class ZoneLoad(
         nb: remember to add the schedules.
 
         Args:
-            doc (IDFDocument): The IDF document to add the loads to.
+            doc (EPDocument): The IDF document to add the loads to.
             target_zone_name (str): The name of the zone to add the loads to.
 
         Returns:
-            IDFDocument: The updated IDF document.
+            EPDocument: The updated IDF document.
         """
         doc = self.add_lights_to_idf_zone(doc, target_zone_name)
         doc = self.add_people_to_idf_zone(doc, target_zone_name)
@@ -1519,17 +1513,17 @@ class ZoneHotWater(
         return {self.WaterSchedule} if self.IsOn else set()
 
     def add_water_to_idf_zone(
-        self, doc: IDFDocument, target_zone_name: str, total_ppl: float
-    ) -> IDFDocument:
+        self, doc: EPDocument, target_zone_name: str, total_ppl: float
+    ) -> EPDocument:
         """Add the hot water to an IDF zone.
 
         Args:
-            doc (IDFDocument): The IDF document to add the hot water to.
+            doc (EPDocument): The IDF document to add the hot water to.
             target_zone_name (str): The name of the zone to add the hot water to.
             total_ppl (float): The total number of people in the zone.
 
         Returns:
-            IDFDocument: The updated IDF document.
+            EPDocument: The updated IDF document.
         """
         if not self.IsOn:
             return doc
@@ -1586,8 +1580,8 @@ class ZoneUse(
     HotWater: ZoneHotWater
 
     def add_loads_to_idf_zone(
-        self, doc: IDFDocument, target_zone_name: str
-    ) -> IDFDocument:
+        self, doc: EPDocument, target_zone_name: str
+    ) -> EPDocument:
         """Add the loads to an IDF zone.
 
         This will add the people, equipment, and lights to the zone.
@@ -1595,42 +1589,42 @@ class ZoneUse(
         nb: remember to add the schedules.
 
         Args:
-            doc (IDFDocument): The IDF document to add the loads to.
+            doc (EPDocument): The IDF document to add the loads to.
             target_zone_name (str): The name of the zone to add the loads to.
 
         Returns:
-            IDFDocument: The updated IDF document.
+            EPDocument: The updated IDF document.
         """
         doc = self.Loads.add_loads_to_idf_zone(doc, target_zone_name)
         return doc
 
     def add_conditioning_to_idf_zone(
-        self, doc: IDFDocument, target_zone_name: str
-    ) -> IDFDocument:
+        self, doc: EPDocument, target_zone_name: str
+    ) -> EPDocument:
         """Add the conditioning to an IDF zone.
 
         Args:
-            doc (IDFDocument): The IDF document to add the conditioning to.
+            doc (EPDocument): The IDF document to add the conditioning to.
             target_zone_name (str): The name of the zone to add the conditioning to.
 
         Returns:
-            IDFDocument: The updated IDF document.
+            EPDocument: The updated IDF document.
         """
         doc = self.Conditioning.add_conditioning_to_idf_zone(doc, target_zone_name)
         return doc
 
     def add_hot_water_to_idf_zone(
-        self, doc: IDFDocument, target_zone_name: str, zone_area: float
-    ) -> IDFDocument:
+        self, doc: EPDocument, target_zone_name: str, zone_area: float
+    ) -> EPDocument:
         """Add the hot water to an IDF zone.
 
         Args:
-            doc (IDFDocument): The IDF document to add the hot water to.
+            doc (EPDocument): The IDF document to add the hot water to.
             target_zone_name (str): The name of the zone to add the hot water to.
             zone_area (float): The area of the zone.
 
         Returns:
-            doc (IDFDocument): The updated IDF document.
+            doc (EPDocument): The updated IDF document.
 
         """
         total_people = self.Loads.PeopleDensity * zone_area
@@ -1640,18 +1634,18 @@ class ZoneUse(
         return doc
 
     def add_space_use_to_idf_zone(
-        self, doc: IDFDocument, target_zone: str | IDFObject
-    ) -> IDFDocument:
+        self, doc: EPDocument, target_zone: str | IDFObject
+    ) -> EPDocument:
         """Add the use to an IDF zone.
 
         This will add the loads and conditioning to the zone.
 
         Args:
-            doc (IDFDocument): The IDF document to add the use to.
+            doc (EPDocument): The IDF document to add the use to.
             target_zone (str | IDFObject): The name of the zone, or the `ZoneList`, to add the use to.
 
         Returns:
-            IDFDocument: The updated IDF document.
+            EPDocument: The updated IDF document.
         """
         loads_target = target_zone if isinstance(target_zone, str) else target_zone.name
         doc = self.add_loads_to_idf_zone(doc, loads_target)
@@ -1688,11 +1682,11 @@ class LibraryScheduleTypeLimits(BaseModel):
     NumericType: Literal["Continuous", "Discrete"] | None = "Continuous"
     UnitType: str = "Dimensionless"
 
-    def add_to_idf(self, doc: IDFDocument) -> IDFObject:
+    def add_to_idf(self, doc: EPDocument) -> IDFObject:
         """Write the `ScheduleTypeLimits` object (an identical one is kept as is).
 
         Args:
-            doc (IDFDocument): The IDF document to add the type limits to.
+            doc (EPDocument): The IDF document to add the type limits to.
 
         Returns:
             IDFObject: The `ScheduleTypeLimits` object.
@@ -1715,11 +1709,11 @@ class LibrarySchedule(BaseModel):
     Type: LibraryScheduleTypeLimits
     Values: list[float]
 
-    def add_to_idf(self, doc: IDFDocument) -> IDFObject:
+    def add_to_idf(self, doc: EPDocument) -> IDFObject:
         """Write the schedule as `Schedule:Year` (with week/day objects) and its type limits.
 
         Args:
-            doc (IDFDocument): The IDF document to add the schedule to.
+            doc (EPDocument): The IDF document to add the schedule to.
 
         Returns:
             IDFObject: The `Schedule:Year` object.
@@ -1921,12 +1915,12 @@ class SurfaceHandler(BaseModel):
     surface_group: Literal["glazing", "opaque"]
 
     def assign_srfs(
-        self, doc: IDFDocument, lib: ClimateStudioLibraryV2, construction_name: str
-    ) -> IDFDocument:
+        self, doc: EPDocument, lib: ClimateStudioLibraryV2, construction_name: str
+    ) -> EPDocument:
         """Adds a construction (and its materials) to an IDF and assigns it to matching surfaces.
 
         Args:
-            doc (IDFDocument): The IDF model to add the construction to.
+            doc (EPDocument): The IDF model to add the construction to.
             lib (ClimateStudioLibraryV2): The library of constructions.
             construction_name (str): The name of the construction to add.
         """
@@ -2108,7 +2102,7 @@ class SurfaceHandlers(BaseModel):
 
     def handle_envelope(
         self,
-        doc: IDFDocument,
+        doc: EPDocument,
         lib: ClimateStudioLibraryV2,
         constructions: ZoneConstruction,
         window: WindowDefinition | None,
@@ -2118,13 +2112,13 @@ class SurfaceHandlers(BaseModel):
         Note that this will add a "reversed" construction for the floorsystem slab/ceiling
 
         Args:
-            doc (IDFDocument): The IDF model to add the envelope to.
+            doc (EPDocument): The IDF model to add the envelope to.
             lib (ClimateStudioLibraryV2): The library of constructions.
             constructions (ZoneConstruction): The construction names for the envelope.
             window (WindowDefinition | None): The window definition.
 
         Returns:
-            doc (IDFDocument): The updated IDF model.
+            doc (EPDocument): The updated IDF model.
         """
 
         # outside walls are the ones with outdoor boundary condition and vertical orientation

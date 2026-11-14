@@ -17,7 +17,7 @@ from uuid import uuid4
 import numpy as np
 import pandas as pd
 import yaml
-from idfkit import IDFDocument, IDFObject, load_idf
+from idfkit import IDFObject
 from idfkit.geometry import Polygon3D, get_surface_coords, set_surface_coords
 from idfkit.simulation.parsers.sql import SQLResult
 from ladybug.epw import EPW
@@ -36,7 +36,12 @@ from epinterface.analysis.overheating import (
 from epinterface.constants import assumed_constants, physical_constants
 from epinterface.data import EnergyPlusArtifactDir
 from epinterface.ddy_injector_bayes import DDYSizingSpec
-from epinterface.document import add_or_replace, minimal_document
+from epinterface.document import (
+    EPDocument,
+    add_or_replace,
+    load_document,
+    minimal_document,
+)
 from epinterface.geometry import ShoeboxGeometry, get_zone_floor_area
 from epinterface.interface import (
     add_default_schedules,
@@ -116,10 +121,10 @@ class SurfaceHandler(BaseModel):
 
     def assign_constructions_to_objs(
         self,
-        doc: IDFDocument,
+        doc: EPDocument,
         construction: ConstructionAssemblyComponent
         | GlazingConstructionSimpleComponent,
-    ) -> IDFDocument:
+    ) -> EPDocument:
         """Adds a construction (and its materials) to a document and assigns it to matching surfaces.
 
         The basic idea is to look for certain idf objects that need a construction assigned to them,
@@ -128,7 +133,7 @@ class SurfaceHandler(BaseModel):
         Depending on the configuration of the surface handler, we will look for different types of IDF objects.
 
         Args:
-            doc (IDFDocument): The document to add the construction to.
+            doc (EPDocument): The document to add the construction to.
             construction (ConstructionAssemblyComponent | GlazingConstructionComponent): The construction to add.
         """
         # This will identify what *type* of energy plus object we need to assign a particular construction to.
@@ -404,7 +409,7 @@ class SurfaceHandlers(BaseModel):
 
     def handle_envelope(
         self,
-        doc: IDFDocument,
+        doc: EPDocument,
         constructions: EnvelopeAssemblyComponent,
         window: GlazingConstructionSimpleComponent | None,
         with_attic: bool,
@@ -416,7 +421,7 @@ class SurfaceHandlers(BaseModel):
         Note that this will add a "reversed" construction for the floorsystem slab/ceiling
 
         Args:
-            doc (IDFDocument): The document to add the envelope to.
+            doc (EPDocument): The document to add the envelope to.
             constructions (ZoneConstruction): The construction names for the envelope.
             window (GlazingConstructionSimpleComponent | None): The window definition.
             with_attic (bool): Whether to add the attic floor and ceiling constructions.
@@ -424,7 +429,7 @@ class SurfaceHandlers(BaseModel):
             exposed_basement_frac (float): The fraction of the basement walls that are exposed above ground.
 
         Returns:
-            doc (IDFDocument): The updated document.
+            doc (EPDocument): The updated document.
         """
         floor_ceiling_reversed = constructions.FloorCeilingAssembly.reversed
         attic_floor_reversed = constructions.AtticFloorAssembly.reversed
@@ -693,8 +698,8 @@ class Model(BaseWeather, validate_assignment=True):
 
     def add_zone_lists(
         self,
-        doc: IDFDocument,
-    ) -> tuple[IDFDocument, AddedZoneLists]:
+        doc: EPDocument,
+    ) -> tuple[EPDocument, AddedZoneLists]:
         """Add the zone lists to the document.
 
         Note that this attempts to automatically determine
@@ -702,10 +707,10 @@ class Model(BaseWeather, validate_assignment=True):
         as well as a separate list for all zones.
 
         Args:
-            doc (IDFDocument): The document to add the zone lists to.
+            doc (EPDocument): The document to add the zone lists to.
 
         Returns:
-            doc (IDFDocument): The document with the added zone lists
+            doc (EPDocument): The document with the added zone lists
             zone_lists (AddedZoneLists): The list of zone lists
         """
         all_zone_names = [zone.name for zone in doc["Zone"]]
@@ -806,19 +811,19 @@ class Model(BaseWeather, validate_assignment=True):
 
     def add_constructions(
         self,
-        doc: IDFDocument,
+        doc: EPDocument,
         constructions: EnvelopeAssemblyComponent,
         window_def: GlazingConstructionSimpleComponent | None,
-    ) -> IDFDocument:
+    ) -> EPDocument:
         """Assigns the constructions to the surfaces in the model.
 
         Args:
-            doc (IDFDocument): The document to select the surfaces from.
+            doc (EPDocument): The document to select the surfaces from.
             constructions (ZoneConstruction): The construction template.
             window_def (WindowDefinition): The window definition template.
 
         Returns:
-            doc (IDFDocument): The document with the selected surfaces.
+            doc (EPDocument): The document with the selected surfaces.
         """
         handlers = SurfaceHandlers.Default(
             basement_suffix=self.geometry.basement_suffix
@@ -839,16 +844,16 @@ class Model(BaseWeather, validate_assignment=True):
     def build(  # noqa: C901
         self,
         config: SimulationPathConfig,
-        post_geometry_callback: Callable[[IDFDocument], IDFDocument] | None = None,
-    ) -> IDFDocument:
+        post_geometry_callback: Callable[[EPDocument], EPDocument] | None = None,
+    ) -> EPDocument:
         """Build the energy model.
 
         Args:
             config (SimulationConfig): The configuration for the simulation.
-            post_geometry_callback (Callable[[IDFDocument], IDFDocument] | None): A callback to run after the geometry is added.
+            post_geometry_callback (Callable[[EPDocument], EPDocument] | None): A callback to run after the geometry is added.
 
         Returns:
-            doc (IDFDocument): The built energy model.
+            doc (EPDocument): The built energy model.
         """
         config.output_dir.mkdir(parents=True, exist_ok=True)
         epw_path, ddy_path = self.fetch_weather(config.weather_dir)
@@ -858,7 +863,7 @@ class Model(BaseWeather, validate_assignment=True):
             doc, DESIRED_METERS_FOR_VERSION[energyplus_settings.supported_major]
         )
 
-        ddy = load_idf(str(ddy_path), version=ep_version)
+        ddy = load_document(ddy_path, ep_version)
         # Sizing periods run in this order. archetypal added them in set order
         # (varying from process to process); winter first is the order the
         # regression baseline ran, and the results are sensitive to it.
@@ -1016,16 +1021,16 @@ class Model(BaseWeather, validate_assignment=True):
     def simulate(
         self,
         config: SimulationPathConfig,
-        post_geometry_callback: Callable[[IDFDocument], IDFDocument] | None = None,
-    ) -> tuple[IDFDocument, SQLResultFile]:
+        post_geometry_callback: Callable[[EPDocument], EPDocument] | None = None,
+    ) -> tuple[EPDocument, SQLResultFile]:
         """Build and simulate the model.
 
         Args:
             config (SimulationConfig): The configuration for the simulation.
-            post_geometry_callback (Callable[[IDFDocument], IDFDocument] | None): A callback to run after the geometry is added.
+            post_geometry_callback (Callable[[EPDocument], EPDocument] | None): A callback to run after the geometry is added.
 
         Returns:
-            doc (IDFDocument): The built energy model.
+            doc (EPDocument): The built energy model.
             sql (SQLResultFile): The open sql results file with simulation data.
 
         Raises:
@@ -1093,7 +1098,7 @@ class Model(BaseWeather, validate_assignment=True):
     def run(
         self,
         weather_dir: Path | None = None,
-        post_geometry_callback: Callable[[IDFDocument], IDFDocument] | None = None,
+        post_geometry_callback: Callable[[EPDocument], EPDocument] | None = None,
         eplus_parent_dir: Path | None = None,
         overheating_config: OverheatingAnalysisConfig | None = None,
     ) -> "ModelRunResults":
@@ -1110,7 +1115,7 @@ class Model(BaseWeather, validate_assignment=True):
 
         Args:
             weather_dir (Path): The directory to store the weather files.
-            post_geometry_callback (Callable[[IDFDocument], IDFDocument] | None): A callback to run after the geometry is added.
+            post_geometry_callback (Callable[[EPDocument], EPDocument] | None): A callback to run after the geometry is added.
             eplus_parent_dir (Path | None): The parent directory to store the eplus working directory.  If None, a temporary directory will be used.
             overheating_config (OverheatingAnalysisConfig | None): Configuration for overheating analysis. Skips if None.
 
@@ -1177,12 +1182,12 @@ class Model(BaseWeather, validate_assignment=True):
 
     @staticmethod
     def get_zone_weights_and_names(
-        doc: IDFDocument,
+        doc: EPDocument,
     ) -> tuple[NDArray[np.float64], list[str]]:
         """Get the zone weights and names from the model.
 
         Args:
-            doc (IDFDocument): The model to get the zone weights and names from.
+            doc (EPDocument): The model to get the zone weights and names from.
 
         Returns:
             zone_weights (NDArray[np.float64]): The weights of the zones.
@@ -1274,7 +1279,7 @@ def construct_zone_def(
 class ModelRunResults:
     """The results of a model run."""
 
-    doc: IDFDocument
+    doc: EPDocument
     sql: SQLResult
     energy_and_peak: pd.Series
     err_text: str
@@ -1282,7 +1287,7 @@ class ModelRunResults:
     overheating_results: OverheatingAnalysisResults | None = None
 
     @property
-    def idf(self) -> IDFDocument:
+    def idf(self) -> EPDocument:
         """Deprecated alias of `doc`, the model's document."""
         warnings.warn(
             "ModelRunResults.idf is deprecated; use ModelRunResults.doc",

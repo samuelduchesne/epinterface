@@ -39,8 +39,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-zone geometry matches within a relative tolerance of 1e-9 and an absolute
   tolerance of 0.01. The committed fixtures in `tests/data/regression` are the
   evidence.
-- idfkit is pinned to `>=1.2,<1.3`, the minor version the regression tests
-  were run against.
+- idfkit is pinned to `>=1.3.0rc1,<1.4`.
+- Documents are typed for the EnergyPlus releases epinterface supports, 22.2
+  to 25.2, instead of idfkit's latest release (26.2), which epinterface never
+  builds. `epinterface.document.EPDocument`, the union of idfkit's
+  `IDFDocumentV22_2` to `IDFDocumentV25_2`, annotates every parameter and return
+  value that takes a document, so pyright offers only the object types and
+  fields that all of those releases have. `as_supported(doc)` types a document
+  as one, checking its version at run time, and `load_document(path, version)`
+  loads a file as one. A pre-commit hook also runs `idfkit check` on those
+  releases, which lints the object types and choice values in string-keyed
+  calls such as `doc.add("Lights", ...)`.
+- **Breaking:** `minimal_document` raises `TypeError` for an EnergyPlus version
+  outside 22.2 to 25.2, before building anything. Such a version used to fail
+  later: 22.1 when an infiltration or ventilation object was written (22.1
+  names their zone and flow fields differently), other majors when the results
+  were read.
 
 ### Added
 
@@ -71,8 +85,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (with its `extract()` readers). Write objects with idfkit's `doc.add` and
   idfkit's snake_case field names instead, or with
   `epinterface.document.add_or_replace`, which reuses an identical object of
-  the same name and replaces a different one. `field_name` picks a field's
-  name for the document's EnergyPlus version, `add_construction` writes a
+  the same name and replaces a different one. `watts_per_area` keys a
+  `Lights` or `ElectricEquipment` design level by the field name of the
+  document's EnergyPlus version, `add_construction` writes a
   layered construction, and `add_site_ground_temperature`, `add_zone_list`
   and `BaseMaterial.add_layer_to_idf` replace
   `SiteGroundTemperature.FromValues`, `ZoneList` and `BaseMaterial.as_layer`.

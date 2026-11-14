@@ -3,11 +3,12 @@
 from collections.abc import Callable
 from pathlib import Path
 
-from idfkit import IDFDocument, Vector3D, rotate_building
+from idfkit import Vector3D, rotate_building
 from idfkit.geometry import get_surface_coords
 from pydantic import BaseModel, Field
 
 from epinterface.analysis.overheating import OverheatingAnalysisConfig
+from epinterface.document import EPDocument
 from epinterface.geometry import ShoeboxGeometry
 from epinterface.sbem.builder import AtticAssumptions, BasementAssumptions, Model
 from epinterface.sbem.components.envelope import (
@@ -2085,7 +2086,7 @@ class FlatModel(BaseModel):
 
         return zone
 
-    def to_model(self) -> tuple[Model, Callable[[IDFDocument], IDFDocument]]:
+    def to_model(self) -> tuple[Model, Callable[[EPDocument], EPDocument]]:
         """Returns a tuple of a Model and a post-geometry callback."""
         zone = self.to_zone()
         # TODO: add in a shading mask
@@ -2103,7 +2104,7 @@ class FlatModel(BaseModel):
             basement=False,
         )
 
-        def post_geometry_callback(doc: IDFDocument) -> IDFDocument:
+        def post_geometry_callback(doc: EPDocument) -> EPDocument:
             rotate_building(doc, self.Rotation, anchor=_floor_plan_centre(doc))
             return doc
 
@@ -2141,7 +2142,7 @@ class FlatModel(BaseModel):
         return r
 
 
-def _floor_plan_centre(doc: IDFDocument) -> Vector3D:
+def _floor_plan_centre(doc: EPDocument) -> Vector3D:
     """The centre of the floors' x-y bounding box (geomeppy's rotation anchor)."""
     points = [
         vertex

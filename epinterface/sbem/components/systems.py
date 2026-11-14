@@ -2,9 +2,9 @@
 
 from typing import Literal
 
-from idfkit import IDFDocument
 from pydantic import Field, model_validator
 
+from epinterface.document import EPDocument
 from epinterface.sbem.common import BoolStr, MetadataMixin, NamedObject
 from epinterface.sbem.components.schedules import YearComponent
 
@@ -195,8 +195,8 @@ class ZoneHVACComponent(
     """Zone conditioning object."""
 
     def add_conditioning_to_idf_zone(
-        self, doc: IDFDocument, target_zone_name: str
-    ) -> IDFDocument:
+        self, doc: EPDocument, target_zone_name: str
+    ) -> EPDocument:
         """Add conditioning to an IDF zone.
 
         This constructs HVAC template objects which get assigned to the zone.
@@ -205,11 +205,11 @@ class ZoneHVACComponent(
         particularly the ones related to humidity control.
 
         Args:
-            doc (IDFDocument): The IDF document to add the conditioning to.
+            doc (EPDocument): The IDF document to add the conditioning to.
             target_zone_name (str): The name of the zone to add the conditioning to.
 
         Returns:
-            IDFDocument: The updated IDF document.
+            EPDocument: The updated IDF document.
         """
         # TODO: add the idf conversion functions
 

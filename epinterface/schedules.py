@@ -5,10 +5,10 @@ from collections.abc import Sequence
 from typing import Any, Literal
 
 import numpy as np
-from idfkit import IDFDocument, IDFObject
+from idfkit import IDFObject
 from numpy.typing import NDArray
 
-from epinterface.document import add_or_replace
+from epinterface.document import EPDocument, add_or_replace
 
 HOURS_PER_YEAR = 8760
 DAYS_PER_YEAR = 365
@@ -26,7 +26,7 @@ _WEEKDAY_FIELDS = (
 
 
 def add_values_schedule(
-    doc: IDFDocument,
+    doc: EPDocument,
     name: str,
     values: Sequence[float] | NDArray[np.floating],
     type_limits: str,
@@ -126,7 +126,7 @@ def add_values_schedule(
 
 
 def _is_unchanged(
-    doc: IDFDocument, obj_type: str, name: str, fields: dict[str, Any]
+    doc: EPDocument, obj_type: str, name: str, fields: dict[str, Any]
 ) -> bool:
     """Whether `doc` already holds `obj_type` `name` with exactly these fields."""
     existing = doc[obj_type].get(name)
@@ -140,7 +140,7 @@ def _is_unchanged(
     return stored == {k: v for k, v in fields.items() if v not in (None, "")}
 
 
-def _remove_generated(doc: IDFDocument, name: str) -> None:
+def _remove_generated(doc: EPDocument, name: str) -> None:
     """Remove the `Schedule:Year` `name` and the day/week objects generated for it."""
     generated = re.compile(rf"[dw]_{re.escape(name)}_\d{{2,}}", re.IGNORECASE)
     if name in doc["Schedule:Year"]:
@@ -166,7 +166,7 @@ def _month_day(day_of_year: int) -> tuple[int, int]:
 
 
 def add_day_hourly_schedule(
-    doc: IDFDocument, name: str, type_limits: str, values: Sequence[float]
+    doc: EPDocument, name: str, type_limits: str, values: Sequence[float]
 ) -> IDFObject:
     """Write a `Schedule:Day:Hourly` of 24 values, the first for hour 1.
 

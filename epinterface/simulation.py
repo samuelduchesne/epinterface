@@ -12,10 +12,11 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal, get_args
 
-from idfkit import IDFDocument, SimulationError
+from idfkit import SimulationError
 from idfkit.simulation import find_energyplus, simulate
 from idfkit.simulation.parsers.sql import SQLResult
 
+from epinterface.document import EPDocument
 from epinterface.settings import energyplus_settings
 
 # TODO: add the meters for HVAC systems
@@ -91,7 +92,7 @@ def _filter_like_archetypal(
     return kept
 
 
-def add_output_objects(doc: IDFDocument, desired_meters: Sequence[str]) -> None:
+def add_output_objects(doc: EPDocument, desired_meters: Sequence[str]) -> None:
     """Request the simulation outputs archetypal's `prep_outputs` requested.
 
     The SQLite output (with tabular data), the HTML/CSV summary reports and the
@@ -99,7 +100,7 @@ def add_output_objects(doc: IDFDocument, desired_meters: Sequence[str]) -> None:
     hourly) and `AVAILABLE_HOURLY_VARIABLES` (hourly), filtered as before.
 
     Args:
-        doc (IDFDocument): The document to add the outputs to (modified in place).
+        doc (EPDocument): The document to add the outputs to (modified in place).
         desired_meters (Sequence[str]): The meters the results postprocessing reads.
     """
     for obj_type, fields in (
@@ -163,7 +164,7 @@ class SQLResultFile(SQLResult):
             self.path.unlink(missing_ok=True)
 
 
-def run_energyplus(doc: IDFDocument, epw_path: Path, output_dir: Path) -> SQLResultFile:
+def run_energyplus(doc: EPDocument, epw_path: Path, output_dir: Path) -> SQLResultFile:
     """Simulate `doc` with the configured EnergyPlus and open its SQLite results.
 
     The returned result holds an open connection to the `.sql` file in
@@ -171,7 +172,7 @@ def run_energyplus(doc: IDFDocument, epw_path: Path, output_dir: Path) -> SQLRes
     which Windows refuses while the file is open.
 
     Args:
-        doc (IDFDocument): The model to simulate.
+        doc (EPDocument): The model to simulate.
         epw_path (Path): The weather file.
         output_dir (Path): The EnergyPlus run directory.
 

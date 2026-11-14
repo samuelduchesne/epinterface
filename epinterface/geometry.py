@@ -7,7 +7,6 @@ from typing import Any, Literal, cast
 
 import numpy as np
 from idfkit import (
-    IDFDocument,
     IDFObject,
     MatchOptions,
     Polygon3D,
@@ -27,10 +26,10 @@ from pydantic import BaseModel, Field
 from shapely import LineString, Polygon, from_wkt
 from shapely.affinity import translate
 
-from epinterface.document import add_construction, add_or_replace
+from epinterface.document import EPDocument, add_construction, add_or_replace
 
 
-def _total_floor_area(doc: IDFDocument) -> float:
+def _total_floor_area(doc: EPDocument) -> float:
     """Sum the areas of all floor surfaces in the document [m2]."""
     return sum(
         calculate_surface_area(srf)
@@ -40,7 +39,7 @@ def _total_floor_area(doc: IDFDocument) -> float:
 
 
 def match_idf_to_building_and_neighbors(
-    doc: IDFDocument,
+    doc: EPDocument,
     building: Polygon | str,
     neighbor_polys: Sequence[Polygon | str | None],
     neighbor_floors: Sequence[float | int | None],
@@ -49,11 +48,11 @@ def match_idf_to_building_and_neighbors(
     target_long_length: float,
     rotation_angle: float,
     allow_no_height: bool = False,
-) -> IDFDocument:
+) -> EPDocument:
     """Match an IDF model to a building and neighbors by scaling and rotating the IDF model and adding shading blocks for neighbors.
 
     Args:
-        doc (IDFDocument): The IDF document to match.
+        doc (EPDocument): The IDF document to match.
         building (Polygon | str): The building to match.
         neighbor_polys (list[Polygon | str | None]): The neighbors to inject as shading.
         neighbor_floors (list[float | int | None]): The counts of the neighbors.
@@ -64,7 +63,7 @@ def match_idf_to_building_and_neighbors(
         allow_no_height (bool): Whether to allow no height for neighbors.
 
     Returns:
-        doc (IDFDocument): The matched IDF document.
+        doc (EPDocument): The matched IDF document.
     """
     building_geo = (
         cast(Polygon, from_wkt(building)) if isinstance(building, str) else building
@@ -132,7 +131,7 @@ def match_idf_to_building_and_neighbors(
 
 
 def _add_shading_walls(
-    doc: IDFDocument, name: str, footprint: list[tuple[float, float]], height: float
+    doc: EPDocument, name: str, footprint: list[tuple[float, float]], height: float
 ) -> None:
     """Add the walls of a shading block (geomeppy added no top cap)."""
     for obj in add_shading_block(doc, name=name, footprint=footprint, height=height):
@@ -486,7 +485,7 @@ class ShoeboxGeometry(BaseModel):
         else:
             return 1
 
-    def add(self, doc: IDFDocument) -> IDFDocument:
+    def add(self, doc: EPDocument) -> EPDocument:
         """Constructs a simple shoebox geometry in the IDF document.
 
         Zones are built with idfkit's `create_block`; the result reproduces the
@@ -622,9 +621,7 @@ class ShoeboxGeometry(BaseModel):
                 srf.sun_exposure = "NoSun"
                 srf.wind_exposure = "NoWind"
 
-    def _add_attic(
-        self, doc: IDFDocument, surfaces: list[IDFObject]
-    ) -> list[IDFObject]:
+    def _add_attic(self, doc: EPDocument, surfaces: list[IDFObject]) -> list[IDFObject]:
         """Add a gabled attic zone on top of the block.
 
         The block's roofs become ceilings, and the attic gets one floor per
@@ -766,7 +763,7 @@ class ShoeboxGeometry(BaseModel):
 
     def _rename_like_geomeppy(
         self,
-        doc: IDFDocument,
+        doc: EPDocument,
         zones: list[IDFObject],
         surfaces: list[IDFObject],
         attic_floors: list[IDFObject],
@@ -858,7 +855,7 @@ def _default_construction_name(surface: IDFObject) -> str | None:
     }.get(surface_type)
 
 
-def _set_default_constructions(doc: IDFDocument) -> None:
+def _set_default_constructions(doc: EPDocument) -> None:
     """Create geomeppy's placeholder constructions and assign them by surface type.
 
     The constructions ("Project Wall", "Project Floor", ..., and "Project
@@ -937,7 +934,7 @@ def _geomeppy_surface_name(zone_name: str, suffix: str, is_perimeter: bool) -> s
 
 
 def _add_window(
-    doc: IDFDocument,
+    doc: EPDocument,
     wall: IDFObject,
     wwr: float,
     construction: str = "Project External Window",
@@ -983,14 +980,14 @@ def _add_window(
     return doc.add("FenestrationSurface:Detailed", f"{wall.name} window", fields)
 
 
-def get_zone_floor_area(doc: IDFDocument, zone_name: str) -> float:
+def get_zone_floor_area(doc: EPDocument, zone_name: str) -> float:
     """Get the floor area of a zone by iterating over building surfaces that are of type 'floor'.
 
     If more than one floor is found, for now we will return an error; it could be possible in an
     attic where the floor below has perim/core zoning...
 
     Args:
-        doc (IDFDocument): The IDF document to get the floor area from.
+        doc (EPDocument): The IDF document to get the floor area from.
         zone_name (str): The name of the zone to get the floor area from.
 
     Returns:
@@ -1014,11 +1011,11 @@ def get_zone_floor_area(doc: IDFDocument, zone_name: str) -> float:
     return area
 
 
-def get_zone_glazed_area(doc: IDFDocument, zone_name: str) -> float:
+def get_zone_glazed_area(doc: EPDocument, zone_name: str) -> float:
     """Calculate the total area of windows for a specific zone in the IDF document.
 
     Args:
-        doc (IDFDocument): The IDF document.
+        doc (EPDocument): The IDF document.
         zone_name (str): The name of the zone to calculate the window area for.
 
     Returns:

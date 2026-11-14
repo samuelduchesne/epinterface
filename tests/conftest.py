@@ -6,9 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
-from idfkit import IDFDocument
 
-from epinterface.document import minimal_document
+from epinterface.document import EPDocument, minimal_document
 from epinterface.geometry import ShoeboxGeometry
 from epinterface.sbem.prisma.client import PrismaSettings
 from epinterface.sbem.prisma.seed_fns import (
@@ -48,7 +47,7 @@ def preseeded_readonly_db():
 
 
 @pytest.fixture(scope="function")
-def doc() -> IDFDocument:
+def doc() -> EPDocument:
     """A fresh minimal idfkit document at the configured version."""
     return minimal_document(energyplus_settings.version_tuple)
 

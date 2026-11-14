@@ -4,14 +4,15 @@ import logging
 from pathlib import Path
 
 import pandas as pd
-from idfkit import IDFDocument, load_idf
 
 from epinterface.ddy_injector_bayes import DDYSizingSpec
 from epinterface.document import (
+    EPDocument,
     add_construction,
     add_or_replace,
-    field_name,
+    load_document,
     minimal_document,
+    watts_per_area,
 )
 from epinterface.geometry import ShoeboxGeometry
 from epinterface.interface import (
@@ -43,7 +44,7 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
 
     def build(
         self, output_dir: Path | str, weather_cache_dir: Path | str | None = None
-    ) -> IDFDocument:
+    ) -> EPDocument:
         """Build the energy model.
 
         Args:
@@ -51,7 +52,7 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
             weather_cache_dir (Path | str | None): The directory to cache the weather files.
 
         Returns:
-            IDFDocument: The constructed IDF model.
+            EPDocument: The constructed IDF model.
         """
         if isinstance(output_dir, str):
             output_dir = Path(output_dir)
@@ -66,7 +67,7 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
 
         version = energyplus_settings.version_tuple
         doc = minimal_document(version)
-        ddy = load_idf(str(ddy_path), version=version)
+        ddy = load_document(ddy_path, version)
         ddyspec = DDYSizingSpec(match=True)
         ddyspec.inject_ddy(doc, ddy)
 
@@ -257,11 +258,6 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
             velocity_squared_term_coefficient=0.0,
         )
 
-        def watts_per_area(obj_type: str) -> str:
-            return field_name(
-                doc, obj_type, "watts_per_floor_area", "watts_per_zone_floor_area"
-            )
-
         # Handle Equipment
         equip_sched = add_values_schedule(
             doc,
@@ -276,7 +272,7 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
             zone_or_zonelist_or_space_or_spacelist_name=zone_list.name,
             schedule_name=equip_sched.name,
             design_level_calculation_method="Watts/Area",
-            **{watts_per_area("ElectricEquipment"): self.EPD},
+            **watts_per_area(doc, self.EPD),
             fraction_latent=0.0,
             fraction_radiant=0.2,
             fraction_lost=0.0,
@@ -296,7 +292,7 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
             zone_or_zonelist_or_space_or_spacelist_name=zone_list.name,
             schedule_name=lights_sched.name,
             design_level_calculation_method="Watts/Area",
-            **{watts_per_area("Lights"): self.LPD},
+            **watts_per_area(doc, self.LPD),
             return_air_fraction=0.0,
             fraction_radiant=0.42,
             fraction_visible=0.18,

@@ -1,8 +1,8 @@
 """Tests for adding envelope components to an IDF document."""
 
 import pytest
-from idfkit import IDFDocument
 
+from epinterface.document import EPDocument
 from epinterface.interface import InfDesignFlowRateCalculationMethodType
 from epinterface.sbem.components.envelope import InfiltrationComponent
 
@@ -15,7 +15,7 @@ from epinterface.sbem.components.envelope import InfiltrationComponent
     ],
 )
 def test_infiltration_comp(
-    doc: IDFDocument,
+    doc: EPDocument,
     is_on: bool,
     rates: tuple[float, float],
     calculation_method_main: InfDesignFlowRateCalculationMethodType,

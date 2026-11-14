@@ -1,12 +1,13 @@
 """Test the builder."""
 
 import pytest
-from idfkit import IDFDocument, IDFObject, SimulationError, load_idf
+from idfkit import IDFObject, SimulationError
 from idfkit.geometry import Vector3D, calculate_surface_area, get_surface_coords
 from prisma import Prisma
 
 from epinterface.data import DefaultEPWZipPath, EnergyPlusArtifactDir
 from epinterface.ddy_injector_bayes import DDYSizingSpec
+from epinterface.document import EPDocument, load_document
 from epinterface.geometry import ShoeboxGeometry
 from epinterface.sbem.builder import (
     AtticAssumptions,
@@ -73,7 +74,7 @@ def test_builder(preseeded_readonly_db: Prisma, sql_cleanup_spy: SQLCleanupSpy):
 def test_simulation_failure_raises(preseeded_readonly_db: Prisma, tmp_path):
     """EnergyPlus failing (here: no Building object) raises SimulationError."""
 
-    def break_model(doc: IDFDocument) -> IDFDocument:
+    def break_model(doc: EPDocument) -> EPDocument:
         for building in list(doc["Building"]):
             doc.removeidfobject(building)
         return doc
@@ -113,14 +114,11 @@ def test_exposed_basement_walls_are_split(preseeded_readonly_db: Prisma, tmp_pat
         assert bottom.construction_name == top.construction_name
 
 
-def test_inject_ddy_in_requested_order(doc: IDFDocument):
+def test_inject_ddy_in_requested_order(doc: EPDocument):
     """The location and the requested sizing periods replace the document's own."""
-    ddy = load_idf(
-        str(
-            EnergyPlusArtifactDir
-            / "USA_MA_Boston-Logan.Intl.AP.725090_TMYx.2009-2023.ddy"
-        ),
-        version=energyplus_settings.version_tuple,
+    ddy = load_document(
+        EnergyPlusArtifactDir / "USA_MA_Boston-Logan.Intl.AP.725090_TMYx.2009-2023.ddy",
+        energyplus_settings.version_tuple,
     )
     DDYSizingSpec(
         match=False, conditions_types=["Winter Extreme", "Summer Extreme"]
@@ -134,13 +132,13 @@ def test_inject_ddy_in_requested_order(doc: IDFDocument):
     assert len(doc["SizingPeriod:DesignDay"]) == 0
 
 
-def test_flat_model_rotates_around_floor_plan_centre(doc: IDFDocument):
+def test_flat_model_rotates_around_floor_plan_centre(doc: EPDocument):
     """The FlatModel callback rotates the building in place, like geomeppy did."""
     flat = FlatModel(**{**_FLAT_MODEL_KWARGS, "Rotation": 90})
     model, callback = flat.to_model()
     doc = model.geometry.add(doc)
 
-    def footprint(d: IDFDocument) -> tuple[float, float, float, float]:
+    def footprint(d: EPDocument) -> tuple[float, float, float, float]:
         points = [
             v
             for s in d["BuildingSurface:Detailed"]

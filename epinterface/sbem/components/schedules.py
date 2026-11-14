@@ -4,10 +4,10 @@ import calendar
 from dataclasses import dataclass
 from typing import Literal
 
-from idfkit import IDFDocument, IDFObject
+from idfkit import IDFObject
 from pydantic import Field, field_validator, model_validator
 
-from epinterface.document import add_or_replace
+from epinterface.document import EPDocument, add_or_replace
 from epinterface.interface import PROTECTED_SCHEDULE_NAMES
 from epinterface.sbem.common import NamedObject
 from epinterface.schedules import add_day_hourly_schedule
@@ -32,7 +32,7 @@ class TypeLimitsSpec:
     Numeric_Type: Literal["Continuous", "Discrete"] | None = None
     Unit_Type: str | None = None
 
-    def add_to_idf(self, doc: IDFDocument) -> IDFObject:
+    def add_to_idf(self, doc: EPDocument) -> IDFObject:
         """Write the `ScheduleTypeLimits` object (an identical one is reused)."""
         return add_or_replace(
             doc,
@@ -156,18 +156,18 @@ class DayComponent(NamedObject, extra="forbid"):
         return self
 
     def add_day_to_idf(
-        self, doc: IDFDocument, name_prefix: str | None
-    ) -> tuple[IDFDocument, str]:
+        self, doc: EPDocument, name_prefix: str | None
+    ) -> tuple[EPDocument, str]:
         """Add the day to the IDF document.
 
         The name prefix can be used to scope the schedule creation to ensure a unique schedule per object.
 
         Args:
-            doc (IDFDocument): The IDF document to add the day to.
+            doc (EPDocument): The IDF document to add the day to.
             name_prefix (str | None): The prefix to use for the schedule name.
 
         Returns:
-            doc (IDFDocument): The IDF document with the day added.
+            doc (EPDocument): The IDF document with the day added.
             day_name (str): The name of the day schedule.
         """
         desired_name = self.Name
@@ -229,23 +229,23 @@ class WeekComponent(NamedObject, extra="forbid"):
 
     def add_week_to_idf(
         self,
-        doc: IDFDocument,
+        doc: EPDocument,
         name_prefix: str | None,
         summer_design_day_sch_name: str | None = None,
         winter_design_day_sch_name: str | None = None,
-    ) -> tuple[IDFDocument, str]:
+    ) -> tuple[EPDocument, str]:
         """Add the week to the IDF document.
 
         The name prefix can be used to scope the schedule creation to ensure a unique schedule per object.
 
         Args:
-            doc (IDFDocument): The IDF document to add the week to.
+            doc (EPDocument): The IDF document to add the week to.
             name_prefix (str | None): The prefix to use for the schedule name.
             summer_design_day_sch_name (str | None): The name of the summer design day schedule.
             winter_design_day_sch_name (str | None): The name of the winter design day schedule.
 
         Returns:
-            doc (IDFDocument): The IDF document with the week added.
+            doc (EPDocument): The IDF document with the week added.
             week_name (str): The name of the week schedule.
         """
         desired_name = self.Name
@@ -414,7 +414,7 @@ class YearComponent(NamedObject, extra="forbid"):
 
     def add_year_to_idf(
         self,
-        doc: IDFDocument,
+        doc: EPDocument,
         name_prefix: str | None = None,
         summer_design_day_sch_name: str | None = None,
         winter_design_day_sch_name: str | None = None,
@@ -424,13 +424,13 @@ class YearComponent(NamedObject, extra="forbid"):
         The name prefix can be used to scope the schedule creation to ensure a unique schedule per object.
 
         Args:
-            doc (IDFDocument): The IDF document to add the year to.
+            doc (EPDocument): The IDF document to add the year to.
             name_prefix (str | None): The prefix to use for the schedule name.
             summer_design_day_sch_name (str | None): The name of the summer design day schedule.
             winter_design_day_sch_name (str | None): The name of the winter design day schedule.
 
         Returns:
-            doc (IDFDocument): The IDF document with the year added.
+            doc (EPDocument): The IDF document with the year added.
             year_name (str): The name of the year schedule.
         """
         desired_name = self.Name

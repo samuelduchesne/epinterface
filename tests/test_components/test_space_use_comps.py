@@ -1,9 +1,9 @@
 """Test the space use components."""
 
 import pytest
-from idfkit import IDFDocument
 from prisma import Prisma
 
+from epinterface.document import EPDocument
 from epinterface.sbem.components.schedules import YearComponent
 from epinterface.sbem.components.space_use import (
     DimmingTypeType,
@@ -29,7 +29,7 @@ def schedule(preseeded_readonly_db: Prisma):
 
 @pytest.mark.parametrize("is_on", [True, False])
 def test_add_lighting_to_idf_zone(
-    doc: IDFDocument, schedule: YearComponent, is_on: bool
+    doc: EPDocument, schedule: YearComponent, is_on: bool
 ):
     """Test the add_lighting_to_idf_zone method."""
     component_name = "new_office"
@@ -66,7 +66,7 @@ def test_add_lighting_to_idf_zone(
 
 @pytest.mark.parametrize("dimming_type", ["Stepped", "Continuous"])
 def test_add_lighting_to_idf_zone_with_dimming(
-    doc: IDFDocument, schedule: YearComponent, dimming_type: DimmingTypeType
+    doc: EPDocument, schedule: YearComponent, dimming_type: DimmingTypeType
 ):
     """Test the add_lighting_to_idf_zone method with dimming."""
     lighting = LightingComponent(
@@ -82,7 +82,7 @@ def test_add_lighting_to_idf_zone_with_dimming(
 
 @pytest.mark.parametrize("is_on,density", [(True, 10), (False, 0)])
 def test_add_people_to_idf_zone(
-    doc: IDFDocument, schedule: YearComponent, is_on: bool, density: float
+    doc: EPDocument, schedule: YearComponent, is_on: bool, density: float
 ):
     """Test the add_people_to_idf_zone method."""
     component_name = "new_office"
@@ -126,7 +126,7 @@ def test_add_people_to_idf_zone(
 
 @pytest.mark.parametrize("is_on", [True, False])
 def test_add_equipment_to_idf_zone(
-    doc: IDFDocument, schedule: YearComponent, is_on: bool
+    doc: EPDocument, schedule: YearComponent, is_on: bool
 ):
     """Test the add_equipment_to_idf_zone method."""
     component_name = "new_office"
@@ -164,18 +164,18 @@ def test_add_equipment_to_idf_zone(
 
 
 @pytest.mark.skip(reason="Not implemented")
-def test_add_thermostat_to_idf_zone(doc: IDFDocument):
+def test_add_thermostat_to_idf_zone(doc: EPDocument):
     """Test the add_thermostat_to_idf_zone method."""
     pass
 
 
 @pytest.mark.skip(reason="Not implemented")
-def test_add_water_to_idf_zone(doc: IDFDocument):
+def test_add_water_to_idf_zone(doc: EPDocument):
     """Test the add_water_to_idf_zone method."""
     pass
 
 
-def test_add_space_use_to_idf_zone(doc: IDFDocument, schedule: YearComponent):
+def test_add_space_use_to_idf_zone(doc: EPDocument, schedule: YearComponent):
     """Test the add_loads_to_idf_zone method."""
     zone_name = "default_zone"
 
@@ -321,7 +321,7 @@ def test_add_space_use_to_idf_zone(doc: IDFDocument, schedule: YearComponent):
 
 
 def test_shared_schedule_across_zones_does_not_duplicate(
-    doc: IDFDocument, schedule: YearComponent
+    doc: EPDocument, schedule: YearComponent
 ):
     """Two zones using one schedule reuse its year/week/day/limits objects."""
     lighting = LightingComponent(

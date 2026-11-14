@@ -3,11 +3,10 @@
 import logging
 from typing import Literal
 
-from idfkit import IDFDocument
 from pydantic import Field
 
 from epinterface.constants import assumed_constants, physical_constants
-from epinterface.document import add_or_replace, field_name
+from epinterface.document import EPDocument, add_or_replace, watts_per_area
 from epinterface.interface import add_constant_schedule
 from epinterface.sbem.common import BoolStr, MetadataMixin, NamedObject
 from epinterface.sbem.components.schedules import (
@@ -43,16 +42,16 @@ class OccupancyComponent(NamedObject, MetadataMixin, extra="forbid"):
         return self.MetabolicRate * avg_human_weight_kg * conversion_factor
 
     def add_people_to_idf_zone(
-        self, doc: IDFDocument, target_zone_or_zone_list_name: str
-    ) -> IDFDocument:
+        self, doc: EPDocument, target_zone_or_zone_list_name: str
+    ) -> EPDocument:
         """Add people to an IDF zone.
 
         Args:
-            doc (IDFDocument): The IDF document to add the people to.
+            doc (EPDocument): The IDF document to add the people to.
             target_zone_or_zone_list_name (str): The name of the zone or zone list to add the people to.
 
         Returns:
-            IDFDocument: The updated IDF document.
+            EPDocument: The updated IDF document.
         """
         if not self.IsOn:
             return doc
@@ -115,18 +114,18 @@ class LightingComponent(NamedObject, MetadataMixin, extra="forbid"):
     IsOn: BoolStr = Field(..., title="Lights are on")
 
     def add_lights_to_idf_zone(
-        self, doc: IDFDocument, target_zone_or_zone_list_name: str
-    ) -> IDFDocument:
+        self, doc: EPDocument, target_zone_or_zone_list_name: str
+    ) -> EPDocument:
         """Add lights to an IDF zone.
 
         Note that this makes some assumptions about the fraction visible/radiant/replaceable.
 
         Args:
-            doc (IDFDocument): The IDF document to add the lights to.
+            doc (EPDocument): The IDF document to add the lights to.
             target_zone_or_zone_list_name (str): The name of the zone or zone list to add the lights to.
 
         Returns:
-            IDFDocument: The updated IDF document.
+            EPDocument: The updated IDF document.
         """
         if not self.IsOn:
             return doc
@@ -141,9 +140,6 @@ class LightingComponent(NamedObject, MetadataMixin, extra="forbid"):
             summer_design_day_sch_name="d_AllOn_00",
             winter_design_day_sch_name="d_AllOn_00",
         )
-        watts_per_area = field_name(
-            doc, "Lights", "watts_per_floor_area", "watts_per_zone_floor_area"
-        )
         add_or_replace(
             doc,
             "Lights",
@@ -151,7 +147,7 @@ class LightingComponent(NamedObject, MetadataMixin, extra="forbid"):
             zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
             schedule_name=year_name,
             design_level_calculation_method="Watts/Area",
-            **{watts_per_area: self.PowerDensity},
+            **watts_per_area(doc, self.PowerDensity),
             return_air_fraction=assumed_constants.ReturnAirFractionLights,
             fraction_radiant=assumed_constants.FractionRadiantLights,
             fraction_visible=assumed_constants.FractionVisibleLights,
@@ -170,16 +166,16 @@ class EquipmentComponent(NamedObject, MetadataMixin, extra="forbid"):
     IsOn: BoolStr = Field(..., title="Equipment is on")
 
     def add_equipment_to_idf_zone(
-        self, doc: IDFDocument, target_zone_or_zone_list_name: str
-    ) -> IDFDocument:
+        self, doc: EPDocument, target_zone_or_zone_list_name: str
+    ) -> EPDocument:
         """Add equipment to an IDF zone.
 
         Args:
-            doc (IDFDocument): The IDF document to add the equipment to.
+            doc (EPDocument): The IDF document to add the equipment to.
             target_zone_or_zone_list_name (str): The name of the zone or zone list to add the equipment to.
 
         Returns:
-            IDFDocument: The updated IDF document.
+            EPDocument: The updated IDF document.
         """
         if not self.IsOn:
             return doc
@@ -191,12 +187,6 @@ class EquipmentComponent(NamedObject, MetadataMixin, extra="forbid"):
             summer_design_day_sch_name="d_AllOn_00",
             winter_design_day_sch_name="d_AllOn_00",
         )
-        watts_per_area = field_name(
-            doc,
-            "ElectricEquipment",
-            "watts_per_floor_area",
-            "watts_per_zone_floor_area",
-        )
         add_or_replace(
             doc,
             "ElectricEquipment",
@@ -204,7 +194,7 @@ class EquipmentComponent(NamedObject, MetadataMixin, extra="forbid"):
             zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
             schedule_name=year_name,
             design_level_calculation_method="Watts/Area",
-            **{watts_per_area: self.PowerDensity},
+            **watts_per_area(doc, self.PowerDensity),
             fraction_latent=assumed_constants.FractionLatentEquipment,
             fraction_radiant=assumed_constants.FractionRadiantEquipment,
             fraction_lost=assumed_constants.FractionLostEquipment,
@@ -254,18 +244,18 @@ class ZoneSpaceUseComponent(NamedObject, MetadataMixin, extra="forbid"):
     # TODO: Is this really necessary, or should it be lifted up to the ZoneComponent?
     # it currently is acting as a very bare bones passthrough.
     def add_loads_to_idf_zone(
-        self, doc: IDFDocument, target_zone_name: str
-    ) -> IDFDocument:
+        self, doc: EPDocument, target_zone_name: str
+    ) -> EPDocument:
         """Add the loads to an IDF zone.
 
         This will add the people, equipment, and lights to the zone.
 
         Args:
-            doc (IDFDocument): The IDF document to add the loads to.
+            doc (EPDocument): The IDF document to add the loads to.
             target_zone_name (str): The name of the zone to add the loads to.
 
         Returns:
-            IDFDocument: The updated IDF document.
+            EPDocument: The updated IDF document.
         """
         doc = self.Lighting.add_lights_to_idf_zone(doc, target_zone_name)
         doc = self.Occupancy.add_people_to_idf_zone(doc, target_zone_name)
