@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.0] - 2026-11-13
+## [Unreleased]
 
 ### Changed
 
@@ -34,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DefaultMinimalIDFPath`, and the IDFVersionUpdater transition step are gone,
   so the first build in a process no longer spends about 37 s migrating the
   file, and the EnergyPlus transition binaries are no longer needed.
-- Simulation outputs match the archetypal-based 1.x results on EnergyPlus
+- Simulation outputs match the archetypal-based results on EnergyPlus
   25.2.0 within a relative tolerance of 1e-3 and an absolute tolerance of 1e-6;
   per-zone geometry matches within a relative tolerance of 1e-9 and an absolute
   tolerance of 0.01. The committed fixtures in `tests/data/regression` are the
@@ -126,7 +126,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   change between processes, which could change results (notably core/perimeter
   models with a basement and attic).
 
-### Migrating from 1.x (GLOBi)
+### Migrating from the archetypal-based releases (GLOBi)
 
 One line changes:
 
@@ -137,6 +137,6 @@ run_result.sql.timeseries_by_name(names, reporting_frequency="Hourly")
 run_result.hourly_timeseries(names)
 ```
 
-Move the pin from `epinterface>=1.4,<1.5` to `epinterface>=2.0,<3`. Code that
-passes archetypal or eppy objects to epinterface, or reads them from `Model`
-results, must switch to `IDFDocument` and `SQLResult`.
+Code that passes archetypal or eppy objects to epinterface, or reads them from
+`Model` results, must switch to idfkit documents (`epinterface.document.EPDocument`)
+and `SQLResult`.
