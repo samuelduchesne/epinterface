@@ -10,12 +10,10 @@ from pydantic import Field, field_validator, model_validator
 from epinterface.document import EPDocument, add_or_replace
 from epinterface.interface import PROTECTED_SCHEDULE_NAMES
 from epinterface.sbem.common import NamedObject
-from epinterface.schedules import add_day_hourly_schedule
+from epinterface.schedules import NON_LEAP_MONTH_LENGTHS, add_day_hourly_schedule
 
 # TODO: handle schedule type limits in a consistent way once?
 ScheduleTypeLimitType = Literal["Fraction", "Temperature", "AnyNumber"]
-
-_NON_LEAP_MONTH_LENGTHS = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
 
 
 @dataclass(frozen=True)
@@ -537,7 +535,7 @@ class YearComponent(NamedObject, extra="forbid"):
                     "start_month": month,
                     "start_day": 1,
                     "end_month": month,
-                    "end_day": _NON_LEAP_MONTH_LENGTHS[month - 1],
+                    "end_day": NON_LEAP_MONTH_LENGTHS[month - 1],
                 }
                 for month, week_name in enumerate(week_names, start=1)
             ],

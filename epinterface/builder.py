@@ -16,8 +16,10 @@ from epinterface.document import (
 )
 from epinterface.geometry import ShoeboxGeometry
 from epinterface.interface import (
+    DEFAULT_CONSTANT_SCHEDULE_PAIRS,
     DefaultMaterialLibrary,
     add_constant_schedule,
+    add_ideal_loads_template,
     add_zone_list,
     ensure_fraction_type_limits,
 )
@@ -105,12 +107,8 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
         # configure timestep
         add_or_replace(doc, "Timestep", number_of_timesteps_per_hour=self.timestep)
 
-        # create constant scheds
-        for on_name, off_name in (
-            ("Always_On", "Always_Off"),
-            ("Always On", "Always Off"),
-            ("On", "Off"),
-        ):
+        # create constant scheds (the first three default pairs)
+        for on_name, off_name in DEFAULT_CONSTANT_SCHEDULE_PAIRS[:3]:
             add_constant_schedule(doc, on_name, 1)
             add_constant_schedule(doc, off_name, 0)
         always_on_name = "On"
@@ -180,33 +178,7 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
             zone_name = zone.name
             if "attic" in zone_name.lower():
                 continue
-            add_or_replace(
-                doc,
-                "HVACTemplate:Zone:IdealLoadsAirSystem",
-                "",
-                zone_name=zone_name,
-                template_thermostat_name=thermostat.name,
-                maximum_heating_supply_air_temperature=30.0,
-                minimum_cooling_supply_air_temperature=18.0,
-                maximum_heating_supply_air_humidity_ratio=0.0156,
-                minimum_cooling_supply_air_humidity_ratio=0.0077,
-                heating_limit="NoLimit",
-                cooling_limit="NoLimit",
-                dehumidification_control_type="None",
-                cooling_sensible_heat_ratio=0.7,
-                dehumidification_setpoint=60.0,
-                humidification_control_type="None",
-                humidification_setpoint=30.0,
-                outdoor_air_method="None",
-                outdoor_air_flow_rate_per_person=0.00944,
-                outdoor_air_flow_rate_per_zone_floor_area=0.00025,
-                outdoor_air_flow_rate_per_zone=0.0,
-                demand_controlled_ventilation_type="None",
-                outdoor_air_economizer_type="NoEconomizer",
-                heat_recovery_type="None",
-                sensible_heat_recovery_effectiveness=0.7,
-                latent_heat_recovery_effectiveness=0.65,
-            )
+            add_ideal_loads_template(doc, zone_name, thermostat.name)
 
         # Handle People
         occ_sched = add_values_schedule(

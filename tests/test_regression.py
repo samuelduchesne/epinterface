@@ -23,6 +23,15 @@ def test_regression(key, preseeded_readonly_db, tmp_path):
     """Current outputs must match the frozen baseline."""
     model, oh = REGRESSION_CONFIGS[key](preseeded_readonly_db)
     r = model.run(eplus_parent_dir=tmp_path, overheating_config=oh)
+    try:
+        _check_against_baseline(key, r, oh, tmp_path)
+    finally:
+        # release the results file in tmp_path (Windows cannot delete an open file)
+        r.sql.close()
+
+
+def _check_against_baseline(key, r, oh, tmp_path):
+    """Compare a run's results, hourly series and geometry with the fixtures."""
     base = FIXTURES / key
     assert_series_equal(
         r.energy_and_peak,

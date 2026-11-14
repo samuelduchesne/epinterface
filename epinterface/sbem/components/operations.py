@@ -7,7 +7,7 @@ from idfkit import IDFObject
 from epinterface.constants import assumed_constants
 from epinterface.document import EPDocument, add_or_replace
 from epinterface.geometry import get_zone_floor_area, get_zone_glazed_area
-from epinterface.interface import add_constant_schedule
+from epinterface.interface import add_constant_schedule, add_ideal_loads_template
 from epinterface.sbem.common import MetadataMixin, NamedObject
 from epinterface.sbem.components.space_use import ZoneSpaceUseComponent
 from epinterface.sbem.components.systems import DHWComponent, ZoneHVACComponent
@@ -209,17 +209,11 @@ class ZoneOperationsComponent(
         if self.HVAC.Ventilation.DCV != "NoDCV":
             # check the design spec outdoor air for the DCV
             raise NotImplementedError("DCV not implemented.")
-        # The template has no name, so it is always added (never reused).
-        add_or_replace(
+        add_ideal_loads_template(
             doc,
-            "HVACTemplate:Zone:IdealLoadsAirSystem",
-            "",
-            zone_name=target_zone_name,
-            template_thermostat_name=thermostat.name,
-            maximum_heating_supply_air_temperature=30.0,
+            target_zone_name,
+            thermostat.name,
             minimum_cooling_supply_air_temperature=13.0,
-            maximum_heating_supply_air_humidity_ratio=0.0156,
-            minimum_cooling_supply_air_humidity_ratio=0.0077,
             heating_limit="LimitFlowRateAndCapacity",
             maximum_heating_air_flow_rate="autosize",
             maximum_sensible_heating_capacity="autosize",
@@ -232,18 +226,12 @@ class ZoneOperationsComponent(
             cooling_availability_schedule_name=None
             if self.HVAC.ConditioningSystems.Cooling
             else "AlwaysOff",
-            dehumidification_control_type="None",
-            cooling_sensible_heat_ratio=0.7,
-            dehumidification_setpoint=60.0,
-            humidification_control_type="None",
-            humidification_setpoint=30.0,
             outdoor_air_method="Sum"
             if self.HVAC.Ventilation.Provider == "Mechanical"
             or self.HVAC.Ventilation.Provider == "Both"
             else "None",
             outdoor_air_flow_rate_per_person=self.HVAC.Ventilation.FreshAirPerPerson,
             outdoor_air_flow_rate_per_zone_floor_area=self.HVAC.Ventilation.FreshAirPerFloorArea,
-            outdoor_air_flow_rate_per_zone=0.0,
             demand_controlled_ventilation_type="None"
             if self.HVAC.Ventilation.DCV == "NoDCV"
             else self.HVAC.Ventilation.DCV,

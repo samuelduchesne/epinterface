@@ -46,10 +46,18 @@ class EnergyPlusVersionNotSetError(ValueError):
     """Raised when an EnergyPlus version is required but none is configured."""
 
 
+# The oldest release epinterface builds documents for (see
+# `epinterface.document.SUPPORTED_DOCUMENT_TYPES`): 22.1 is of a supported major
+# but names several fields differently, so `minimal_document` refuses it.
+_OLDEST_SUPPORTED_RELEASE = (22, 2)
+
+
 def _get_installed_energyplus_version() -> str | None:
-    """Get the newest installed EnergyPlus version (X.Y.Z) of a supported major."""
+    """Get the newest installed EnergyPlus version (X.Y.Z) epinterface supports."""
     for major in SUPPORTED_ENERGYPLUS_MAJORS:
         for minor in range(9, -1, -1):
+            if (major, minor) < _OLDEST_SUPPORTED_RELEASE:
+                continue
             try:
                 return version_string(
                     find_energyplus(version=f"{major}.{minor}").version

@@ -5,7 +5,7 @@ Objects are written with idfkit directly (`doc.add`, or
 snake_case field names.
 """
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import numpy as np
 from idfkit import IDFObject, create_schedule_type_limits
@@ -212,6 +212,59 @@ class DefaultMaterialLibrary(BaseModel):
     concrete: BaseMaterial = concrete
     insulation: BaseMaterial = insulation
     stucco: BaseMaterial = stucco
+
+
+# The defaults epinterface writes for `HVACTemplate:Zone:IdealLoadsAirSystem`
+# (those of the former `HVACTemplateZoneIdealLoadsAirSystem` model).
+_IDEAL_LOADS_TEMPLATE_DEFAULTS: dict[str, float | str] = {
+    "maximum_heating_supply_air_temperature": 30.0,
+    "minimum_cooling_supply_air_temperature": 18.0,
+    "maximum_heating_supply_air_humidity_ratio": 0.0156,
+    "minimum_cooling_supply_air_humidity_ratio": 0.0077,
+    "heating_limit": "NoLimit",
+    "cooling_limit": "NoLimit",
+    "dehumidification_control_type": "None",
+    "cooling_sensible_heat_ratio": 0.7,
+    "dehumidification_setpoint": 60.0,
+    "humidification_control_type": "None",
+    "humidification_setpoint": 30.0,
+    "outdoor_air_method": "None",
+    "outdoor_air_flow_rate_per_person": 0.00944,
+    "outdoor_air_flow_rate_per_zone_floor_area": 0.00025,
+    "outdoor_air_flow_rate_per_zone": 0.0,
+    "demand_controlled_ventilation_type": "None",
+    "outdoor_air_economizer_type": "NoEconomizer",
+    "heat_recovery_type": "None",
+    "sensible_heat_recovery_effectiveness": 0.7,
+    "latent_heat_recovery_effectiveness": 0.65,
+}
+
+
+def add_ideal_loads_template(
+    doc: EPDocument, zone_name: str, thermostat_name: str, **fields: Any
+) -> IDFObject:
+    """Write a `HVACTemplate:Zone:IdealLoadsAirSystem` for a zone.
+
+    Fields not given take epinterface's defaults; a field given as None is left
+    blank. The template has no name, so it is always added (never reused).
+
+    Args:
+        doc (EPDocument): The IDF document to write to.
+        zone_name (str): The zone the template conditions.
+        thermostat_name (str): The `HVACTemplate:Thermostat` it uses.
+        **fields (Any): Fields that override the defaults, by idfkit name.
+
+    Returns:
+        IDFObject: The `HVACTemplate:Zone:IdealLoadsAirSystem` object.
+    """
+    return add_or_replace(
+        doc,
+        "HVACTemplate:Zone:IdealLoadsAirSystem",
+        "",
+        zone_name=zone_name,
+        template_thermostat_name=thermostat_name,
+        **(_IDEAL_LOADS_TEMPLATE_DEFAULTS | fields),
+    )
 
 
 def add_default_sim_controls(doc: EPDocument) -> EPDocument:

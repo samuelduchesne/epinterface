@@ -17,7 +17,6 @@ from idfkit.simulation import find_energyplus, simulate
 from idfkit.simulation.parsers.sql import SQLResult
 
 from epinterface.document import EPDocument
-from epinterface.settings import energyplus_settings
 
 # TODO: add the meters for HVAC systems
 AvailableHourlyVariables = Literal[
@@ -165,7 +164,7 @@ class SQLResultFile(SQLResult):
 
 
 def run_energyplus(doc: EPDocument, epw_path: Path, output_dir: Path) -> SQLResultFile:
-    """Simulate `doc` with the configured EnergyPlus and open its SQLite results.
+    """Simulate `doc` with the EnergyPlus of its release and open its SQLite results.
 
     The returned result holds an open connection to the `.sql` file in
     `output_dir`; close it (or `detach_sql` it) before deleting the directory,
@@ -183,11 +182,13 @@ def run_energyplus(doc: EPDocument, epw_path: Path, output_dir: Path) -> SQLResu
         SimulationError: If EnergyPlus fails.
         FileNotFoundError: If the simulation produced no SQLite file.
     """
+    # The EnergyPlus of the document's own release, which is the configured one
+    # for the documents epinterface builds.
     result = simulate(
         doc,
         weather=epw_path,
         output_dir=output_dir,
-        energyplus=find_energyplus(version=energyplus_settings.version_tuple),
+        energyplus=find_energyplus(version=doc.version),
     )
     if not result.success:
         msg = f"EnergyPlus failed in {result.run_dir}:\n{read_warnings(result.run_dir)}"
@@ -228,6 +229,9 @@ def detach_sql(sql: SQLResultFile) -> SQLResultFile:
     Returns:
         sql (SQLResultFile): The results, read from the copy.
     """
+    if sql.delete_on_close:
+        # Already a private copy: closing it would delete the file to copy.
+        return sql
     sql.close()
     fd, copy_path = tempfile.mkstemp(prefix="epinterface-", suffix=".sql")
     os.close(fd)

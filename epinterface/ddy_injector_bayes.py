@@ -222,10 +222,16 @@ class DDYSizingSpec(BaseModel):
             ddy (EPDocument): The DDY file to copy objects from.
             field (DDYField): The field to remove and replace objects from.
             copy_names (Sequence[WeatherFileConditionType] | Sequence[DesignDayName]): The names of the objects to copy,
-                in the order they are added (EnergyPlus runs sizing periods in file order); duplicates are ignored.
+                in the order they are added (EnergyPlus runs sizing periods in file order); duplicates, which
+                like EnergyPlus names ignore case, are ignored.
         """
         _remove_all(doc, field)
-        for obj_name in dict.fromkeys(copy_names):
+        copied: set[str] = set()
+        for obj_name in copy_names:
+            # Names that differ only in case are the same object.
+            if obj_name.upper() in copied:
+                continue
+            copied.add(obj_name.upper())
             obj = ddy[field.value].get(obj_name)
             if obj is None:
                 if self.raise_on_not_found:

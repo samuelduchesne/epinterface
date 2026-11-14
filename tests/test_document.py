@@ -217,3 +217,25 @@ def test_watts_per_area_is_a_field_of_every_supported_version(version, obj_type)
         "watts_per_zone_floor_area" if version < (24, 1, 0) else "watts_per_floor_area"
     )
     assert obj[expected] == 8.5
+
+
+def test_add_or_replace_keeps_the_original_when_the_replacement_is_refused(
+    doc: EPDocument,
+):
+    """A replacement that fails validation leaves the existing object in place."""
+    add_or_replace(doc, "Material", "Wood", **_WOOD)
+    with pytest.raises(Exception, match="thickness"):
+        add_or_replace(doc, "Material", "Wood", **(_WOOD | {"thickness": -0.1}))
+    assert doc["Material"]["Wood"].thickness == _WOOD["thickness"]
+    assert len(doc["Material"]) == 1
+
+
+def test_minimal_documents_do_not_share_field_values():
+    """Editing one document's list-valued field leaves later documents untouched."""
+    version = energyplus_settings.version_tuple
+    first = minimal_document(version)
+    reports = first["Output:Table:SummaryReports"][0].reports
+    count = len(reports)
+    reports.append({"report_name": "ZoneComponentLoadSummary"})
+    second = minimal_document(version)
+    assert len(second["Output:Table:SummaryReports"][0].reports) == count

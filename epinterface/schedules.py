@@ -84,12 +84,15 @@ def add_values_schedule(
         week_fields: dict[str, Any] = {
             f"{k}_schedule_day_name": v for k, v in by_field.items()
         }
+        # The special days follow the weekday fields (as archetypal's week did):
+        # holidays and custom day 2 the Sunday field, the design days the Monday
+        # field and custom day 1 the Tuesday field, whatever `first_weekday` is.
         week_fields |= {
-            "holiday_schedule_day_name": by_position[6],
-            "summerdesignday_schedule_day_name": by_position[0],
-            "winterdesignday_schedule_day_name": by_position[0],
-            "customday1_schedule_day_name": by_position[1],
-            "customday2_schedule_day_name": by_position[6],
+            "holiday_schedule_day_name": by_field["sunday"],
+            "summerdesignday_schedule_day_name": by_field["monday"],
+            "winterdesignday_schedule_day_name": by_field["monday"],
+            "customday1_schedule_day_name": by_field["tuesday"],
+            "customday2_schedule_day_name": by_field["sunday"],
         }
         planned.append(("Schedule:Week:Daily", week_name, week_fields))
 
@@ -151,13 +154,14 @@ def _remove_generated(doc: EPDocument, name: str) -> None:
                 doc.removeidfobject(obj)
 
 
-_MONTH_LENGTHS = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+NON_LEAP_MONTH_LENGTHS = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+"""The number of days in each month of a non-leap year, January first."""
 
 
 def _month_day(day_of_year: int) -> tuple[int, int]:
     """Convert a zero-based day of a non-leap year to (month, day)."""
     remaining = day_of_year
-    for month, length in enumerate(_MONTH_LENGTHS, start=1):
+    for month, length in enumerate(NON_LEAP_MONTH_LENGTHS, start=1):
         if remaining < length:
             return month, remaining + 1
         remaining -= length

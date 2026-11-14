@@ -2,6 +2,7 @@
 
 import re
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pandas as pd
@@ -42,7 +43,8 @@ def zone_geometry_summary(sql_path: Path) -> pd.DataFrame:
         WHERE ReportName = 'InputVerificationandResultsSummary'
           AND TableName = 'Zone Summary'
     """
-    with sqlite3.connect(sql_path) as conn:
+    # `closing`: a sqlite3 connection's own context manager only commits.
+    with closing(sqlite3.connect(sql_path)) as conn:
         raw = pd.read_sql_query(query, conn)
     raw = raw[~raw["RowName"].isin(_EXCLUDED_ROWS)]
     raw = raw[raw["ColumnName"].isin(_COLUMN_MAP)]

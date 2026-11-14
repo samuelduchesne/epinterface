@@ -1,5 +1,6 @@
 """The base idfkit document every model is built on."""
 
+import copy
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, TypeAlias
@@ -243,10 +244,15 @@ def _add_objects(
     doc: AnyIDFDocument,
     objects: tuple[tuple[str, str, dict[str, Any]], ...] = _MINIMAL_OBJECTS,
 ) -> None:
-    """Add `objects` to `doc`, skipping only the fields in `_FIELD_ADDED_IN`."""
+    """Add `objects` to `doc`, skipping only the fields in `_FIELD_ADDED_IN`.
+
+    Values are deep-copied: idfkit stores a list it is given (e.g. the reports of
+    `Output:Table:SummaryReports`) as is, so editing one document would otherwise
+    edit `_MINIMAL_OBJECTS`, and with it every later `minimal_document`.
+    """
     for obj_type, name, fields in objects:
         supported = {
-            k: v
+            k: copy.deepcopy(v)
             for k, v in fields.items()
             if doc.version >= _FIELD_ADDED_IN.get((obj_type, k), (0, 0, 0))
         }
@@ -333,9 +339,9 @@ def add_or_replace(
     """
     fields = {k: v for k, v in fields.items() if v is not None}
     obj_schema = doc.schema.get_object_schema(obj_type) if doc.schema else None
+    replaced: list[IDFObject] = []
     if obj_schema and obj_schema.get("maxProperties") == 1:
-        for existing in list(doc[obj_type]):
-            doc.removeidfobject(existing)
+        replaced = list(doc[obj_type])
     elif name and (existing := doc[obj_type].get(name)) is not None:
         stored = {
             k: v
@@ -344,8 +350,17 @@ def add_or_replace(
         }
         if stored == {k: v for k, v in fields.items() if v not in (None, "")}:
             return existing
-        doc.removeidfobject(existing)
-    return doc.add(obj_type, name, fields)
+        replaced = [existing]
+    for obj in replaced:
+        doc.removeidfobject(obj)
+    try:
+        return doc.add(obj_type, name, fields)
+    except Exception:
+        # The new object was refused (e.g. it fails validation): put back the
+        # one it was to replace rather than leave the document without it.
+        for obj in replaced:
+            doc.copyidfobject(obj)
+        raise
 
 
 def add_construction(

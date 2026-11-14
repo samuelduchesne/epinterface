@@ -29,6 +29,7 @@ from epinterface.interface import (
     InfDesignFlowRateCalculationMethodType,
     OutdoorAirEconomizerTypeType,
     add_constant_schedule,
+    add_ideal_loads_template,
     zone_list_names,
 )
 from epinterface.schedules import HOURS_PER_YEAR, add_values_schedule
@@ -986,18 +987,13 @@ class ZoneConditioning(
                 self.CoolingSetpoint if self.CoolingSetpointConstant else None
             ),
         )
-        # The template has no name, so it is always added (never reused).
-        add_or_replace(
+        add_ideal_loads_template(
             doc,
-            "HVACTemplate:Zone:IdealLoadsAirSystem",
-            "",
-            zone_name=target_zone_name,
-            template_thermostat_name=thermostat.name,
+            target_zone_name,
+            thermostat.name,
             system_availability_schedule_name="AlwaysOn",
             maximum_heating_supply_air_temperature=self.MaxHeatSupplyAirTemp,
             minimum_cooling_supply_air_temperature=self.MinCoolSupplyAirTemp,
-            maximum_heating_supply_air_humidity_ratio=0.0156,
-            minimum_cooling_supply_air_humidity_ratio=0.0077,
             heating_limit=self.HeatingLimitType,
             maximum_heating_air_flow_rate=self.MaxHeatFlow
             if not self.Autosize
@@ -1018,18 +1014,11 @@ class ZoneConditioning(
             cooling_availability_schedule_name=(
                 self.CoolingSchedule if self.CoolIsOn else None
             ),
-            dehumidification_control_type="None",
-            cooling_sensible_heat_ratio=0.7,
-            dehumidification_setpoint=60.0,
-            humidification_control_type="None",
-            humidification_setpoint=30.0,
             outdoor_air_method="Sum" if self.MechVentIsOn else "None",
             outdoor_air_flow_rate_per_person=self.MinFreshAirPerson
             / 1000,  # convert to m3
             outdoor_air_flow_rate_per_zone_floor_area=self.MinFreshAirArea
             / 1000,  # convert to m3
-            outdoor_air_flow_rate_per_zone=0.0,
-            demand_controlled_ventilation_type="None",
             outdoor_air_economizer_type=self.EconomizerType,
             heat_recovery_type=self.HeatRecoveryType,
             sensible_heat_recovery_effectiveness=self.HeatRecoveryEfficiencySensible,
@@ -1532,15 +1521,9 @@ class ZoneHotWater(
         total_flow_rate_per_s = total_flow_rate / 3600  # m3/s
 
         if "Temperature" not in doc["ScheduleTypeLimits"]:
-            add_or_replace(
-                doc,
-                "ScheduleTypeLimits",
-                "Temperature",
-                lower_limit_value=-60.0,
-                upper_limit_value=200.0,
-                numeric_type="Continuous",
-                unit_type="Dimensionless",
-            )
+            # archetypal rewrote these limits with its own Temperature type
+            # (-100 to 100) when it wrote the schedules below, as the sbem path does.
+            _type_limits_for("Temperature").add_to_idf(doc)
 
         target_temperature_yr_schedule = add_constant_schedule(
             doc,

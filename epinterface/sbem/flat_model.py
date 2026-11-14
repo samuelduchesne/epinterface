@@ -3,8 +3,7 @@
 from collections.abc import Callable
 from pathlib import Path
 
-from idfkit import Vector3D, rotate_building
-from idfkit.geometry import get_surface_coords
+from idfkit import Vector3D, bounding_box, rotate_building
 from pydantic import BaseModel, Field
 
 from epinterface.analysis.overheating import OverheatingAnalysisConfig
@@ -2143,17 +2142,17 @@ class FlatModel(BaseModel):
 
 
 def _floor_plan_centre(doc: EPDocument) -> Vector3D:
-    """The centre of the floors' x-y bounding box (geomeppy's rotation anchor)."""
-    points = [
-        vertex
-        for srf in doc["BuildingSurface:Detailed"]
-        if (srf.surface_type or "").lower() == "floor"
-        and (polygon := get_surface_coords(srf)) is not None
-        for vertex in polygon.vertices
-    ]
-    xs = [p.x for p in points]
-    ys = [p.y for p in points]
-    return Vector3D((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2, 0)
+    """The centre of the building's x-y bounding box (geomeppy's rotation anchor).
+
+    geomeppy boxed the floors; for the shoebox every surface lies within the
+    footprint, so idfkit's box of all building surfaces is the same.
+    """
+    bbox = bounding_box(doc)
+    if bbox is None:
+        msg = "The document has no building surfaces to rotate."
+        raise ValueError(msg)
+    (x_min, y_min), (x_max, y_max) = bbox
+    return Vector3D((x_min + x_max) / 2, (y_min + y_max) / 2, 0)
 
 
 if __name__ == "__main__":
