@@ -3,7 +3,7 @@
 import logging
 import re
 from pathlib import Path
-from typing import Annotated, Any, Literal, TypeVar, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeVar, cast
 
 import numpy as np
 import pandas as pd
@@ -33,6 +33,10 @@ from epinterface.interface import (
     zone_list_names,
 )
 from epinterface.schedules import HOURS_PER_YEAR, add_values_schedule
+
+if TYPE_CHECKING:
+    # The object classes exist only in idfkit's stubs.
+    from idfkit.document import AnyZoneList
 
 logger = logging.getLogger(__name__)
 
@@ -1611,7 +1615,7 @@ class ZoneUse(
         return doc
 
     def add_space_use_to_idf_zone(
-        self, doc: EPDocument, target_zone: str | IDFObject
+        self, doc: EPDocument, target_zone: "str | AnyZoneList"
     ) -> EPDocument:
         """Add the use to an IDF zone.
 
@@ -1619,7 +1623,7 @@ class ZoneUse(
 
         Args:
             doc (EPDocument): The IDF document to add the use to.
-            target_zone (str | IDFObject): The name of the zone, or the `ZoneList`, to add the use to.
+            target_zone (str | AnyZoneList): The name of the zone, or the `ZoneList`, to add the use to.
 
         Returns:
             EPDocument: The updated IDF document.

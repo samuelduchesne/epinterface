@@ -5,7 +5,7 @@ Objects are written with idfkit directly, through their typed collection
 objects), using idfkit's snake_case field names.
 """
 
-from typing import Annotated, Any, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 import numpy as np
 from idfkit import IDFObject, create_schedule_type_limits
@@ -13,6 +13,10 @@ from pydantic import BaseModel, BeforeValidator, Field
 
 from epinterface.document import EPDocument, add_or_replace
 from epinterface.schedules import HOURS_PER_YEAR, add_values_schedule
+
+if TYPE_CHECKING:
+    # The object classes exist only in idfkit's stubs.
+    from idfkit.document import AnyZoneList
 
 IdealLoadsLimitType = Literal[
     "NoLimit", "LimitFlowRate", "LimitCapacity", "LimitFlowRateAndCapacity"
@@ -347,7 +351,7 @@ def add_site_ground_temperature(doc: EPDocument, values: list[float]) -> IDFObje
     )
 
 
-def add_zone_list(doc: EPDocument, name: str, zone_names: list[str]) -> IDFObject:
+def add_zone_list(doc: EPDocument, name: str, zone_names: list[str]) -> "AnyZoneList":
     """Write a `ZoneList` of the (non-empty) `zone_names`.
 
     Args:
@@ -356,16 +360,16 @@ def add_zone_list(doc: EPDocument, name: str, zone_names: list[str]) -> IDFObjec
         zone_names (list[str]): The zones in the list; empty names are skipped.
 
     Returns:
-        IDFObject: The `ZoneList` object.
+        AnyZoneList: The `ZoneList` object.
     """
     return add_or_replace(
         doc["ZoneList"].add, name, zones=[{"zone_name": z} for z in zone_names if z]
     )
 
 
-def zone_list_names(zone_list: IDFObject) -> list[str]:
+def zone_list_names(zone_list: "AnyZoneList") -> list[str]:
     """The zone names of a `ZoneList` object, in order."""
-    return [group["zone_name"] for group in zone_list.to_dict().get("zones", [])]
+    return [group.zone_name for group in zone_list.zones]
 
 
 def ensure_fraction_type_limits(doc: EPDocument) -> IDFObject:

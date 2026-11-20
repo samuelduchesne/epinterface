@@ -4,11 +4,10 @@ import gc
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 import pandas as pd
-from idfkit import IDFObject
 from idfkit.simulation.parsers.sql import SQLResult
 from pydantic import BaseModel, Field
 
@@ -44,6 +43,10 @@ from epinterface.results import tabular_frame
 from epinterface.settings import energyplus_settings, require_supported_major
 from epinterface.simulation import add_output_objects, read_warnings, run_energyplus
 from epinterface.weather import BaseWeather
+
+if TYPE_CHECKING:
+    # The object classes exist only in idfkit's stubs.
+    from idfkit.document import AnyZoneList
 
 
 class ClimateStudioBuilderNotImplementedError(NotImplementedError):
@@ -253,14 +256,14 @@ class Model(BaseWeather, validate_assignment=True):
         return doc
 
     def add_hot_water_to_zone_list(
-        self, doc: EPDocument, space_use: ZoneUse, zone_list: IDFObject
+        self, doc: EPDocument, space_use: ZoneUse, zone_list: "AnyZoneList"
     ) -> EPDocument:
         """Add the hot water to the zone list.
 
         Args:
             doc (EPDocument): The IDF model to add the hot water to.
             space_use (ZoneUse): The zone use template.
-            zone_list (IDFObject): The `ZoneList` of the zones to add the hot water to.
+            zone_list (AnyZoneList): The `ZoneList` of the zones to add the hot water to.
 
         Returns:
             doc (EPDocument): The IDF model with the added hot water.
@@ -292,7 +295,7 @@ class Model(BaseWeather, validate_assignment=True):
         return doc
 
     def add_envelope(
-        self, doc: EPDocument, envelope: ZoneEnvelope, inf_zone_list: IDFObject
+        self, doc: EPDocument, envelope: ZoneEnvelope, inf_zone_list: "AnyZoneList"
     ) -> EPDocument:
         """Add the envelope to the IDF model.
 
@@ -301,7 +304,7 @@ class Model(BaseWeather, validate_assignment=True):
         Args:
             doc (EPDocument): The IDF model to add the envelope to.
             envelope (ZoneEnvelope): The envelope template.
-            inf_zone_list (IDFObject): The `ZoneList` of the zones to add the infiltration to.
+            inf_zone_list (AnyZoneList): The `ZoneList` of the zones to add the infiltration to.
 
 
         Returns:
@@ -361,7 +364,7 @@ class Model(BaseWeather, validate_assignment=True):
     def add_zone_lists(
         self,
         doc: EPDocument,
-    ):
+    ) -> tuple[EPDocument, "AnyZoneList", "AnyZoneList"]:
         """Add the zone lists to the IDF model.
 
         Note that this attempts to automatically determine
@@ -373,8 +376,8 @@ class Model(BaseWeather, validate_assignment=True):
 
         Returns:
             doc (EPDocument): The IDF model with the added zone lists
-            conditioned_zone_list (IDFObject): The `ZoneList` of conditioned zones
-            all_zones_list (IDFObject): The `ZoneList` of all zones
+            conditioned_zone_list (AnyZoneList): The `ZoneList` of conditioned zones
+            all_zones_list (AnyZoneList): The `ZoneList` of all zones
         """
         all_zone_names = [zone.name for zone in doc["Zone"]]
         conditioned_zone_names = [
@@ -404,14 +407,14 @@ class Model(BaseWeather, validate_assignment=True):
         return doc, conditioned_zone_list, all_zones_list
 
     def add_infiltration(
-        self, doc: EPDocument, infiltration: ZoneInfiltration, zone_list: IDFObject
+        self, doc: EPDocument, infiltration: ZoneInfiltration, zone_list: "AnyZoneList"
     ):
         """Add the infiltration to the IDF model.
 
         Args:
             doc (EPDocument): The IDF model to add the infiltration to.
             infiltration: The infiltration object.
-            zone_list (IDFObject): The `ZoneList` of the zones to add the infiltration to.
+            zone_list (AnyZoneList): The `ZoneList` of the zones to add the infiltration to.
 
         Returns:
             doc (EPDocument): The IDF model with the added infiltration.
@@ -421,14 +424,14 @@ class Model(BaseWeather, validate_assignment=True):
         return doc
 
     def add_space_use(
-        self, doc: EPDocument, space_use: ZoneUse, zone_list: IDFObject
+        self, doc: EPDocument, space_use: ZoneUse, zone_list: "AnyZoneList"
     ) -> EPDocument:
         """Add the space use to the IDF model.
 
         Args:
             doc (EPDocument): The IDF model to add the space use to.
             space_use (ZoneUse): The zone use template.
-            zone_list (IDFObject): The `ZoneList` of the zones to add the space use to.
+            zone_list (AnyZoneList): The `ZoneList` of the zones to add the space use to.
 
         Returns:
             EPDocument: The IDF model with the added space use.
