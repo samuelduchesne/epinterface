@@ -1,8 +1,8 @@
 """EnergyPlus literal types, a small material library and document helpers.
 
-Objects are written with idfkit directly (`doc.add`, or
-`epinterface.document.add_or_replace` for shared objects), using idfkit's
-snake_case field names.
+Objects are written with idfkit directly, through their typed collection
+(`doc["Zone"].add(...)`, or `epinterface.document.add_or_replace` for shared
+objects), using idfkit's snake_case field names.
 """
 
 from typing import Annotated, Any, Literal, cast

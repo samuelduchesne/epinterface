@@ -74,7 +74,7 @@ def load_document(path: Path | str, version: tuple[int, int, int]) -> EPDocument
     Raises:
         TypeError: If `version` is not a release epinterface supports.
     """
-    return as_supported(idfkit.load_idf(str(path), version=version))
+    return idfkit.load_idf(str(path), version=version, as_type=SUPPORTED_DOCUMENT_TYPES)
 
 
 _DESIGN_DAY_COMMON: dict[str, Any] = {
