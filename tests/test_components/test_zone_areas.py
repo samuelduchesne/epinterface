@@ -1,6 +1,6 @@
 """Tests for zone-area helpers and the zone-area dependent water use."""
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from prisma import Prisma
@@ -9,8 +9,14 @@ from epinterface.document import EPDocument
 from epinterface.geometry import get_zone_floor_area, get_zone_glazed_area
 from epinterface.sbem.prisma.client import deep_fetcher
 
+if TYPE_CHECKING:
+    # A type of idfkit's stubs only.
+    from idfkit.document import BuildingSurfaceDetailedVerticesItem
 
-def _vertices(points: list[tuple[float, float, float]]):
+
+def _vertices(
+    points: list[tuple[float, float, float]],
+) -> list["BuildingSurfaceDetailedVerticesItem"]:
     return [
         {
             "vertex_x_coordinate": x,
@@ -23,9 +29,8 @@ def _vertices(points: list[tuple[float, float, float]]):
 
 def _add_box_zone(doc: EPDocument, zone_name: str):
     """Add a zone with a 5 x 4 m floor and a 2 m2 window on a 5 x 3 m wall."""
-    doc.add("Zone", zone_name)
-    doc.add(
-        "BuildingSurface:Detailed",
+    doc["Zone"].add(zone_name)
+    doc["BuildingSurface:Detailed"].add(
         f"{zone_name}_Floor",
         surface_type="Floor",
         construction_name="",
@@ -35,8 +40,7 @@ def _add_box_zone(doc: EPDocument, zone_name: str):
         vertices=_vertices([(0, 0, 0), (0, 4, 0), (5, 4, 0), (5, 0, 0)]),
         validate=False,
     )
-    doc.add(
-        "BuildingSurface:Detailed",
+    doc["BuildingSurface:Detailed"].add(
         f"{zone_name}_Wall",
         surface_type="Wall",
         construction_name="",
@@ -52,8 +56,7 @@ def _add_box_zone(doc: EPDocument, zone_name: str):
         for i, point in enumerate(window_points, start=1)
         for k, axis in enumerate("xyz")
     }
-    doc.add(
-        "FenestrationSurface:Detailed",
+    doc["FenestrationSurface:Detailed"].add(
         f"{zone_name}_Window",
         surface_type="Window",
         construction_name="",
@@ -67,7 +70,7 @@ def _add_box_zone(doc: EPDocument, zone_name: str):
 def test_zone_floor_and_glazed_area(doc: EPDocument):
     """Floor and window areas are read from the document's surfaces."""
     _add_box_zone(doc, "Box")
-    doc.add("Zone", "Empty")
+    doc["Zone"].add("Empty")
 
     assert get_zone_floor_area(doc, "Box") == pytest.approx(20.0)
     assert get_zone_glazed_area(doc, "Box") == pytest.approx(2.0)

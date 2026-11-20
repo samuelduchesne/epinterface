@@ -90,7 +90,7 @@ _DESIGN_DAY_COMMON: dict[str, Any] = {
 # The objects of the former packaged `Minimal.idf`, with its values and the
 # field names of the newest idfkit schema. Fields an older schema lacks are
 # skipped only through the explicit `_FIELD_ADDED_IN` allowlist; any other
-# unknown field fails in `doc.add`.
+# unknown field fails in `add`.
 # `new_document` also pre-adds a SimulationControl, which is removed because the
 # migrated `Minimal.idf` never had one (parity with the former base model).
 _MINIMAL_OBJECTS: tuple[tuple[str, str, dict[str, Any]], ...] = (
@@ -235,7 +235,7 @@ _MINIMAL_OBJECTS: tuple[tuple[str, str, dict[str, Any]], ...] = (
 
 
 # Fields a version's schema lacks, as (object type, field) -> first version that has it.
-# Anything else not in the schema is a typo and must fail loudly in `doc.add`.
+# Anything else not in the schema is a typo and must fail loudly in `add`.
 _FIELD_ADDED_IN: dict[tuple[str, str], tuple[int, int, int]] = {
     ("Output:SQLite", "unit_conversion_for_tabular_data"): (9, 5, 0),
 }
@@ -263,7 +263,7 @@ def _add_objects(
             0,
         ):
             supported["solar_model_indicator"] = "ASHRAETau"  # 2017 model is newer
-        doc.add(obj_type, name, supported)
+        doc.get_collection(obj_type).add(*([name] if name else []), **supported)
 
 
 def _fill_minimal(doc: AnyIDFDocument) -> None:

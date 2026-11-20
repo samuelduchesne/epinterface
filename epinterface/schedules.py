@@ -124,7 +124,7 @@ def add_values_schedule(
         return doc["Schedule:Year"][name]
     _remove_generated(doc, name)
     for obj_type, obj_name, fields in planned:
-        doc.add(obj_type, obj_name, fields)
+        doc.get_collection(obj_type).add(obj_name, **fields)
     return doc["Schedule:Year"][name]
 
 

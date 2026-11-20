@@ -131,7 +131,9 @@ def test_add_values_schedule_constant_matches_baseline_structure(doc):
         ("Schedule:Day:Hourly", "d_Always_On_00"),
         ("Schedule:Week:Daily", "w_Always_On_00"),
     ):
-        assert _field_values(doc[kind][name]) == _field_values(baseline[kind][name])
+        assert _field_values(doc.get_collection(kind)[name]) == _field_values(
+            baseline.get_collection(kind)[name]
+        )
     assert _year_field_values(doc["Schedule:Year"]["Always_On"]) == _year_field_values(
         baseline["Schedule:Year"]["Always_On"]
     )
@@ -179,7 +181,7 @@ def test_different_repeat_replaces_schedule(doc):
 
 def test_orphan_generated_objects_do_not_raise(doc):
     """A leftover day object with no year of that name is replaced, not an error."""
-    doc.add("Schedule:Day:Hourly", "d_A_00", {"schedule_type_limits_name": "Fraction"})
+    doc["Schedule:Day:Hourly"].add("d_A_00", schedule_type_limits_name="Fraction")
 
     add_constant_schedule(doc, "A", 1)
 

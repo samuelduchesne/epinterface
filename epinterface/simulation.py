@@ -16,7 +16,7 @@ from idfkit import SimulationError
 from idfkit.simulation import find_energyplus, simulate
 from idfkit.simulation.parsers.sql import SQLResult
 
-from epinterface.document import EPDocument
+from epinterface.document import EPDocument, add_or_replace
 
 # TODO: add the meters for HVAC systems
 AvailableHourlyVariables = Literal[
@@ -70,9 +70,12 @@ _UMI_TEMPLATE_AND_PROFILE_METERS = (
 )
 
 
+_Frequency = Literal["Hourly", "Monthly"]
+
+
 def _filter_like_archetypal(
-    items: Sequence[tuple[str, str]], wanted: Sequence[str]
-) -> list[tuple[str, str]]:
+    items: Sequence[tuple[str, _Frequency]], wanted: Sequence[str]
+) -> list[tuple[str, _Frequency]]:
     """Drop unwanted outputs the way the archetypal-based builder did.
 
     It removed unwanted objects from the list it was iterating over, so the
@@ -80,7 +83,7 @@ def _filter_like_archetypal(
     Reproducing that keeps the requested outputs (and the run's output
     files) identical to the archetypal baseline.
     """
-    kept: list[tuple[str, str]] = []
+    kept: list[tuple[str, _Frequency]] = []
     skip_next = False
     for item in items:
         if skip_next or item[0] in wanted:
@@ -102,45 +105,38 @@ def add_output_objects(doc: EPDocument, desired_meters: Sequence[str]) -> None:
         doc (EPDocument): The document to add the outputs to (modified in place).
         desired_meters (Sequence[str]): The meters the results postprocessing reads.
     """
-    for obj_type, fields in (
-        ("OutputControl:Table:Style", {"column_separator": "CommaAndHTML"}),
-        ("Output:Table:SummaryReports", {"reports": [{"report_name": "AllSummary"}]}),
-        ("Output:SQLite", {"option_type": "SimpleAndTabular"}),
-    ):
-        for existing in list(doc.get_collection(obj_type)):
-            doc.removeidfobject(existing)
-        doc.add(obj_type, "", fields)
-    doc.add("Output:Schedules", "", {"key_field": "Hourly"})
-    doc.add("Output:VariableDictionary", "", {"key_field": "IDF"})
+    # Each of these types is allowed once: add_or_replace replaces the existing one.
+    add_or_replace(
+        doc["OutputControl:Table:Style"].add, column_separator="CommaAndHTML"
+    )
+    add_or_replace(
+        doc["Output:Table:SummaryReports"].add,
+        reports=[{"report_name": "AllSummary"}],
+    )
+    add_or_replace(doc["Output:SQLite"].add, option_type="SimpleAndTabular")
+    doc["Output:Schedules"].add(key_field="Hourly")
+    doc["Output:VariableDictionary"].add(key_field="IDF")
 
-    variables = sorted({
+    variables: list[tuple[str, _Frequency]] = sorted({
         (variable, "Hourly")
         for variable in (*AVAILABLE_HOURLY_VARIABLES, *_UMI_TEMPLATE_VARIABLES)
     })
-    meters = sorted(
-        {
-            (meter, frequency)
-            for meter in desired_meters
-            for frequency in ("Monthly", "Hourly")
-        }
-        | {(meter, "Monthly") for meter in _UMI_TEMPLATE_AND_PROFILE_METERS}
+    frequencies: tuple[_Frequency, ...] = ("Monthly", "Hourly")
+    requested_meters: set[tuple[str, _Frequency]] = {
+        (meter, frequency) for meter in desired_meters for frequency in frequencies
+    }
+    requested_meters.update(
+        (meter, "Monthly") for meter in _UMI_TEMPLATE_AND_PROFILE_METERS
     )
+    meters = sorted(requested_meters)
     for variable, frequency in _filter_like_archetypal(
         variables, AVAILABLE_HOURLY_VARIABLES
     ):
-        doc.add(
-            "Output:Variable",
-            "",
-            {
-                "key_value": "*",
-                "variable_name": variable,
-                "reporting_frequency": frequency,
-            },
+        doc["Output:Variable"].add(
+            key_value="*", variable_name=variable, reporting_frequency=frequency
         )
     for meter, frequency in _filter_like_archetypal(meters, desired_meters):
-        doc.add(
-            "Output:Meter", "", {"key_name": meter, "reporting_frequency": frequency}
-        )
+        doc["Output:Meter"].add(key_name=meter, reporting_frequency=frequency)
 
 
 class SQLResultFile(SQLResult):

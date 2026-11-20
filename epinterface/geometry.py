@@ -645,7 +645,7 @@ class ShoeboxGeometry(BaseModel):
             srf.surface_type = "Ceiling"
 
         # create the zone
-        doc.add("Zone", "Attic")
+        doc["Zone"].add("Attic")
 
         # we always want the centerline of a gable to be paralle to the longer
         # edge
@@ -716,14 +716,14 @@ class ShoeboxGeometry(BaseModel):
                 (x1, roof_centerline, z_ridge),
             ]
 
-        for name, surface_type, vertices in (
+        attic_surfaces: list[tuple[str, Literal["Roof", "Wall"], list]] = [
             ("Gable1", "Roof", gable1),
             ("Gable2", "Roof", gable2),
             ("Endcap1", "Wall", endcap1),
             ("Endcap2", "Wall", endcap2),
-        ):
-            srf = doc.add(
-                "BuildingSurface:Detailed",
+        ]
+        for name, surface_type, vertices in attic_surfaces:
+            srf = doc["BuildingSurface:Detailed"].add(
                 name,
                 surface_type=surface_type,
                 construction_name="",
@@ -746,8 +746,7 @@ class ShoeboxGeometry(BaseModel):
         attic_floors = []
         for i, srf in enumerate(old_roof_srfs):
             v = cast(Polygon3D, get_surface_coords(srf)).vertices
-            floor = doc.add(
-                "BuildingSurface:Detailed",
+            floor = doc["BuildingSurface:Detailed"].add(
                 f"attic_bottom_plane_{i}",
                 surface_type="Floor",
                 construction_name="",
@@ -965,7 +964,7 @@ def _add_window(
         )
         for v in vertices
     ]
-    fields = {
+    fields: dict[str, Any] = {
         "surface_type": "Window",
         "construction_name": construction,
         "building_surface_name": wall.name,
@@ -976,7 +975,7 @@ def _add_window(
         for i, vertex in enumerate(window_vertices, 1)
         for axis, value in zip("xyz", vertex, strict=True)
     }
-    return doc.add("FenestrationSurface:Detailed", f"{wall.name} window", fields)
+    return doc["FenestrationSurface:Detailed"].add(f"{wall.name} window", **fields)
 
 
 def get_zone_floor_area(doc: EPDocument, zone_name: str) -> float:

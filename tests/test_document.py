@@ -202,7 +202,10 @@ def test_add_or_replace_takes_a_collections_add(doc: EPDocument):
 def test_add_or_replace_unknown_field_raises(doc: EPDocument):
     """A field the schema does not know is an error, not silently dropped."""
     with pytest.raises(Exception, match="typo_field"):
-        add_or_replace(doc["Material"].add, "Wood", **_WOOD, typo_field=1)
+        # Untyped collection: the typo must reach run time, not the type checker.
+        add_or_replace(
+            doc.get_collection("Material").add, "Wood", **_WOOD, typo_field=1
+        )
 
 
 @pytest.mark.parametrize("version", SUPPORTED_VERSIONS, ids=idfkit.version_string)
