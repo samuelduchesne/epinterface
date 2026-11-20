@@ -132,7 +132,7 @@ def _is_unchanged(
     doc: EPDocument, obj_type: str, name: str, fields: dict[str, Any]
 ) -> bool:
     """Whether `doc` already holds `obj_type` `name` with exactly these fields."""
-    existing = doc[obj_type].get(name)
+    existing = doc.get_collection(obj_type).get(name)
     if existing is None:
         return False
     stored = {

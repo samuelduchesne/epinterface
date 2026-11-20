@@ -341,8 +341,8 @@ def add_or_replace(
     obj_schema = doc.schema.get_object_schema(obj_type) if doc.schema else None
     replaced: list[IDFObject] = []
     if obj_schema and obj_schema.get("maxProperties") == 1:
-        replaced = list(doc[obj_type])
-    elif name and (existing := doc[obj_type].get(name)) is not None:
+        replaced = list(doc.get_collection(obj_type))
+    elif name and (existing := doc.get_collection(obj_type).get(name)) is not None:
         stored = {
             k: v
             for k, v in existing.to_dict().items()

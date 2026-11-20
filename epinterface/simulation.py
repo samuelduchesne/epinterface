@@ -107,7 +107,7 @@ def add_output_objects(doc: EPDocument, desired_meters: Sequence[str]) -> None:
         ("Output:Table:SummaryReports", {"reports": [{"report_name": "AllSummary"}]}),
         ("Output:SQLite", {"option_type": "SimpleAndTabular"}),
     ):
-        for existing in list(doc[obj_type]):
+        for existing in list(doc.get_collection(obj_type)):
             doc.removeidfobject(existing)
         doc.add(obj_type, "", fields)
     doc.add("Output:Schedules", "", {"key_field": "Hourly"})
