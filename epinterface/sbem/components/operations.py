@@ -89,8 +89,7 @@ class ZoneOperationsComponent(
 
         if "Temperature" not in doc["ScheduleTypeLimits"]:
             add_or_replace(
-                doc,
-                "ScheduleTypeLimits",
+                doc["ScheduleTypeLimits"].add,
                 "Temperature",
                 lower_limit_value=-100.0,
                 upper_limit_value=100.0,
@@ -129,8 +128,7 @@ class ZoneOperationsComponent(
         peak_flow_rate_per_s = avg_flow_per_s / avg_fractional_value
 
         add_or_replace(
-            doc,
-            "WaterUse:Equipment",
+            doc["WaterUse:Equipment"].add,
             water_use_name,
             end_use_subcategory="Domestic Hot Water",
             peak_flow_rate=float(peak_flow_rate_per_s),
@@ -188,8 +186,7 @@ class ZoneOperationsComponent(
             )
 
         return add_or_replace(
-            doc,
-            "HVACTemplate:Thermostat",
+            doc["HVACTemplate:Thermostat"].add,
             thermostat_name,
             heating_setpoint_schedule_name=heating_schedule_name,
             constant_heating_setpoint=self.SpaceUse.Thermostat.HeatingSetpoint
@@ -263,16 +260,15 @@ class ZoneOperationsComponent(
                 )
             )
             add_or_replace(
-                doc,
-                "ZoneVentilation:WindandStackOpenArea",
+                doc["ZoneVentilation:WindandStackOpenArea"].add,
                 vent_wind_stack_name,
                 zone_or_space_name=target_zone_name,
                 opening_area=float(total_window_area),
                 opening_area_fraction_schedule_name=vent_wind_stack_name_sch,
-                opening_effectiveness="AutoCalculate",
+                opening_effectiveness="Autocalculate",
                 effective_angle=0.0,
                 height_difference=0.0,
-                discharge_coefficient_for_opening="AutoCalculate",
+                discharge_coefficient_for_opening="Autocalculate",
                 delta_temperature=2.0,
                 minimum_outdoor_temperature=12.0,
                 maximum_outdoor_temperature=25.0,

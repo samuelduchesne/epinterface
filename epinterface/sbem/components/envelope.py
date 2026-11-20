@@ -51,8 +51,7 @@ class GlazingConstructionSimpleComponent(
             EPDocument: The updated IDF document.
         """
         add_or_replace(
-            doc,
-            "WindowMaterial:SimpleGlazingSystem",
+            doc["WindowMaterial:SimpleGlazingSystem"].add,
             self.Name,
             u_factor=self.UValue,
             solar_heat_gain_coefficient=self.SHGF,
@@ -136,8 +135,7 @@ class InfiltrationComponent(
         # infiltration values are taken as actual rates, and no assumption is
         # made about the wind velocity.
         add_or_replace(
-            doc,
-            "ZoneInfiltration:DesignFlowRate",
+            doc["ZoneInfiltration:DesignFlowRate"].add,
             infiltration_name,
             zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
             schedule_name=inf_schedule.name,
@@ -188,8 +186,7 @@ class ConstructionLayerComponent(BaseModel, extra="forbid"):
         """
         material = self.ConstructionMaterial
         return add_or_replace(
-            doc,
-            "Material",
+            doc["Material"].add,
             self.name,
             roughness=material.Roughness,
             thickness=self.Thickness,

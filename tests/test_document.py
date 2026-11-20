@@ -165,38 +165,44 @@ _WOOD = {
 
 def test_add_or_replace_reuses_identical_object(doc: EPDocument):
     """An object with the same type, name and fields is returned, not duplicated."""
-    first = add_or_replace(doc, "Material", "Wood", **_WOOD)
-    second = add_or_replace(doc, "Material", "Wood", **_WOOD)
+    first = add_or_replace(doc["Material"].add, "Wood", **_WOOD)
+    second = add_or_replace(doc["Material"].add, "Wood", **_WOOD)
     assert second is first
     assert len(doc["Material"]) == 1
 
 
 def test_add_or_replace_replaces_different_object(doc: EPDocument):
     """An object with the same type and name but other fields replaces the old one."""
-    add_or_replace(doc, "Material", "Wood", **_WOOD)
-    add_or_replace(doc, "Material", "Wood", **(_WOOD | {"thickness": 0.2}))
+    add_or_replace(doc["Material"].add, "Wood", **_WOOD)
+    add_or_replace(doc["Material"].add, "Wood", **(_WOOD | {"thickness": 0.2}))
     assert len(doc["Material"]) == 1
     assert doc["Material"]["Wood"].thickness == 0.2
 
 
 def test_add_or_replace_leaves_none_fields_blank(doc: EPDocument):
     """None means unset: the field stays blank and does not break reuse."""
-    first = add_or_replace(doc, "Material", "Wood", **_WOOD, solar_absorptance=None)
+    first = add_or_replace(doc["Material"].add, "Wood", **_WOOD, solar_absorptance=None)
     assert first.solar_absorptance in (None, "")
-    assert add_or_replace(doc, "Material", "Wood", **_WOOD) is first
+    assert add_or_replace(doc["Material"].add, "Wood", **_WOOD) is first
 
 
 def test_add_or_replace_replaces_singleton(doc: EPDocument):
     """A type allowed once (Timestep) holds only the latest definition."""
-    add_or_replace(doc, "Timestep", number_of_timesteps_per_hour=4)
-    add_or_replace(doc, "Timestep", number_of_timesteps_per_hour=6)
+    add_or_replace(doc["Timestep"].add, number_of_timesteps_per_hour=4)
+    add_or_replace(doc["Timestep"].add, number_of_timesteps_per_hour=6)
     assert [t.number_of_timesteps_per_hour for t in doc["Timestep"]] == [6]
+
+
+def test_add_or_replace_takes_a_collections_add(doc: EPDocument):
+    """Anything but a collection's bound `add` is refused, naming the form to use."""
+    with pytest.raises(TypeError, match=r'doc\["Material"\]\.add'):
+        add_or_replace(doc.add, "Material", "Wood", **_WOOD)
 
 
 def test_add_or_replace_unknown_field_raises(doc: EPDocument):
     """A field the schema does not know is an error, not silently dropped."""
     with pytest.raises(Exception, match="typo_field"):
-        add_or_replace(doc, "Material", "Wood", **_WOOD, typo_field=1)
+        add_or_replace(doc["Material"].add, "Wood", **_WOOD, typo_field=1)
 
 
 @pytest.mark.parametrize("version", SUPPORTED_VERSIONS, ids=idfkit.version_string)
@@ -205,8 +211,7 @@ def test_watts_per_area_is_a_field_of_every_supported_version(version, obj_type)
     """The design level lands in the field the version's schema has."""
     doc = minimal_document(version)
     obj = add_or_replace(
-        doc,
-        obj_type,
+        doc.get_collection(obj_type).add,
         "Load",
         zone_or_zonelist_or_space_or_spacelist_name="Zone",
         schedule_name="Always On",
@@ -223,9 +228,9 @@ def test_add_or_replace_keeps_the_original_when_the_replacement_is_refused(
     doc: EPDocument,
 ):
     """A replacement that fails validation leaves the existing object in place."""
-    add_or_replace(doc, "Material", "Wood", **_WOOD)
+    add_or_replace(doc["Material"].add, "Wood", **_WOOD)
     with pytest.raises(Exception, match="thickness"):
-        add_or_replace(doc, "Material", "Wood", **(_WOOD | {"thickness": -0.1}))
+        add_or_replace(doc["Material"].add, "Wood", **(_WOOD | {"thickness": -0.1}))
     assert doc["Material"]["Wood"].thickness == _WOOD["thickness"]
     assert len(doc["Material"]) == 1
 

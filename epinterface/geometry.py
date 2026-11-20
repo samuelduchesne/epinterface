@@ -864,11 +864,10 @@ def _set_default_constructions(doc: EPDocument) -> None:
     are assigned.
     """
     for name in _DEFAULT_OPAQUE_CONSTRUCTIONS:
-        add_or_replace(doc, "Material", _DEFAULT_MATERIAL_NAME, **_DEFAULT_MATERIAL)
+        add_or_replace(doc["Material"].add, _DEFAULT_MATERIAL_NAME, **_DEFAULT_MATERIAL)
         add_construction(doc, name, [_DEFAULT_MATERIAL_NAME])
     add_or_replace(
-        doc,
-        "WindowMaterial:SimpleGlazingSystem",
+        doc["WindowMaterial:SimpleGlazingSystem"].add,
         _DEFAULT_GLAZING_NAME,
         **_DEFAULT_GLAZING,
     )

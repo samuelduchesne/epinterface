@@ -356,8 +356,7 @@ class GlazingConstructionSimple(
             EPDocument: The updated IDF document.
         """
         add_or_replace(
-            doc,
-            "WindowMaterial:SimpleGlazingSystem",
+            doc["WindowMaterial:SimpleGlazingSystem"].add,
             self.Name,
             u_factor=self.UValue,
             solar_heat_gain_coefficient=self.SHGF,
@@ -619,10 +618,10 @@ class OpaqueConstructionLayer(MaterialWithThickness, NamedObject, extra="forbid"
 
         mat_def = material_defs[self.Name]
         return add_or_replace(
-            doc,
-            "Material",
+            doc["Material"].add,
             f"{self.Name}_{self.Thickness}",
-            roughness=mat_def.Roughness,
+            # Library data, a plain str: idfkit checks it against the choices.
+            roughness=cast(Any, mat_def.Roughness),
             thickness=self.Thickness,
             conductivity=mat_def.Conductivity,
             density=mat_def.Density,
@@ -967,8 +966,7 @@ class ZoneConditioning(
             f"Mechanical ventilation schedule is being ignored in zone {target_zone_name}."
         )
         thermostat = add_or_replace(
-            doc,
-            "HVACTemplate:Thermostat",
+            doc["HVACTemplate:Thermostat"].add,
             f"{self.Name}_{target_zone_name}_Thermostat",
             heating_setpoint_schedule_name=(
                 self.HeatingSetpointSchedule
@@ -1026,8 +1024,7 @@ class ZoneConditioning(
         )
         if self.Autosize:
             add_or_replace(
-                doc,
-                "Sizing:Parameters",
+                doc["Sizing:Parameters"].add,
                 heating_sizing_factor=self.HeatingSizingFactor,
                 cooling_sizing_factor=self.CoolingSizingFactor,
             )
@@ -1151,8 +1148,7 @@ class ZoneInfiltration(
             doc, infiltration_schedule_name, 1, "Fraction"
         )
         add_or_replace(
-            doc,
-            "ZoneInfiltration:DesignFlowRate",
+            doc["ZoneInfiltration:DesignFlowRate"].add,
             f"{target_zone_or_zone_list_name}_{self.Name}_Infiltration",
             zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
             schedule_name=inf_schedule.name,
@@ -1335,8 +1331,8 @@ class ZoneLoad(
             f"Ignoring IlluminanceTarget for zone(s) {target_zone_or_zone_list_name}."
         )
         add_or_replace(
-            doc,
-            "Lights",
+            # Untyped: the Watts/Area field was renamed in 24.1 (see watts_per_area).
+            doc.get_collection("Lights").add,
             f"{target_zone_or_zone_list_name}_{self.Name.join('_')}_Lights",
             zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
             schedule_name=self.LightsAvailabilitySchedule,
@@ -1369,8 +1365,7 @@ class ZoneLoad(
         )
         if "AnyNumber" not in doc["ScheduleTypeLimits"]:
             add_or_replace(
-                doc,
-                "ScheduleTypeLimits",
+                doc["ScheduleTypeLimits"].add,
                 "AnyNumber",
                 numeric_type="Continuous",
                 unit_type="Dimensionless",
@@ -1386,15 +1381,15 @@ class ZoneLoad(
             f"Ignoring AirspeedSchedule for zone(s) {target_zone_or_zone_list_name}."
         )
         add_or_replace(
-            doc,
-            "People",
+            # Untyped: 24.1 renamed a mean radiant temperature choice.
+            doc.get_collection("People").add,
             f"{target_zone_or_zone_list_name}_{self.Name.join('_')}_People",
             zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
             number_of_people_schedule_name=self.OccupancySchedule,
             number_of_people_calculation_method="People/Area",
             people_per_floor_area=self.PeopleDensity,
             fraction_radiant=0.3,
-            sensible_heat_fraction="autocalculate",
+            sensible_heat_fraction="Autocalculate",
             activity_level_schedule_name=activity_sch_year.name,
             enable_ashrae_55_comfort_warnings="No",
         )
@@ -1420,8 +1415,8 @@ class ZoneLoad(
         )
 
         add_or_replace(
-            doc,
-            "ElectricEquipment",
+            # Untyped: the Watts/Area field was renamed in 24.1 (see watts_per_area).
+            doc.get_collection("ElectricEquipment").add,
             f"{target_zone_or_zone_list_name}_{self.Name.join('_')}_Equipment",
             zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
             schedule_name=self.EquipmentAvailabilitySchedule,
@@ -1539,8 +1534,7 @@ class ZoneHotWater(
         )
 
         add_or_replace(
-            doc,
-            "WaterUse:Equipment",
+            doc["WaterUse:Equipment"].add,
             f"{target_zone_name}_{self.Name}_HotWater",
             end_use_subcategory="Domestic Hot Water",
             peak_flow_rate=float(total_flow_rate_per_s),
@@ -1675,13 +1669,13 @@ class LibraryScheduleTypeLimits(BaseModel):
             IDFObject: The `ScheduleTypeLimits` object.
         """
         return add_or_replace(
-            doc,
-            "ScheduleTypeLimits",
+            doc["ScheduleTypeLimits"].add,
             self.Name,
             lower_limit_value=self.LowerLimit,
             upper_limit_value=self.UpperLimit,
             numeric_type=self.NumericType,
-            unit_type=self.UnitType,
+            # Library data, a plain str: idfkit checks it against the choices.
+            unit_type=cast(Any, self.UnitType),
         )
 
 

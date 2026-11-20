@@ -539,8 +539,7 @@ class SurfaceHandlers(BaseModel):
                     constructions.InternalMassExposedAreaPerArea or 0
                 )
                 add_or_replace(
-                    doc,
-                    "InternalMass",
+                    doc["InternalMass"].add,
                     f"{zone.name}_InternalMass",
                     construction_name=constructions.InternalMassAssembly.Name,
                     zone_or_zonelist_name=zone.name,

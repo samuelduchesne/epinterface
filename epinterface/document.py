@@ -1,12 +1,13 @@
 """The base idfkit document every model is built on."""
 
 import copy
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any, TypeAlias
+from types import MethodType
+from typing import Any, ParamSpec, TypeAlias, TypeVar, cast
 
 import idfkit
-from idfkit import IDFObject
+from idfkit import IDFCollection, IDFObject
 from idfkit.document import AnyIDFDocument
 from idfkit.versioned import (
     IDFDocumentV22_2,
@@ -295,8 +296,10 @@ def watts_per_area(doc: EPDocument, value: float) -> dict[str, float]:
     """The Watts/Area design level of `Lights` or `ElectricEquipment` for `doc`.
 
     EnergyPlus 24.1 renamed the field `watts_per_zone_floor_area` to
-    `watts_per_floor_area`. Pass the result as keyword fields:
-    `add_or_replace(doc, "Lights", name, **watts_per_area(doc, 8.0), ...)`.
+    `watts_per_floor_area`. Pass the result as keyword fields, through the
+    untyped collection, since no one call suits every supported release:
+    `add_or_replace(doc.get_collection("Lights").add, name,
+    **watts_per_area(doc, 8.0), ...)`.
 
     Args:
         doc (EPDocument): The document the object is written to.
@@ -310,9 +313,23 @@ def watts_per_area(doc: EPDocument, value: float) -> dict[str, float]:
     return {"watts_per_floor_area": value}
 
 
-def add_or_replace(
-    doc: EPDocument, obj_type: str, name: str = "", /, **fields: Any
-) -> IDFObject:
+P = ParamSpec("P")
+T = TypeVar("T", bound=IDFObject)
+
+
+def _collection_of(add: Callable[..., IDFObject]) -> IDFCollection[IDFObject]:
+    """The collection whose bound `add` method `add` is."""
+    collection = add.__self__ if isinstance(add, MethodType) else None
+    if not isinstance(collection, IDFCollection):
+        msg = (
+            "add_or_replace takes a collection's add method, e.g. "
+            f'doc["Material"].add, not {add!r}'
+        )
+        raise TypeError(msg)
+    return collection
+
+
+def add_or_replace(add: Callable[P, T], /, *args: P.args, **kwargs: P.kwargs) -> T:
     """Add one object, reusing or replacing an existing one as archetypal did.
 
     archetypal's writer (`newidfobject`) kept a model free of duplicates, and
@@ -325,41 +342,61 @@ def add_or_replace(
     - An object whose type and name already exist is returned as is when its
       fields are identical, and replaced otherwise.
 
+    Pass the `add` method of the type's collection, then the arguments it
+    takes: `add_or_replace(doc["Material"].add, "Wood", roughness="Rough", ...)`,
+    or, for a type without a Name field,
+    `add_or_replace(doc["Timestep"].add, number_of_timesteps_per_hour=6)`.
+    A type checker then checks the field names, the required fields and the
+    values against every supported release, and types the result as the
+    type's class. Where the fields differ between releases (e.g. `Lights`),
+    pass `doc.get_collection("Lights").add`, which is unchecked.
+
     Fields set to None are left blank. Field names are idfkit's (the schema's
-    snake_case names); an unknown field raises in `doc.add`.
+    snake_case names); an unknown field raises in `add`.
 
     Args:
-        doc (EPDocument): The document to write to.
-        obj_type (str): The EnergyPlus object type, e.g. "Material".
-        name (str): The object's name; empty for unnamed types.
-        **fields (Any): The object's fields by idfkit name.
+        add (Callable[P, T]): The `add` method of the collection of the type to
+            write, e.g. `doc["Material"].add`.
+        *args (P.args): The object's name; none for a type without a Name field.
+        **kwargs (P.kwargs): The object's fields by idfkit name.
 
     Returns:
-        IDFObject: The object now in the document.
+        T: The object now in the document.
+
+    Raises:
+        TypeError: If `add` is not the `add` method of a collection.
     """
-    fields = {k: v for k, v in fields.items() if v is not None}
-    obj_schema = doc.schema.get_object_schema(obj_type) if doc.schema else None
+    collection = _collection_of(add)
+    name = str(args[0]) if args else ""
+    fields = {k: v for k, v in kwargs.items() if v is not None}
+    current = list(collection)
     replaced: list[IDFObject] = []
-    if obj_schema and obj_schema.get("maxProperties") == 1:
-        replaced = list(doc.get_collection(obj_type))
-    elif name and (existing := doc.get_collection(obj_type).get(name)) is not None:
+    if current and (current[0].schema_dict or {}).get("maxProperties") == 1:
+        replaced = current
+    elif name and (existing := collection.get(name)) is not None:
         stored = {
             k: v
             for k, v in existing.to_dict().items()
             if k != "name" and v not in (None, "")
         }
         if stored == {k: v for k, v in fields.items() if v not in (None, "")}:
-            return existing
+            return cast(T, existing)
         replaced = [existing]
-    for obj in replaced:
-        doc.removeidfobject(obj)
+    # A collection has no public link to its document; the objects in it have.
+    doc = replaced[0].theidf if replaced else None
+    if doc is not None:
+        for obj in replaced:
+            doc.removeidfobject(obj)
     try:
-        return doc.add(obj_type, name, fields)
+        # The same call less the None fields, which a type checker cannot
+        # follow through the dict.
+        return cast(Callable[..., T], add)(*args, **fields)
     except Exception:
         # The new object was refused (e.g. it fails validation): put back the
         # one it was to replace rather than leave the document without it.
-        for obj in replaced:
-            doc.copyidfobject(obj)
+        if doc is not None:
+            for obj in replaced:
+                doc.copyidfobject(obj)
         raise
 
 
@@ -383,4 +420,5 @@ def add_construction(
         ("outside_layer" if i == 0 else f"layer_{i + 1}"): layer
         for i, layer in enumerate(layer_names)
     }
-    return add_or_replace(doc, "Construction", name, **layers)
+    # Untyped collection: the layer fields are named from the list's positions.
+    return add_or_replace(doc.get_collection("Construction").add, name, **layers)

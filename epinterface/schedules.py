@@ -184,8 +184,8 @@ def add_day_hourly_schedule(
         msg = f"Expected 24 hourly values, got {len(values)}."
         raise ValueError(msg)
     return add_or_replace(
-        doc,
-        "Schedule:Day:Hourly",
+        # Untyped: the hour fields are named from the values' positions.
+        doc.get_collection("Schedule:Day:Hourly").add,
         name,
         schedule_type_limits_name=type_limits,
         **{f"hour_{h + 1}": v for h, v in enumerate(values)},

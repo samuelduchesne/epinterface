@@ -75,8 +75,7 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
 
         # Configure simulation
         add_or_replace(
-            doc,
-            "SimulationControl",
+            doc["SimulationControl"].add,
             do_zone_sizing_calculation="Yes",
             do_system_sizing_calculation="Yes",
             # The model has no plant loops; plant sizing would require Sizing:Plant.
@@ -89,8 +88,7 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
 
         # Configure run period
         add_or_replace(
-            doc,
-            "RunPeriod",
+            doc["RunPeriod"].add,
             "Year",
             begin_month=1,
             begin_day_of_month=1,
@@ -105,7 +103,7 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
         )
 
         # configure timestep
-        add_or_replace(doc, "Timestep", number_of_timesteps_per_hour=self.timestep)
+        add_or_replace(doc["Timestep"].add, number_of_timesteps_per_hour=self.timestep)
 
         # create constant scheds (the first three default pairs)
         for on_name, off_name in DEFAULT_CONSTANT_SCHEDULE_PAIRS[:3]:
@@ -129,8 +127,7 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
         doc = zone_dims.add(doc)
 
         add_or_replace(
-            doc,
-            "WindowMaterial:SimpleGlazingSystem",
+            doc["WindowMaterial:SimpleGlazingSystem"].add,
             "DefaultGlazing",
             u_factor=self.WindowU,
             solar_heat_gain_coefficient=self.WindowSHGC,
@@ -168,8 +165,7 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
 
         # Handle HVAC
         thermostat = add_or_replace(
-            doc,
-            "HVACTemplate:Thermostat",
+            doc["HVACTemplate:Thermostat"].add,
             "Thermostat",
             constant_heating_setpoint=self.HeatingSetpoint,
             constant_cooling_setpoint=self.CoolingSetpoint,
@@ -189,8 +185,7 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
         )
         ensure_fraction_type_limits(doc)
         add_or_replace(
-            doc,
-            "ScheduleTypeLimits",
+            doc["ScheduleTypeLimits"].add,
             "any number",
             numeric_type="Continuous",
             unit_type="Dimensionless",
@@ -202,23 +197,22 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
             type_limits="any number",
         )
         add_or_replace(
-            doc,
-            "People",
+            # Untyped: 24.1 renamed a mean radiant temperature choice.
+            doc.get_collection("People").add,
             "People",
             zone_or_zonelist_or_space_or_spacelist_name=zone_list.name,
             number_of_people_schedule_name=occ_sched.name,
             number_of_people_calculation_method="People/Area",
             people_per_floor_area=self.PeopleDensity,
             fraction_radiant=0.3,
-            sensible_heat_fraction="autocalculate",
+            sensible_heat_fraction="Autocalculate",
             activity_level_schedule_name=acti_year.name,
             enable_ashrae_55_comfort_warnings="No",
         )
 
         # Handle Infiltration
         add_or_replace(
-            doc,
-            "ZoneInfiltration:DesignFlowRate",
+            doc["ZoneInfiltration:DesignFlowRate"].add,
             "Infiltration",
             zone_or_zonelist_or_space_or_spacelist_name=zone_list.name,
             schedule_name=always_on_name,
@@ -238,8 +232,8 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
             type_limits="Fraction",
         )
         add_or_replace(
-            doc,
-            "ElectricEquipment",
+            # Untyped: the Watts/Area field was renamed in 24.1 (see watts_per_area).
+            doc.get_collection("ElectricEquipment").add,
             "Equipment",
             zone_or_zonelist_or_space_or_spacelist_name=zone_list.name,
             schedule_name=equip_sched.name,
@@ -258,8 +252,8 @@ class SimpleResidentialModel(BaseWeather, extra="allow"):
             type_limits="Fraction",
         )
         add_or_replace(
-            doc,
-            "Lights",
+            # Untyped: the Watts/Area field was renamed in 24.1 (see watts_per_area).
+            doc.get_collection("Lights").add,
             "Lights",
             zone_or_zonelist_or_space_or_spacelist_name=zone_list.name,
             schedule_name=lights_sched.name,

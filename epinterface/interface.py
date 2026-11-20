@@ -5,7 +5,7 @@ Objects are written with idfkit directly (`doc.add`, or
 snake_case field names.
 """
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 import numpy as np
 from idfkit import IDFObject, create_schedule_type_limits
@@ -124,10 +124,10 @@ class BaseMaterial(BaseModel, extra="ignore", populate_by_name=True):
             IDFObject: The `Material` object, named `layer_name(thickness)`.
         """
         return add_or_replace(
-            doc,
-            "Material",
+            doc["Material"].add,
             self.layer_name(thickness),
-            roughness=self.Roughness,
+            # Library data, a plain str: idfkit checks it against the choices.
+            roughness=cast(Any, self.Roughness),
             thickness=thickness,
             conductivity=self.Conductivity,
             density=self.Density,
@@ -258,9 +258,8 @@ def add_ideal_loads_template(
         IDFObject: The `HVACTemplate:Zone:IdealLoadsAirSystem` object.
     """
     return add_or_replace(
-        doc,
-        "HVACTemplate:Zone:IdealLoadsAirSystem",
-        "",
+        # Untyped: the fields come from the caller's overrides.
+        doc.get_collection("HVACTemplate:Zone:IdealLoadsAirSystem").add,
         zone_name=zone_name,
         template_thermostat_name=thermostat_name,
         **(_IDEAL_LOADS_TEMPLATE_DEFAULTS | fields),
@@ -281,8 +280,7 @@ def add_default_sim_controls(doc: EPDocument) -> EPDocument:
         EPDocument: The IDF model with the added simulation controls.
     """
     add_or_replace(
-        doc,
-        "SimulationControl",
+        doc["SimulationControl"].add,
         do_zone_sizing_calculation="Yes",
         do_system_sizing_calculation="Yes",
         do_plant_sizing_calculation="No",
@@ -292,8 +290,7 @@ def add_default_sim_controls(doc: EPDocument) -> EPDocument:
         maximum_number_of_hvac_sizing_simulation_passes=2,
     )
     add_or_replace(
-        doc,
-        "RunPeriod",
+        doc["RunPeriod"].add,
         "Year",
         begin_month=1,
         begin_day_of_month=1,
@@ -306,30 +303,13 @@ def add_default_sim_controls(doc: EPDocument) -> EPDocument:
         use_weather_file_rain_indicators="No",
         use_weather_file_snow_indicators="No",
     )
-    add_or_replace(doc, "Timestep", number_of_timesteps_per_hour=6)
+    add_or_replace(doc["Timestep"].add, number_of_timesteps_per_hour=6)
     add_or_replace(
-        doc,
-        "Sizing:Parameters",
+        doc["Sizing:Parameters"].add,
         heating_sizing_factor=1.15,
         cooling_sizing_factor=1.15,
     )
     return doc
-
-
-_MONTHS = (
-    "january",
-    "february",
-    "march",
-    "april",
-    "may",
-    "june",
-    "july",
-    "august",
-    "september",
-    "october",
-    "november",
-    "december",
-)
 
 
 def add_site_ground_temperature(doc: EPDocument, values: list[float]) -> IDFObject:
@@ -349,13 +329,21 @@ def add_site_ground_temperature(doc: EPDocument, values: list[float]) -> IDFObje
     """
     if len(values) != 12:
         raise ValueError(f"GROUNDTEMP:EXPECTED_12:RECEIVED_{len(values)}")
+    t = [float(value) for value in values]
     return add_or_replace(
-        doc,
-        "Site:GroundTemperature:BuildingSurface",
-        **{
-            f"{month}_ground_temperature": float(value)
-            for month, value in zip(_MONTHS, values, strict=True)
-        },
+        doc["Site:GroundTemperature:BuildingSurface"].add,
+        january_ground_temperature=t[0],
+        february_ground_temperature=t[1],
+        march_ground_temperature=t[2],
+        april_ground_temperature=t[3],
+        may_ground_temperature=t[4],
+        june_ground_temperature=t[5],
+        july_ground_temperature=t[6],
+        august_ground_temperature=t[7],
+        september_ground_temperature=t[8],
+        october_ground_temperature=t[9],
+        november_ground_temperature=t[10],
+        december_ground_temperature=t[11],
     )
 
 
@@ -371,7 +359,7 @@ def add_zone_list(doc: EPDocument, name: str, zone_names: list[str]) -> IDFObjec
         IDFObject: The `ZoneList` object.
     """
     return add_or_replace(
-        doc, "ZoneList", name, zones=[{"zone_name": z} for z in zone_names if z]
+        doc["ZoneList"].add, name, zones=[{"zone_name": z} for z in zone_names if z]
     )
 
 

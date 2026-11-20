@@ -61,8 +61,7 @@ class OccupancyComponent(NamedObject, MetadataMixin, extra="forbid"):
         )
         if "AnyNumber" not in doc["ScheduleTypeLimits"]:
             add_or_replace(
-                doc,
-                "ScheduleTypeLimits",
+                doc["ScheduleTypeLimits"].add,
                 "AnyNumber",
                 numeric_type="Continuous",
                 unit_type="Dimensionless",
@@ -79,15 +78,15 @@ class OccupancyComponent(NamedObject, MetadataMixin, extra="forbid"):
             winter_design_day_sch_name="d_AllOn_00",
         )
         add_or_replace(
-            doc,
-            "People",
+            # Untyped: 24.1 renamed a mean radiant temperature choice.
+            doc.get_collection("People").add,
             name_prefix,
             zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
             number_of_people_schedule_name=year_name,
             number_of_people_calculation_method="People/Area",
             people_per_floor_area=self.PeopleDensity,
             fraction_radiant=assumed_constants.FractionRadiantPeople,
-            sensible_heat_fraction="autocalculate",
+            sensible_heat_fraction="Autocalculate",
             activity_level_schedule_name=activity_sch_year.name,
             enable_ashrae_55_comfort_warnings="No",
         )
@@ -141,8 +140,8 @@ class LightingComponent(NamedObject, MetadataMixin, extra="forbid"):
             winter_design_day_sch_name="d_AllOn_00",
         )
         add_or_replace(
-            doc,
-            "Lights",
+            # Untyped: the Watts/Area field was renamed in 24.1 (see watts_per_area).
+            doc.get_collection("Lights").add,
             name_prefix,
             zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
             schedule_name=year_name,
@@ -188,8 +187,8 @@ class EquipmentComponent(NamedObject, MetadataMixin, extra="forbid"):
             winter_design_day_sch_name="d_AllOn_00",
         )
         add_or_replace(
-            doc,
-            "ElectricEquipment",
+            # Untyped: the Watts/Area field was renamed in 24.1 (see watts_per_area).
+            doc.get_collection("ElectricEquipment").add,
             name_prefix,
             zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
             schedule_name=year_name,

@@ -28,13 +28,12 @@ class TypeLimitsSpec:
     Lower_Limit_Value: float | None = None
     Upper_Limit_Value: float | None = None
     Numeric_Type: Literal["Continuous", "Discrete"] | None = None
-    Unit_Type: str | None = None
+    Unit_Type: Literal["Dimensionless", "Temperature"] | None = None
 
     def add_to_idf(self, doc: EPDocument) -> IDFObject:
         """Write the `ScheduleTypeLimits` object (an identical one is reused)."""
         return add_or_replace(
-            doc,
-            "ScheduleTypeLimits",
+            doc["ScheduleTypeLimits"].add,
             self.Name,
             lower_limit_value=self.Lower_Limit_Value,
             upper_limit_value=self.Upper_Limit_Value,
@@ -262,8 +261,7 @@ class WeekComponent(NamedObject, extra="forbid"):
         doc, sunday_name = self.Sunday.add_day_to_idf(doc, name_prefix)
         # Holiday follows Sunday; custom days and unset design days follow Monday.
         add_or_replace(
-            doc,
-            "Schedule:Week:Daily",
+            doc["Schedule:Week:Daily"].add,
             desired_name,
             sunday_schedule_day_name=sunday_name,
             monday_schedule_day_name=monday_name,
@@ -525,8 +523,7 @@ class YearComponent(NamedObject, extra="forbid"):
             dec_name,
         ]
         add_or_replace(
-            doc,
-            "Schedule:Year",
+            doc["Schedule:Year"].add,
             self.Name,
             schedule_type_limits_name=self.schedule_type_limits,
             schedule_weeks=[
