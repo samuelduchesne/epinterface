@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-zone geometry matches within a relative tolerance of 1e-9 and an absolute
   tolerance of 0.01. The committed fixtures in `tests/data/regression` are the
   evidence.
-- idfkit is pinned to `>=1.3.0rc1,<1.4`.
+- idfkit is pinned to `>=1.3.0rc2,<1.4`.
 - Documents are typed for the EnergyPlus releases epinterface supports, 22.2
   to 25.2, instead of idfkit's latest release (26.2), which epinterface never
   builds. `epinterface.document.EPDocument`, the union of idfkit's
@@ -47,9 +47,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   value that takes a document, so pyright offers only the object types and
   fields that all of those releases have. `as_supported(doc)` types a document
   as one, checking its version at run time, and `load_document(path, version)`
-  loads a file as one. A pre-commit hook also runs `idfkit check` on those
-  releases, which lints the object types and choice values in string-keyed
-  calls such as `doc.add("Lights", ...)`.
+  loads a file as one. Objects are created through their collection,
+  `doc["Zone"].add("Office", ...)`, so pyright checks the field names, the
+  required fields and the values against every one of those releases. A
+  pre-commit hook also runs `idfkit check` on those releases, which lints the
+  object types and choice values in string-keyed calls such as
+  `doc.get_collection("Lights")`.
 - **Breaking:** `minimal_document` raises `TypeError` for an EnergyPlus version
   outside 22.2 to 25.2, before building anything. Such a version used to fail
   later: 22.1 when an infiltration or ventilation object was written (22.1
@@ -82,15 +85,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ElectricEquipment`, `Lights`, `ZoneVentilationWindAndStackOpenArea`,
   `ZoneInfiltrationDesignFlowRate`, `People`, `ScheduleDayHourly`,
   `ScheduleWeekDaily`, `ScheduleYear`, `ZoneList` and their base `BaseObj`
-  (with its `extract()` readers). Write objects with idfkit's `doc.add` and
-  idfkit's snake_case field names instead, or with
-  `epinterface.document.add_or_replace`, which reuses an identical object of
-  the same name and replaces a different one. `watts_per_area` keys a
-  `Lights` or `ElectricEquipment` design level by the field name of the
-  document's EnergyPlus version, `add_construction` writes a
-  layered construction, and `add_site_ground_temperature`, `add_zone_list`
-  and `BaseMaterial.add_layer_to_idf` replace
-  `SiteGroundTemperature.FromValues`, `ZoneList` and `BaseMaterial.as_layer`.
+  (with its `extract()` readers). Write objects through idfkit's typed
+  collections (`doc["Material"].add(name, ...)`) and idfkit's snake_case field
+  names instead, or with `epinterface.document.add_or_replace`, which reuses an
+  identical object of the same name and replaces a different one, and replaces
+  the object of a type allowed once. It takes the collection's `add` and its
+  arguments, `add_or_replace(doc["Material"].add, name, roughness=..., ...)`,
+  so pyright checks the call and types the result as `add` does; for a type
+  whose fields differ between the supported releases (`People`, `Lights`,
+  `ElectricEquipment`), pass `doc.get_collection("Lights").add`, which is
+  unchecked. `watts_per_area` keys a `Lights` or `ElectricEquipment` design
+  level by the field name of the document's EnergyPlus version,
+  `add_construction` writes a layered construction, and
+  `add_site_ground_temperature`, `add_zone_list` and
+  `BaseMaterial.add_layer_to_idf` replace `SiteGroundTemperature.FromValues`,
+  `ZoneList` and `BaseMaterial.as_layer`.
   The literal types, the default material library and the schedule helpers
   stay in `epinterface.interface`. The written models are unchanged.
 - **Breaking:** methods that returned those classes now write and return the
