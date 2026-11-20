@@ -11,13 +11,12 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, cast, get_args
+from typing import TYPE_CHECKING, Literal, cast, get_args
 from uuid import uuid4
 
 import numpy as np
 import pandas as pd
 import yaml
-from idfkit import IDFObject
 from idfkit.geometry import Polygon3D, get_surface_coords, set_surface_coords
 from idfkit.simulation.parsers.sql import SQLResult
 from ladybug.epw import EPW
@@ -82,6 +81,14 @@ from epinterface.simulation import (
 )
 from epinterface.weather import BaseWeather
 
+if TYPE_CHECKING:
+    # The object classes exist only in idfkit's stubs.
+    from idfkit.document import (
+        AnyBuildingSurfaceDetailed,
+        AnyFenestrationSurfaceDetailed,
+        AnyInternalMass,
+    )
+
 logger = logging.getLogger(__name__)
 
 
@@ -119,6 +126,26 @@ class SurfaceHandler(BaseModel):
             raise ValueError(msg)
         return self
 
+    @model_validator(mode="after")
+    def check_internal_mass_filters(self):
+        """An internal mass can only be matched on its construction name.
+
+        `InternalMass` has no surface type, boundary condition or zone name field to
+        filter on (its zone field is `zone_or_zonelist_name`).
+        """
+        if self.surface_group == "internal_mass" and any(
+            value is not None
+            for value in (
+                self.boundary_condition,
+                self.original_surface_type,
+                self.zone_name_contains,
+                self.outside_boundary_condition_object_contains,
+            )
+        ):
+            msg = "An internal mass handler can only filter on the original construction name."
+            raise ValueError(msg)
+        return self
+
     def assign_constructions_to_objs(
         self,
         doc: EPDocument,
@@ -130,33 +157,40 @@ class SurfaceHandler(BaseModel):
         The basic idea is to look for certain idf objects that need a construction assigned to them,
         and then assign the construction to them by name.
 
-        Depending on the configuration of the surface handler, we will look for different types of IDF objects.
+        Depending on the configuration of the surface handler, we look in a different collection:
+        `FenestrationSurface:Detailed` for glazing, `InternalMass` for internal mass and
+        `BuildingSurface:Detailed` otherwise. Windows and internal masses are matched on their
+        original construction name only; the other filters name fields their types do not have.
 
         Args:
             doc (EPDocument): The document to add the construction to.
             construction (ConstructionAssemblyComponent | GlazingConstructionComponent): The construction to add.
         """
-        # This will identify what *type* of energy plus object we need to assign a particular construction to.
-        # e.g. glazing -> look for FENESTRATIONSURFACE:DETAILED
-        # e.g. opaque -> look for BUILDINGSURFACE:DETAILED
-        # e.g. internal mass -> look for INTERNALMASS
-        obj_type_key = (
-            "FenestrationSurface:Detailed"
-            if self.surface_group == "glazing"
-            else (
-                "InternalMass"
-                if self.surface_group == "internal_mass"
-                else "BuildingSurface:Detailed"
-            )
-        )
-
         if self.boundary_condition is not None and self.surface_group == "glazing":
             raise NotImplementedParameter(
                 "BoundaryCondition", self.surface_group, "Glazing"
             )
 
         # Now we can find the matching idf objects that need a construction.
-        srfs = [srf for srf in doc[obj_type_key] if self.check_srf(srf)]
+        srfs: list[
+            AnyBuildingSurfaceDetailed
+            | AnyFenestrationSurfaceDetailed
+            | AnyInternalMass
+        ]
+        if self.surface_group == "glazing":
+            srfs = [
+                srf
+                for srf in doc["FenestrationSurface:Detailed"]
+                if self.check_construction_name(srf)
+            ]
+        elif self.surface_group == "internal_mass":
+            srfs = [
+                srf for srf in doc["InternalMass"] if self.check_construction_name(srf)
+            ]
+        else:
+            srfs = [
+                srf for srf in doc["BuildingSurface:Detailed"] if self.check_srf(srf)
+            ]
         doc = construction.add_to_idf(doc)
 
         # and then we can finally assign the construction to the surfaces.
@@ -164,11 +198,11 @@ class SurfaceHandler(BaseModel):
             srf.construction_name = construction.Name
         return doc
 
-    def check_srf(self, srf: IDFObject):
+    def check_srf(self, srf: "AnyBuildingSurfaceDetailed"):
         """Check if the surface matches the filters.
 
         Args:
-            srf (IDFObject): The surface to check.
+            srf (AnyBuildingSurfaceDetailed): The surface to check.
 
         Returns:
             match (bool): True if the surface matches the filters.
@@ -181,36 +215,30 @@ class SurfaceHandler(BaseModel):
             and self.check_outside_boundary_condition_object(srf)
         )
 
-    def check_construction_type(self, srf: IDFObject):
+    def check_construction_type(self, srf: "AnyBuildingSurfaceDetailed"):
         """Check if the surface matches the construction type.
 
         Args:
-            srf (IDFObject): The surface to check.
+            srf (AnyBuildingSurfaceDetailed): The surface to check.
 
         Returns:
             match (bool): True if the surface matches the construction type.
         """
-        if self.surface_group == "glazing":
-            # Ignore the construction type check for windows
-            return True
         if self.original_surface_type is None:
             # Ignore the construction type check when filter not provided
             return True
         # Check the construction type
         return self.original_surface_type.lower() == (srf.surface_type or "").lower()
 
-    def check_boundary(self, srf: IDFObject):
+    def check_boundary(self, srf: "AnyBuildingSurfaceDetailed"):
         """Check if the surface matches the boundary condition.
 
         Args:
-            srf (IDFObject): The surface to check.
+            srf (AnyBuildingSurfaceDetailed): The surface to check.
 
         Returns:
             match (bool): True if the surface matches the boundary condition.
         """
-        if self.surface_group == "glazing":
-            # Ignore the bc filter check for windows
-            return True
         if self.boundary_condition is None:
             # Ignore the bc filter when filter not provided
             return True
@@ -219,11 +247,14 @@ class SurfaceHandler(BaseModel):
             srf.outside_boundary_condition or ""
         ).lower() == self.boundary_condition.lower()
 
-    def check_construction_name(self, srf: IDFObject):
+    def check_construction_name(
+        self,
+        srf: "AnyBuildingSurfaceDetailed | AnyFenestrationSurfaceDetailed | AnyInternalMass",
+    ):
         """Check if the surface matches the original construction name.
 
         Args:
-            srf (IDFObject): The surface to check.
+            srf (AnyBuildingSurfaceDetailed | AnyFenestrationSurfaceDetailed | AnyInternalMass): The surface to check.
 
         Returns:
             match (bool): True if the surface matches the original construction name.
@@ -237,26 +268,21 @@ class SurfaceHandler(BaseModel):
         ).lower() == self.original_construction_name.lower()
 
     # TODO: convert this to a regex for better control
-    def check_zone_name(self, srf: IDFObject):
+    def check_zone_name(self, srf: "AnyBuildingSurfaceDetailed"):
         """Check that the zone name for the surface contains the expected substring."""
         if self.zone_name_contains is None:
             # Ignore the zone name check when filter not provided
-            return True
-        if self.surface_group == "glazing":
-            # Ignore the zone name check for windows
             return True
         # Check the zone name
         zone_name = srf.zone_name or ""
         return self.zone_name_contains.lower() in zone_name.lower()
 
-    def check_outside_boundary_condition_object(self, srf: IDFObject):
+    def check_outside_boundary_condition_object(
+        self, srf: "AnyBuildingSurfaceDetailed"
+    ):
         """Check if the surface's outside boundary condition object contains the desired substring."""
         if self.outside_boundary_condition_object_contains is None:
             # Ignore the outside boundary condition object check when filter not provided
-            return True
-        # Check the outside boundary condition object
-        if self.surface_group == "glazing":
-            # Ignore the outside boundary condition object check for windows
             return True
         return (
             self.outside_boundary_condition_object_contains.lower()

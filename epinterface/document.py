@@ -4,7 +4,7 @@ import copy
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from types import MethodType
-from typing import Any, ParamSpec, TypeAlias, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ParamSpec, TypeAlias, TypeVar, cast
 
 import idfkit
 from idfkit import IDFCollection, IDFObject
@@ -19,6 +19,10 @@ from idfkit.versioned import (
     IDFDocumentV25_2,
     as_version,
 )
+
+if TYPE_CHECKING:
+    # The object classes exist only in idfkit's stubs.
+    from idfkit.document import AnyConstruction
 
 # The EnergyPlus releases epinterface builds models for, oldest first. It keeps
 # per-version meter and table definitions for these majors only (see
@@ -401,7 +405,7 @@ def add_or_replace(add: Callable[P, T], /, *args: P.args, **kwargs: P.kwargs) ->
 
 def add_construction(
     doc: EPDocument, name: str, layer_names: Sequence[str]
-) -> IDFObject:
+) -> "AnyConstruction":
     """Write a `Construction` of the named layers, outside first.
 
     The layer materials must be written first. An identical construction is
@@ -413,11 +417,11 @@ def add_construction(
         layer_names (Sequence[str]): The material names, from outside to inside.
 
     Returns:
-        IDFObject: The `Construction` object.
+        AnyConstruction: The `Construction` object.
     """
-    layers = {
+    # Named from the list's positions, so checked by idfkit when added.
+    layers: dict[str, Any] = {
         ("outside_layer" if i == 0 else f"layer_{i + 1}"): layer
         for i, layer in enumerate(layer_names)
     }
-    # Untyped collection: the layer fields are named from the list's positions.
-    return add_or_replace(doc.get_collection("Construction").add, name, **layers)
+    return add_or_replace(doc["Construction"].add, name, **layers)

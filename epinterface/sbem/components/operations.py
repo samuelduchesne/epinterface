@@ -1,8 +1,7 @@
 """Operations components for the SBEM library."""
 
 from logging import getLogger
-
-from idfkit import IDFObject
+from typing import TYPE_CHECKING
 
 from epinterface.constants import assumed_constants
 from epinterface.document import EPDocument, add_or_replace
@@ -12,6 +11,10 @@ from epinterface.sbem.common import MetadataMixin, NamedObject
 from epinterface.sbem.components.space_use import ZoneSpaceUseComponent
 from epinterface.sbem.components.systems import DHWComponent, ZoneHVACComponent
 from epinterface.schedules import add_day_hourly_schedule
+
+if TYPE_CHECKING:
+    # The object classes exist only in idfkit's stubs.
+    from idfkit.document import AnyHVACTemplateThermostat
 
 logger = getLogger(__name__)
 
@@ -142,7 +145,7 @@ class ZoneOperationsComponent(
 
     def add_thermostat_to_idf_zone(
         self, doc: EPDocument, target_zone_name: str
-    ) -> IDFObject:
+    ) -> "AnyHVACTemplateThermostat":
         """Add a thermostat to the zone.
 
         Args:
@@ -150,7 +153,7 @@ class ZoneOperationsComponent(
             target_zone_name (str): The name of the zone to add the thermostat to.
 
         Returns:
-            thermostat (IDFObject): The `HVACTemplate:Thermostat` object.
+            thermostat (AnyHVACTemplateThermostat): The `HVACTemplate:Thermostat` object.
         """
         thermostat_name = (
             f"{target_zone_name}_{self.SpaceUse.Thermostat.safe_name}_THERMOSTAT"

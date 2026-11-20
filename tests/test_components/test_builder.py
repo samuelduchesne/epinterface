@@ -243,3 +243,18 @@ def test_model_run_results_idf_is_a_deprecated_alias_of_doc():
         warnings.simplefilter("always")
         assert results.idf is doc
     assert any(issubclass(w.category, DeprecationWarning) for w in caught)
+
+
+def test_internal_mass_handler_refuses_surface_filters():
+    """InternalMass has no surface type, boundary or zone name field to filter on."""
+    from epinterface.sbem.builder import SurfaceHandler
+
+    with pytest.raises(ValueError, match="internal mass"):
+        SurfaceHandler(
+            boundary_condition=None,
+            original_construction_name=None,
+            original_surface_type="wall",
+            surface_group="internal_mass",
+            zone_name_contains=None,
+            outside_boundary_condition_object_contains=None,
+        )

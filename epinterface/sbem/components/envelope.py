@@ -1,8 +1,7 @@
 """Envelope components for the SBEM library."""
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from idfkit import IDFObject
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from epinterface.document import (
@@ -20,6 +19,10 @@ from epinterface.sbem.components.materials import (
     ConstructionMaterialComponent,
     StandardMaterialMetadataMixin,
 )
+
+if TYPE_CHECKING:
+    # The object classes exist only in idfkit's stubs.
+    from idfkit.document import AnyMaterial
 
 WindowType = Literal["Single", "Double", "Triple"]
 
@@ -172,7 +175,7 @@ class ConstructionLayerComponent(BaseModel, extra="forbid"):
         # return f"{self.LayerOrder}_{self.ConstructionMaterial.Name}_{self.Thickness}m"
         return f"{self.ConstructionMaterial.Name}_{self.Thickness}m"
 
-    def add_to_idf(self, doc: EPDocument) -> IDFObject:
+    def add_to_idf(self, doc: EPDocument) -> "AnyMaterial":
         """Write the layer as a `Material` object named `self.name`.
 
         An identical material already in the document (e.g. the same layer of
@@ -182,7 +185,7 @@ class ConstructionLayerComponent(BaseModel, extra="forbid"):
             doc (EPDocument): The IDF document to write to.
 
         Returns:
-            IDFObject: The `Material` object.
+            AnyMaterial: The `Material` object.
         """
         material = self.ConstructionMaterial
         return add_or_replace(

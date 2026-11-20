@@ -3,11 +3,10 @@
 import re
 import warnings
 from collections.abc import Sequence
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
 from idfkit import (
-    IDFObject,
     MatchOptions,
     Polygon3D,
     Vector3D,
@@ -27,6 +26,14 @@ from shapely import LineString, Polygon, from_wkt
 from shapely.affinity import translate
 
 from epinterface.document import EPDocument, add_construction, add_or_replace
+
+if TYPE_CHECKING:
+    # The object classes exist only in idfkit's stubs.
+    from idfkit.document import (
+        AnyBuildingSurfaceDetailed,
+        AnyFenestrationSurfaceDetailed,
+        AnyZone,
+    )
 
 
 def _total_floor_area(doc: EPDocument) -> float:
@@ -518,9 +525,11 @@ class ShoeboxGeometry(BaseModel):
             else ZoningScheme.BY_STOREY,
             perimeter_depth=self.perim_depth,
         )
-        zones = [obj for obj in created if obj.obj_type == "Zone"]
+        # The created objects, typed and in creation order, from their collections.
+        created_ids = {id(obj) for obj in created}
+        zones = [zone for zone in doc["Zone"] if id(zone) in created_ids]
         surfaces = [
-            obj for obj in created if obj.obj_type == "BuildingSurface:Detailed"
+            srf for srf in doc["BuildingSurface:Detailed"] if id(srf) in created_ids
         ]
         if len(zones) != storey_count * self.zones_per_storey:
             msg = (
@@ -603,7 +612,9 @@ class ShoeboxGeometry(BaseModel):
         return doc
 
     def _bury_lowest_storey(
-        self, basement_zones: list[IDFObject], surfaces: list[IDFObject]
+        self,
+        basement_zones: Sequence["AnyZone"],
+        surfaces: Sequence["AnyBuildingSurfaceDetailed"],
     ) -> None:
         """Move the block down one storey and put its lowest storey in the ground."""
         offset = Vector3D(0, 0, -self.h)
@@ -621,7 +632,9 @@ class ShoeboxGeometry(BaseModel):
                 srf.sun_exposure = "NoSun"
                 srf.wind_exposure = "NoWind"
 
-    def _add_attic(self, doc: EPDocument, surfaces: list[IDFObject]) -> list[IDFObject]:
+    def _add_attic(
+        self, doc: EPDocument, surfaces: Sequence["AnyBuildingSurfaceDetailed"]
+    ) -> list["AnyBuildingSurfaceDetailed"]:
         """Add a gabled attic zone on top of the block.
 
         The block's roofs become ceilings, and the attic gets one floor per
@@ -763,9 +776,9 @@ class ShoeboxGeometry(BaseModel):
     def _rename_like_geomeppy(
         self,
         doc: EPDocument,
-        zones: list[IDFObject],
-        surfaces: list[IDFObject],
-        attic_floors: list[IDFObject],
+        zones: Sequence["AnyZone"],
+        surfaces: Sequence["AnyBuildingSurfaceDetailed"],
+        attic_floors: Sequence["AnyBuildingSurfaceDetailed"],
     ) -> None:
         """Give the block's zones and surfaces geomeppy's names, in geomeppy's zone order.
 
@@ -837,7 +850,7 @@ _DEFAULT_GLAZING: dict[str, Any] = {
 }
 
 
-def _default_construction_name(surface: IDFObject) -> str | None:
+def _default_construction_name(surface: "AnyBuildingSurfaceDetailed") -> str | None:
     """The placeholder construction geomeppy gave a building surface, by type."""
     surface_type = (surface.surface_type or "").lower()
     if surface_type == "wall":
@@ -933,10 +946,10 @@ def _geomeppy_surface_name(zone_name: str, suffix: str, is_perimeter: bool) -> s
 
 def _add_window(
     doc: EPDocument,
-    wall: IDFObject,
+    wall: "AnyBuildingSurfaceDetailed",
     wwr: float,
     construction: str = "Project External Window",
-) -> IDFObject:
+) -> "AnyFenestrationSurfaceDetailed":
     """Add geomeppy's ribbon window to a wall.
 
     The window is the wall shrunk about its vertex average: by the

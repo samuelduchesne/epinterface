@@ -8,7 +8,7 @@ objects), using idfkit's snake_case field names.
 from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 import numpy as np
-from idfkit import IDFObject, create_schedule_type_limits
+from idfkit import create_schedule_type_limits
 from pydantic import BaseModel, BeforeValidator, Field
 
 from epinterface.document import EPDocument, add_or_replace
@@ -16,7 +16,14 @@ from epinterface.schedules import HOURS_PER_YEAR, add_values_schedule
 
 if TYPE_CHECKING:
     # The object classes exist only in idfkit's stubs.
-    from idfkit.document import AnyZoneList
+    from idfkit.document import (
+        AnyHVACTemplateZoneIdealLoadsAirSystem,
+        AnyMaterial,
+        AnyScheduleTypeLimits,
+        AnyScheduleYear,
+        AnySiteGroundTemperatureBuildingSurface,
+        AnyZoneList,
+    )
 
 IdealLoadsLimitType = Literal[
     "NoLimit", "LimitFlowRate", "LimitCapacity", "LimitFlowRateAndCapacity"
@@ -114,7 +121,7 @@ class BaseMaterial(BaseModel, extra="ignore", populate_by_name=True):
         """The name of this material's `Material` object at `thickness` [m]."""
         return f"{self.Name}_{thickness}m"
 
-    def add_layer_to_idf(self, doc: EPDocument, thickness: float) -> IDFObject:
+    def add_layer_to_idf(self, doc: EPDocument, thickness: float) -> "AnyMaterial":
         """Write this material as a `Material` object of the given thickness.
 
         An identical layer already in the document is reused (see
@@ -125,7 +132,7 @@ class BaseMaterial(BaseModel, extra="ignore", populate_by_name=True):
             thickness (float): The thickness of the layer [m].
 
         Returns:
-            IDFObject: The `Material` object, named `layer_name(thickness)`.
+            AnyMaterial: The `Material` object, named `layer_name(thickness)`.
         """
         return add_or_replace(
             doc["Material"].add,
@@ -246,7 +253,7 @@ _IDEAL_LOADS_TEMPLATE_DEFAULTS: dict[str, float | str] = {
 
 def add_ideal_loads_template(
     doc: EPDocument, zone_name: str, thermostat_name: str, **fields: Any
-) -> IDFObject:
+) -> "AnyHVACTemplateZoneIdealLoadsAirSystem":
     """Write a `HVACTemplate:Zone:IdealLoadsAirSystem` for a zone.
 
     Fields not given take epinterface's defaults; a field given as None is left
@@ -259,14 +266,15 @@ def add_ideal_loads_template(
         **fields (Any): Fields that override the defaults, by idfkit name.
 
     Returns:
-        IDFObject: The `HVACTemplate:Zone:IdealLoadsAirSystem` object.
+        AnyHVACTemplateZoneIdealLoadsAirSystem: The template object.
     """
+    # Built at run time, so checked by idfkit when added rather than by pyright.
+    overrides: dict[str, Any] = _IDEAL_LOADS_TEMPLATE_DEFAULTS | fields
     return add_or_replace(
-        # Untyped: the fields come from the caller's overrides.
-        doc.get_collection("HVACTemplate:Zone:IdealLoadsAirSystem").add,
+        doc["HVACTemplate:Zone:IdealLoadsAirSystem"].add,
         zone_name=zone_name,
         template_thermostat_name=thermostat_name,
-        **(_IDEAL_LOADS_TEMPLATE_DEFAULTS | fields),
+        **overrides,
     )
 
 
@@ -316,7 +324,9 @@ def add_default_sim_controls(doc: EPDocument) -> EPDocument:
     return doc
 
 
-def add_site_ground_temperature(doc: EPDocument, values: list[float]) -> IDFObject:
+def add_site_ground_temperature(
+    doc: EPDocument, values: list[float]
+) -> "AnySiteGroundTemperatureBuildingSurface":
     """Write `Site:GroundTemperature:BuildingSurface` from 12 monthly values.
 
     The document holds one such object; an existing one is replaced.
@@ -326,7 +336,7 @@ def add_site_ground_temperature(doc: EPDocument, values: list[float]) -> IDFObje
         values (list[float]): The ground temperatures [degC], January first.
 
     Returns:
-        IDFObject: The `Site:GroundTemperature:BuildingSurface` object.
+        AnySiteGroundTemperatureBuildingSurface: The ground temperature object.
 
     Raises:
         ValueError: If `values` does not hold exactly 12 values.
@@ -372,21 +382,21 @@ def zone_list_names(zone_list: "AnyZoneList") -> list[str]:
     return [group.zone_name for group in zone_list.zones]
 
 
-def ensure_fraction_type_limits(doc: EPDocument) -> IDFObject:
+def ensure_fraction_type_limits(doc: EPDocument) -> "AnyScheduleTypeLimits":
     """Return the `Fraction` ScheduleTypeLimits, creating it (0 to 1) if missing.
 
     archetypal wrote this object together with every schedule that used it.
     """
-    if "Fraction" in doc["ScheduleTypeLimits"]:
-        return doc["ScheduleTypeLimits"]["Fraction"]
-    return create_schedule_type_limits(
-        doc, "Fraction", 0, 1, "Continuous", "Dimensionless"
-    )
+    if "Fraction" not in doc["ScheduleTypeLimits"]:
+        create_schedule_type_limits(
+            doc, "Fraction", 0, 1, "Continuous", "Dimensionless"
+        )
+    return doc["ScheduleTypeLimits"]["Fraction"]
 
 
 def add_constant_schedule(
     doc: EPDocument, name: str, value: float, type_limits: str = "Fraction"
-) -> IDFObject:
+) -> "AnyScheduleYear":
     """Add a constant schedule as `Schedule:Year`/`Week:Daily`/`Day:Hourly` objects.
 
     Args:
@@ -396,7 +406,7 @@ def add_constant_schedule(
         type_limits (str): The name of an existing `ScheduleTypeLimits`.
 
     Returns:
-        IDFObject: The `Schedule:Year` object.
+        AnyScheduleYear: The `Schedule:Year` object.
     """
     if type_limits == "Fraction":
         ensure_fraction_type_limits(doc)
@@ -412,7 +422,9 @@ DEFAULT_CONSTANT_SCHEDULE_PAIRS = (
 )
 
 
-def add_default_schedules(doc: EPDocument) -> tuple[EPDocument, dict[str, IDFObject]]:
+def add_default_schedules(
+    doc: EPDocument,
+) -> tuple[EPDocument, dict[str, "AnyScheduleYear"]]:
     """Helper to add default schedules to the IDF model.
 
     Args:
@@ -420,9 +432,9 @@ def add_default_schedules(doc: EPDocument) -> tuple[EPDocument, dict[str, IDFObj
 
     Returns:
         doc (EPDocument): The IDF model with the added schedules.
-        scheds (dict[str, IDFObject]): The added `Schedule:Year` objects by name.
+        scheds (dict[str, AnyScheduleYear]): The added `Schedule:Year` objects by name.
     """
-    all_scheds: dict[str, IDFObject] = {}
+    all_scheds: dict[str, AnyScheduleYear] = {}
     for on_name, off_name in DEFAULT_CONSTANT_SCHEDULE_PAIRS:
         all_scheds[on_name] = add_constant_schedule(doc, on_name, 1)
         all_scheds[off_name] = add_constant_schedule(doc, off_name, 0)

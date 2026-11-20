@@ -2,15 +2,18 @@
 
 import calendar
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from idfkit import IDFObject
 from pydantic import Field, field_validator, model_validator
 
 from epinterface.document import EPDocument, add_or_replace
 from epinterface.interface import PROTECTED_SCHEDULE_NAMES
 from epinterface.sbem.common import NamedObject
 from epinterface.schedules import NON_LEAP_MONTH_LENGTHS, add_day_hourly_schedule
+
+if TYPE_CHECKING:
+    # The object classes exist only in idfkit's stubs.
+    from idfkit.document import AnyScheduleTypeLimits
 
 # TODO: handle schedule type limits in a consistent way once?
 ScheduleTypeLimitType = Literal["Fraction", "Temperature", "AnyNumber"]
@@ -30,7 +33,7 @@ class TypeLimitsSpec:
     Numeric_Type: Literal["Continuous", "Discrete"] | None = None
     Unit_Type: Literal["Dimensionless", "Temperature"] | None = None
 
-    def add_to_idf(self, doc: EPDocument) -> IDFObject:
+    def add_to_idf(self, doc: EPDocument) -> "AnyScheduleTypeLimits":
         """Write the `ScheduleTypeLimits` object (an identical one is reused)."""
         return add_or_replace(
             doc["ScheduleTypeLimits"].add,

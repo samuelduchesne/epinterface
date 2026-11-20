@@ -2,13 +2,16 @@
 
 import re
 from collections.abc import Sequence
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
-from idfkit import IDFObject
 from numpy.typing import NDArray
 
 from epinterface.document import EPDocument, add_or_replace
+
+if TYPE_CHECKING:
+    # The object classes exist only in idfkit's stubs.
+    from idfkit.document import AnyScheduleDayHourly, AnyScheduleYear
 
 HOURS_PER_YEAR = 8760
 DAYS_PER_YEAR = 365
@@ -31,7 +34,7 @@ def add_values_schedule(
     values: Sequence[float] | NDArray[np.floating],
     type_limits: str,
     first_weekday: Literal["monday", "sunday"] = "monday",
-) -> IDFObject:
+) -> "AnyScheduleYear":
     """Add a `Schedule:Year` for 8760 hourly values, with its week/day objects.
 
     Reproduces archetypal's `to_year_week_day`: unique days become
@@ -171,7 +174,7 @@ def _month_day(day_of_year: int) -> tuple[int, int]:
 
 def add_day_hourly_schedule(
     doc: EPDocument, name: str, type_limits: str, values: Sequence[float]
-) -> IDFObject:
+) -> "AnyScheduleDayHourly":
     """Write a `Schedule:Day:Hourly` of 24 values, the first for hour 1.
 
     An identical schedule is reused and a different one of the same name
@@ -183,10 +186,11 @@ def add_day_hourly_schedule(
     if len(values) != 24:
         msg = f"Expected 24 hourly values, got {len(values)}."
         raise ValueError(msg)
+    # Named from the values' positions, so checked by idfkit when added.
+    hours: dict[str, Any] = {f"hour_{h + 1}": v for h, v in enumerate(values)}
     return add_or_replace(
-        # Untyped: the hour fields are named from the values' positions.
-        doc.get_collection("Schedule:Day:Hourly").add,
+        doc["Schedule:Day:Hourly"].add,
         name,
         schedule_type_limits_name=type_limits,
-        **{f"hour_{h + 1}": v for h, v in enumerate(values)},
+        **hours,
     )

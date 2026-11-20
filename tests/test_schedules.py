@@ -48,9 +48,10 @@ def test_add_values_schedule_drops_day_365_like_archetypal(doc):
     # Dec 31 (a Monday in 2018) reuses the last week's Monday profile.
     assert np.allclose(evaluated[364 * 24 :], vals[357 * 24 : 358 * 24])
     # Identical weeks collapse into one block stretched to Dec 31.
-    assert len(result.schedule_weeks) == 1
-    assert result.schedule_weeks[0]["end_month"] == 12
-    assert result.schedule_weeks[0]["end_day"] == 31
+    weeks = result.to_dict()["schedule_weeks"]
+    assert len(weeks) == 1
+    assert weeks[0]["end_month"] == 12
+    assert weeks[0]["end_day"] == 31
 
 
 def test_add_values_schedule_default_puts_jan_1_in_monday_field(doc):

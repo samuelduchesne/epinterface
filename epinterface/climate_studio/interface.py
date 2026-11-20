@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeVar, cast
 
 import numpy as np
 import pandas as pd
-from idfkit import IDFObject
 from pydantic import (
     AliasChoices,
     BaseModel,
@@ -36,7 +35,14 @@ from epinterface.schedules import HOURS_PER_YEAR, add_values_schedule
 
 if TYPE_CHECKING:
     # The object classes exist only in idfkit's stubs.
-    from idfkit.document import AnyZoneList
+    from idfkit.document import (
+        AnyBuildingSurfaceDetailed,
+        AnyFenestrationSurfaceDetailed,
+        AnyMaterial,
+        AnyScheduleTypeLimits,
+        AnyScheduleYear,
+        AnyZoneList,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -605,7 +611,7 @@ class OpaqueConstructionLayer(MaterialWithThickness, NamedObject, extra="forbid"
 
     def add_material_to_idf(
         self, doc: EPDocument, material_defs: dict[str, OpaqueMaterial]
-    ) -> IDFObject:
+    ) -> "AnyMaterial":
         """Write the referenced material as a `Material` of this layer's thickness.
 
         An identical material already in the document is reused.
@@ -615,7 +621,7 @@ class OpaqueConstructionLayer(MaterialWithThickness, NamedObject, extra="forbid"
             material_defs (dict[str, OpaqueMaterial]): Opaque material definitions by name.
 
         Returns:
-            IDFObject: The `Material` object, named `{Name}_{Thickness}`.
+            AnyMaterial: The `Material` object, named `{Name}_{Thickness}`.
         """
         if self.Name not in material_defs:
             raise ClimateStudioValueNotFound("Material", self.Name)
@@ -1663,14 +1669,14 @@ class LibraryScheduleTypeLimits(BaseModel):
     NumericType: Literal["Continuous", "Discrete"] | None = "Continuous"
     UnitType: str = "Dimensionless"
 
-    def add_to_idf(self, doc: EPDocument) -> IDFObject:
+    def add_to_idf(self, doc: EPDocument) -> "AnyScheduleTypeLimits":
         """Write the `ScheduleTypeLimits` object (an identical one is kept as is).
 
         Args:
             doc (EPDocument): The IDF document to add the type limits to.
 
         Returns:
-            IDFObject: The `ScheduleTypeLimits` object.
+            AnyScheduleTypeLimits: The `ScheduleTypeLimits` object.
         """
         return add_or_replace(
             doc["ScheduleTypeLimits"].add,
@@ -1690,14 +1696,14 @@ class LibrarySchedule(BaseModel):
     Type: LibraryScheduleTypeLimits
     Values: list[float]
 
-    def add_to_idf(self, doc: EPDocument) -> IDFObject:
+    def add_to_idf(self, doc: EPDocument) -> "AnyScheduleYear":
         """Write the schedule as `Schedule:Year` (with week/day objects) and its type limits.
 
         Args:
             doc (EPDocument): The IDF document to add the schedule to.
 
         Returns:
-            IDFObject: The `Schedule:Year` object.
+            AnyScheduleYear: The `Schedule:Year` object.
         """
         self.Type.add_to_idf(doc)
         return add_values_schedule(doc, self.Name, self.Values, self.Type.Name)
@@ -1905,17 +1911,24 @@ class SurfaceHandler(BaseModel):
             lib (ClimateStudioLibraryV2): The library of constructions.
             construction_name (str): The name of the construction to add.
         """
-        srf_key = (
-            "FenestrationSurface:Detailed"
-            if self.surface_group == "glazing"
-            else "BuildingSurface:Detailed"
-        )
         if self.boundary_condition is not None and self.surface_group == "glazing":
             raise NotImplementedClimateStudioParameter(
                 "BoundaryCondition", self.surface_group, "Glazing"
             )
 
-        srfs = [srf for srf in doc[srf_key] if self.check_srf(srf)]
+        # Windows are matched on their original construction name only; the other
+        # filters name fields `FenestrationSurface:Detailed` does not have.
+        srfs: list[AnyBuildingSurfaceDetailed | AnyFenestrationSurfaceDetailed]
+        if self.surface_group == "glazing":
+            srfs = [
+                srf
+                for srf in doc["FenestrationSurface:Detailed"]
+                if self.check_construction_name(srf)
+            ]
+        else:
+            srfs = [
+                srf for srf in doc["BuildingSurface:Detailed"] if self.check_srf(srf)
+            ]
         construction_lib = (
             lib.OpaqueConstructions
             if self.surface_group != "glazing"
@@ -1935,11 +1948,11 @@ class SurfaceHandler(BaseModel):
             srf.construction_name = construction.Name
         return doc
 
-    def check_srf(self, srf: IDFObject):
+    def check_srf(self, srf: "AnyBuildingSurfaceDetailed"):
         """Check if the surface matches the filters.
 
         Args:
-            srf (IDFObject): The surface to check.
+            srf (AnyBuildingSurfaceDetailed): The surface to check.
 
         Returns:
             match (bool): True if the surface matches the filters.
@@ -1950,36 +1963,30 @@ class SurfaceHandler(BaseModel):
             and self.check_construction_name(srf)
         )
 
-    def check_construction_type(self, srf: IDFObject):
+    def check_construction_type(self, srf: "AnyBuildingSurfaceDetailed"):
         """Check if the surface matches the construction type.
 
         Args:
-            srf (IDFObject): The surface to check.
+            srf (AnyBuildingSurfaceDetailed): The surface to check.
 
         Returns:
             match (bool): True if the surface matches the construction type.
         """
-        if self.surface_group == "glazing":
-            # Ignore the construction type check for windows
-            return True
         if self.original_surface_type is None:
             # Ignore the construction type check when filter not provided
             return True
         # Check the construction type
         return self.original_surface_type.lower() == (srf.surface_type or "").lower()
 
-    def check_boundary(self, srf: IDFObject):
+    def check_boundary(self, srf: "AnyBuildingSurfaceDetailed"):
         """Check if the surface matches the boundary condition.
 
         Args:
-            srf (IDFObject): The surface to check.
+            srf (AnyBuildingSurfaceDetailed): The surface to check.
 
         Returns:
             match (bool): True if the surface matches the boundary condition.
         """
-        if self.surface_group == "glazing":
-            # Ignore the bc filter check for windows
-            return True
         if self.boundary_condition is None:
             # Ignore the bc filter when filter not provided
             return True
@@ -1988,11 +1995,13 @@ class SurfaceHandler(BaseModel):
             srf.outside_boundary_condition or ""
         ).lower() == self.boundary_condition.lower()
 
-    def check_construction_name(self, srf: IDFObject):
+    def check_construction_name(
+        self, srf: "AnyBuildingSurfaceDetailed | AnyFenestrationSurfaceDetailed"
+    ):
         """Check if the surface matches the original construction name.
 
         Args:
-            srf (IDFObject): The surface to check.
+            srf (AnyBuildingSurfaceDetailed | AnyFenestrationSurfaceDetailed): The surface to check.
 
         Returns:
             match (bool): True if the surface matches the original construction name.
