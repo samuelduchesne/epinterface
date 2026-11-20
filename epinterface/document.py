@@ -382,21 +382,20 @@ def add_or_replace(add: Callable[P, T], /, *args: P.args, **kwargs: P.kwargs) ->
         if stored == {k: v for k, v in fields.items() if v not in (None, "")}:
             return cast(T, existing)
         replaced = [existing]
-    # A collection has no public link to its document; the objects in it have.
-    doc = replaced[0].theidf if replaced else None
-    if doc is not None:
-        for obj in replaced:
-            doc.removeidfobject(obj)
+    for obj in replaced:
+        collection.remove(obj)
+    # The same call less the None fields, which a type checker cannot follow
+    # through the dict.
+    untyped_add = cast(Callable[..., T], add)
     try:
-        # The same call less the None fields, which a type checker cannot
-        # follow through the dict.
-        return cast(Callable[..., T], add)(*args, **fields)
+        return untyped_add(*args, **fields)
     except Exception:
         # The new object was refused (e.g. it fails validation): put back the
         # one it was to replace rather than leave the document without it.
-        if doc is not None:
-            for obj in replaced:
-                doc.copyidfobject(obj)
+        for obj in replaced:
+            data = obj.to_dict()
+            old_name = data.pop("name", "")
+            untyped_add(*([old_name] if old_name else []), **data)
         raise
 
 
