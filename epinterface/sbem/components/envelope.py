@@ -358,6 +358,35 @@ class EnvelopeAssemblyComponent(
         ge=0,
     )
 
+    IsFacadeAdiabatic: bool = Field(
+        default=False,
+        title="Facade is adiabatic",
+        description="Exterior walls exchange no heat with the outdoors.",
+    )
+    IsRoofAdiabatic: bool = Field(
+        default=False,
+        title="Roof is adiabatic",
+        description="Exterior roofs exchange no heat with the outdoors.",
+    )
+    IsGroundAdiabatic: bool = Field(
+        default=False,
+        title="Ground contact is adiabatic",
+        description="Floors and walls on the ground exchange no heat with it.",
+    )
+    IsPartitionAdiabatic: bool = Field(
+        default=False,
+        title="Partitions are adiabatic",
+        description="Walls between zones exchange no heat between them.",
+    )
+    IsSlabAdiabatic: bool = Field(
+        default=False,
+        title="Floor/ceiling slabs are adiabatic",
+        description=(
+            "Floors and ceilings between storeys of the main zones exchange no "
+            "heat between them."
+        ),
+    )
+
     @model_validator(mode="after")
     def validate_internal_mass_exposed_area_per_area(self):
         """Validate that either both internal mass assembly and internal mass exposed area are provided, or neither."""

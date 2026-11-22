@@ -1219,6 +1219,94 @@ class Model(BaseWeather, validate_assignment=True):
             )
         return doc
 
+    def remove_adiabatic_facade_windows(self, doc: EPDocument) -> EPDocument:
+        """Remove the windows of exterior walls whose zone has an adiabatic facade.
+
+        EnergyPlus allows no window on an adiabatic surface, so a zone whose
+        assemblies set `IsFacadeAdiabatic` loses its windows (and with them
+        their solar gains and natural ventilation).
+
+        Args:
+            doc (EPDocument): The document, with its geometry.
+
+        Returns:
+            doc (EPDocument): The document.
+        """
+        surfaces = doc["BuildingSurface:Detailed"]
+        for window in list(doc["FenestrationSurface:Detailed"]):
+            wall = surfaces.get(window.building_surface_name or "")
+            if wall is None or (wall.outside_boundary_condition or "").lower() != (
+                "outdoors"
+            ):
+                continue
+            zone = self.conditioning_definition(wall.zone_name or "")
+            if zone.Envelope.Assemblies.IsFacadeAdiabatic:
+                doc.removeidfobject(window)
+        return doc
+
+    def apply_adiabatic_boundaries(self, doc: EPDocument) -> EPDocument:  # noqa: C901
+        """Make the surfaces adiabatic that their zone's assemblies say are.
+
+        Each surface follows the envelope of its zone's definition
+        (`conditioning_definition`): exterior walls (`IsFacadeAdiabatic`),
+        exterior roofs (`IsRoofAdiabatic`), surfaces on the ground
+        (`IsGroundAdiabatic`), walls between zones (`IsPartitionAdiabatic`) and
+        floors and ceilings between two main zones (`IsSlabAdiabatic`). An
+        interzone surface made adiabatic takes its partner with it, so both
+        sides agree. EnergyPlus allows no window on an adiabatic surface:
+        `remove_adiabatic_facade_windows` has removed them.
+
+        Args:
+            doc (EPDocument): The document, with its constructions assigned.
+
+        Returns:
+            doc (EPDocument): The document.
+        """
+        surfaces = list(doc["BuildingSurface:Detailed"])
+        by_name = {srf.name: srf for srf in surfaces}
+
+        def is_main(zone_name: str) -> bool:
+            lower = zone_name.lower()
+            if "attic" in lower:
+                return False
+            return not (
+                self.geometry.basement
+                and lower.endswith(self.geometry.basement_suffix.lower())
+            )
+
+        def flagged(srf: "AnyBuildingSurfaceDetailed") -> bool:
+            zone = srf.zone_name or ""
+            a = self.conditioning_definition(zone).Envelope.Assemblies
+            kind = (srf.surface_type or "").lower()
+            bc = (srf.outside_boundary_condition or "").lower()
+            if bc == "outdoors":
+                return (kind == "wall" and a.IsFacadeAdiabatic) or (
+                    kind == "roof" and a.IsRoofAdiabatic
+                )
+            if bc == "ground":
+                return a.IsGroundAdiabatic
+            if bc == "surface":
+                if kind == "wall":
+                    return a.IsPartitionAdiabatic
+                partner = by_name.get(srf.outside_boundary_condition_object or "")
+                other = (partner.zone_name or "") if partner is not None else ""
+                return a.IsSlabAdiabatic and is_main(zone) and is_main(other)
+            return False
+
+        chosen = [srf for srf in surfaces if flagged(srf)]
+        for srf in chosen:
+            partner = None
+            if (srf.outside_boundary_condition or "").lower() == "surface":
+                partner = by_name.get(srf.outside_boundary_condition_object or "")
+            for s in (srf, partner):
+                if s is None:
+                    continue
+                s.outside_boundary_condition = "Adiabatic"
+                s.outside_boundary_condition_object = None
+                s.sun_exposure = "NoSun"
+                s.wind_exposure = "NoWind"
+        return doc
+
     def build(  # noqa: C901
         self,
         config: SimulationPathConfig,
@@ -1265,6 +1353,10 @@ class Model(BaseWeather, validate_assignment=True):
 
         # construct zone lists
         doc, added_zone_lists = self.add_zone_lists(doc)
+
+        # adiabatic facades have no windows; removed before the zone
+        # definitions, whose natural ventilation opens the windows
+        doc = self.remove_adiabatic_facade_windows(doc)
 
         # Handle main zones
         for zone in added_zone_lists.main_zone_list:
@@ -1372,6 +1464,7 @@ class Model(BaseWeather, validate_assignment=True):
         )
         if self.GroupZones is not None:
             doc = self.add_group_constructions(doc)
+        doc = self.apply_adiabatic_boundaries(doc)
 
         # > operations
         # ----> space use

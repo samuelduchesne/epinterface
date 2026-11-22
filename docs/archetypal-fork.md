@@ -23,6 +23,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-9, mechanical ventilation schedule | A schedule of the mechanical outdoor air on `VentilationComponent`. |
 | UP-9, ideal-loads limits | Heating and cooling limit types, flows and capacities per floor area on `ConditioningSystemsComponent`. |
 | UP-9, availability | Heating and cooling availability schedules on `ConditioningSystemsComponent`. |
+| UP-9, adiabatic assemblies | Adiabatic facade, roof, ground, partition and slab flags on `EnvelopeAssemblyComponent`. |
 
 ## Classes
 
@@ -451,6 +452,32 @@ ideal loads' heating or cooling availability schedule. Its design days are
 "always on" (`d_AllOn_00`), so that sizing sees an available system, unless
 the week sets its own design-day slots. A missing system stays `AlwaysOff`,
 whatever its schedule.
+
+## Adiabatic assemblies (UP-9)
+
+A UMI template can declare any of its assemblies adiabatic, for example the
+facade of a terraced house's party walls. `EnvelopeAssemblyComponent`
+(`epinterface.sbem.components.envelope`) now holds UMI's five flags.
+
+| Field | Type | Unit | Default | Surfaces made adiabatic |
+|---|---|---|---|---|
+| `IsFacadeAdiabatic` | `bool` | – | `False` | Exterior walls (`Outdoors` walls). Their windows are removed. |
+| `IsRoofAdiabatic` | `bool` | – | `False` | Exterior roofs. |
+| `IsGroundAdiabatic` | `bool` | – | `False` | Floors and walls on the ground. |
+| `IsPartitionAdiabatic` | `bool` | – | `False` | Walls between two zones. |
+| `IsSlabAdiabatic` | `bool` | – | `False` | Floors and ceilings between two main zones (not those of the attic or basement). |
+
+After the constructions are assigned, `Model.apply_adiabatic_boundaries` sets
+each such surface's outside boundary condition to `Adiabatic` (no sun, no
+wind), following the assemblies of its zone's definition
+(`Model.conditioning_definition`: the group's for a main zone, `Zone` for the
+attic and basement). An interzone surface takes its partner with it, so both
+sides agree. The construction stays: it still stores heat.
+
+EnergyPlus allows no window on an adiabatic surface, so before the zone
+definitions are written `Model.remove_adiabatic_facade_windows` removes the
+windows of exterior walls whose zone has an adiabatic facade; such a zone
+then has no solar gains through windows and no natural ventilation.
 
 ## Example
 
