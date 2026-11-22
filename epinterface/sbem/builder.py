@@ -752,8 +752,12 @@ class Model(BaseWeather, validate_assignment=True):
           included (`GroupZones`); `Zone` is the largest perimeter group (the
           largest group without exposures).
 
-        The archetype's attic and basement assumptions are used as they are; its
-        geometry characteristics are descriptive and do not change `geometry`.
+        The archetype's attic and basement assumptions are used as they are. Of
+        its geometry characteristics, the window-to-wall ratios by orientation
+        (`BuildingGeometry.WindowToWallRatio`), when set, replace the geometry's
+        window ratio (`ShoeboxGeometry.wwr_by_orientation`): each exterior wall
+        takes the ratio of the orientation it faces. The others are descriptive
+        and do not change `geometry`.
 
         Args:
             archetype: The archetype to model.
@@ -769,6 +773,12 @@ class Model(BaseWeather, validate_assignment=True):
                 than two groups with unset shares, or exposures set for some
                 groups only.
         """
+        if archetype.Geometry.WindowToWallRatio is not None:
+            geometry = geometry.model_copy(
+                update={
+                    "wwr_by_orientation": dict(archetype.Geometry.WindowToWallRatio)
+                }
+            )
         groups = archetype.Groups
         if len(groups) == 1:
             return cls(

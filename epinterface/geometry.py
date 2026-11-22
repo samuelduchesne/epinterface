@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import math
 import re
 import warnings
 from collections.abc import Sequence
@@ -21,7 +22,11 @@ from idfkit import (
     scale_building,
     translate_building,
 )
-from idfkit.geometry import get_surface_coords, set_surface_coords
+from idfkit.geometry import (
+    calculate_surface_azimuth,
+    get_surface_coords,
+    set_surface_coords,
+)
 from idfkit.zoning import ZoneFootprint, ZoningScheme, create_block
 from numpy.typing import ArrayLike
 from pydantic import BaseModel, Field, field_validator
@@ -392,6 +397,25 @@ def prepare_neighbor_shading_for_idf(
     return mask_polys, neighbor_floors
 
 
+Orientation = Literal["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+"""Eight 45-degree sectors of azimuth, centred on north (0 deg), clockwise."""
+
+ORIENTATIONS: tuple[Orientation, ...] = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+
+
+def orientation_of(azimuth_deg: float) -> Orientation:
+    """Return the 45-degree sector an azimuth falls in.
+
+    Args:
+        azimuth_deg: Azimuth in degrees, clockwise from north.
+
+    Returns:
+        orientation: The sector, for example `"NE"` for 22.5 <= azimuth < 67.5.
+    """
+    index = math.floor(((azimuth_deg % 360) + 22.5) / 45) % 8
+    return ORIENTATIONS[index]
+
+
 ZoningType = Literal["core/perim", "by_storey"]
 
 GroupExposure = Literal["core", "perimeter"]
@@ -617,9 +641,56 @@ class ShoeboxGeometry(BaseModel):
         ge=0,
         le=1,
     )
+    wwr_by_orientation: dict[Orientation, float] | None = Field(
+        default=None,
+        title="Window-to-wall ratio by orientation",
+        description=(
+            "Window-to-wall ratio of each of the eight orientations, in [0, 1]. "
+            "Each exterior wall takes the ratio of the 45-degree sector its "
+            "outward normal faces (after the scene context's rotation). None: "
+            "`wwr` for every wall."
+        ),
+    )
     scene_context: SceneContext | None = Field(
         default=None, description="The context for the scene."
     )
+
+    @field_validator("wwr_by_orientation", mode="after")
+    @classmethod
+    def check_wwr_by_orientation(
+        cls, v: dict[Orientation, float] | None
+    ) -> dict[Orientation, float] | None:
+        """Every orientation is given, with a ratio in [0, 1].
+
+        Raises:
+            ValueError
+        """
+        if v is None:
+            return v
+        missing = [o for o in ORIENTATIONS if o not in v]
+        if missing:
+            msg = f"wwr_by_orientation must give every orientation; missing {missing}."
+            raise ValueError(msg)
+        bad = {o: r for o, r in v.items() if not 0 <= r <= 1}
+        if bad:
+            msg = f"Window-to-wall ratios must be in [0, 1]; got {bad}."
+            raise ValueError(msg)
+        return {o: v[o] for o in ORIENTATIONS}
+
+    def window_to_wall_ratio(self, azimuth_deg: float) -> float:
+        """The window-to-wall ratio of a wall facing an azimuth.
+
+        Args:
+            azimuth_deg: The azimuth of the wall's outward normal in the final
+                model, degrees clockwise from north.
+
+        Returns:
+            ratio: `wwr_by_orientation` of the wall's sector, or `wwr`.
+        """
+        if self.wwr_by_orientation is None:
+            return self.wwr
+        return self.wwr_by_orientation[orientation_of(azimuth_deg)]
+
     zone_groups: list[ZoneGroupLayout] | None = Field(
         default=None,
         description=(
@@ -870,7 +941,10 @@ class ShoeboxGeometry(BaseModel):
         _set_default_constructions(doc)
 
         # Handle Windows
-        if self.wwr:
+        if self.wwr or (
+            self.wwr_by_orientation is not None
+            and any(self.wwr_by_orientation.values())
+        ):
             window_walls = [
                 w
                 for w in doc["BuildingSurface:Detailed"]
@@ -885,8 +959,19 @@ class ShoeboxGeometry(BaseModel):
                 )
                 and (w.surface_type or "").lower() == "wall"
             ]
+            # the scene context later rotates the building counter-clockwise,
+            # which lowers every compass azimuth by the same angle
+            rotation_deg = (
+                self.scene_context.orientation * 180 / np.pi
+                if self.scene_context
+                else 0.0
+            )
             for wall in window_walls:
-                _add_window(doc, wall, self.wwr)
+                ratio = self.window_to_wall_ratio(
+                    calculate_surface_azimuth(wall) - rotation_deg
+                )
+                if ratio:
+                    _add_window(doc, wall, ratio)
 
         if self.scene_context:
             mask_polys, neighbor_floors = prepare_neighbor_shading_for_idf(

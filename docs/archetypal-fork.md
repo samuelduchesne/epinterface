@@ -10,6 +10,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-2, zone groups | `epinterface.sbem.archetype`: `Archetype`, `ZoneGroup`, `BuildingGeometry`, save and load. `Model.from_archetype` and `Model.CoreZone` in the builder. |
 | UP-2, unset shares | Floor-area shares may all be `None`: the geometry sets them when the archetype is applied. |
 | UP-2, any number of groups | `Model.from_archetype` places any number of groups: one zone per group on each storey, each with its group's zone definition. |
+| UP-2, ratios by orientation | `BuildingGeometry.WindowToWallRatio` is applied by the builder: `ShoeboxGeometry.wwr_by_orientation`. |
 | UP-2, week slots | Holiday and design-day slots on `WeekComponent`. |
 | UP-2, infiltration schedule | An hourly schedule on `InfiltrationComponent`. |
 | UP-2, heat recovery | Numeric sensible and latent heat-recovery effectiveness on `VentilationComponent`. |
@@ -72,7 +73,7 @@ to the conditioned floor area.
 |---|---|---|
 | `Storeys` | `int \| None` | Number of storeys above ground, at least 1. |
 | `ConditionedFloorArea` | `float \| None` | Conditioned floor area, m². |
-| `WindowToWallRatio` | `dict[Orientation, float] \| None` | Window-to-wall ratio of each orientation, in [0, 1]. |
+| `WindowToWallRatio` | `dict[Orientation, float] \| None` | Window-to-wall ratio of each orientation, in [0, 1]. Applied by `Model.from_archetype` (see below). |
 | `FacadeAreaPerFloorArea` | `dict[Orientation, float] \| None` | Gross exterior wall area of each orientation (windows included) per floor area. |
 | `RoofAreaPerFloorArea` | `float \| None` | Exterior roof area per floor area. |
 | `ExposedFloorAreaPerFloorArea` | `float \| None` | Floor area exposed to outdoor air per floor area. |
@@ -80,7 +81,8 @@ to the conditioned floor area.
 
 `Orientation` is one of `"N"`, `"NE"`, `"E"`, `"SE"`, `"S"`, `"SW"`, `"W"`, `"NW"`:
 eight 45° sectors of azimuth centred on those directions (`ORIENTATIONS`,
-`orientation_of(azimuth_deg)`). An orientation map must give all eight; it is stored in
+`orientation_of(azimuth_deg)`). They are defined in `epinterface.geometry` and
+re-exported by `epinterface.sbem.archetype`. An orientation map must give all eight; it is stored in
 that order.
 
 Helpers: `BuildingGeometry.uniform(value)` gives the same value for every orientation;
@@ -108,12 +110,16 @@ returns a `Model` for a `ShoeboxGeometry`. `kwargs` are other `Model` fields, su
 | Any other set | unset | `ValueError`: the archetype's validation already refuses most of these. |
 | Exposures set for some groups only | | `ValueError`. |
 
+When the archetype's `Geometry.WindowToWallRatio` is set, `from_archetype`
+copies it to the geometry's `wwr_by_orientation`, which replaces `wwr`; see
+[Window-to-wall ratios by orientation](#window-to-wall-ratios-by-orientation-up-2).
+
 `Model.CoreZone` (default `None`) is the zone definition of the core zones of a
 core/perimeter shoebox; `Model.zone_definition(zone_name)` returns the definition a
 zone gets. With one or two groups, the envelope assemblies, window, ground
 temperatures and the attic and basement zones follow `Model.Zone`, the perimeter
-group, which holds the facade. The archetype's `Geometry` is descriptive:
-`from_archetype` does not read it.
+group, which holds the facade. Of the archetype's `Geometry`, `from_archetype`
+reads only `WindowToWallRatio`; the other characteristics are descriptive.
 
 ### One zone per group
 
@@ -154,6 +160,28 @@ sides of a partition match. The reference group is the largest perimeter group
 (the largest group without exposures); it also sets the attic and basement zone
 definitions, the ground temperatures and the COPs and fuels of
 `standard_results_postprocess`.
+
+## Window-to-wall ratios by orientation (UP-2)
+
+The archetype already held the envelope and window ratios by orientation
+(`BuildingGeometry.FacadeAreaPerFloorArea` and `WindowToWallRatio`), but the
+shoebox had one `wwr`. The shoebox now takes a ratio per orientation.
+
+| Field | Type | Unit | Default | Meaning |
+|---|---|---|---|---|
+| `ShoeboxGeometry.wwr_by_orientation` (`epinterface.geometry`) | `dict[Orientation, float] \| None`, all eight orientations, each in [0, 1] | – | `None` | Window-to-wall ratio of each orientation. `None`: `wwr` for every wall. |
+
+Each exterior wall of a main zone takes the ratio of the sector its outward
+normal faces in the final model: the azimuth is corrected for the scene
+context's rotation (`ShoeboxGeometry.window_to_wall_ratio(azimuth_deg)`). A
+wall with a ratio of 0 gets no window. The window keeps its ribbon shape, so
+its area is 0.999 × ratio × wall area. An unrotated shoebox faces N, E, S and W
+only, so the four intermediate ratios apply only to rotated scenes.
+
+`Model.from_archetype` copies `BuildingGeometry.WindowToWallRatio`, when set, to
+`wwr_by_orientation`. `FacadeAreaPerFloorArea` stays descriptive: a shoebox's
+facade areas follow from its width, depth, height and storeys, and opposite
+facades are always equal, so eight independent areas cannot be honoured.
 
 ## Holiday and design-day slots (UP-2)
 

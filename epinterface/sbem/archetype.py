@@ -17,13 +17,26 @@ version of this model wrote it.
 This module needs neither a generated Prisma client nor EnergyPlus.
 """
 
-import math
 from pathlib import Path
-from typing import Literal, get_args
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from epinterface.geometry import ORIENTATIONS, Orientation, orientation_of
 from epinterface.sbem.common import NamedObject
+
+__all__ = [
+    "ARCHETYPE_FILE_SUFFIX",
+    "ARCHETYPE_SCHEMA_VERSION",
+    "ORIENTATIONS",
+    "Archetype",
+    "AtticAssumptions",
+    "BasementAssumptions",
+    "BuildingGeometry",
+    "Orientation",
+    "ZoneGroup",
+    "orientation_of",
+]
 from epinterface.sbem.components.zones import ZoneComponent
 
 ARCHETYPE_SCHEMA_VERSION = "1.0"
@@ -34,11 +47,6 @@ ARCHETYPE_FILE_SUFFIX = ".sbem.json"
 
 SHARE_SUM_TOLERANCE = 1e-6
 """How far the sum of set floor-area shares may be from 1."""
-
-Orientation = Literal["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
-"""Eight 45-degree sectors of azimuth, centred on north (0 deg), clockwise."""
-
-ORIENTATIONS: tuple[Orientation, ...] = get_args(Orientation)
 
 ExposureType = Literal["core", "perimeter"]
 """Where a group's zones sit: on the facade (perimeter) or away from it (core)."""
@@ -56,19 +64,6 @@ class BasementAssumptions(BaseModel):
 
     UseFraction: float | None = Field(..., ge=0, le=1)
     Conditioned: bool
-
-
-def orientation_of(azimuth_deg: float) -> Orientation:
-    """Return the 45-degree sector an azimuth falls in.
-
-    Args:
-        azimuth_deg: Azimuth in degrees, clockwise from north.
-
-    Returns:
-        orientation: The sector, for example `"NE"` for 22.5 <= azimuth < 67.5.
-    """
-    index = math.floor(((azimuth_deg % 360) + 22.5) / 45) % 8
-    return ORIENTATIONS[index]
 
 
 def _check_by_orientation(
