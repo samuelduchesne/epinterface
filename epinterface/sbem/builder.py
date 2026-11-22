@@ -1324,6 +1324,9 @@ class Model(BaseWeather, validate_assignment=True):
 
             if not self.Basement.Conditioned:
                 new_zone_def.Operations.HVAC.Ventilation.Provider = "None"
+                new_zone_def.Operations.HVAC.Ventilation.IsScheduledVentilationOn = (
+                    False
+                )
                 new_zone_def.Operations.HVAC.ConditioningSystems.Heating = None
                 new_zone_def.Operations.HVAC.ConditioningSystems.Cooling = None
             else:
@@ -1354,6 +1357,9 @@ class Model(BaseWeather, validate_assignment=True):
 
             if not self.Attic.Conditioned:
                 new_zone_def.Operations.HVAC.Ventilation.Provider = "None"
+                new_zone_def.Operations.HVAC.Ventilation.IsScheduledVentilationOn = (
+                    False
+                )
                 new_zone_def.Operations.HVAC.ConditioningSystems.Heating = None
                 new_zone_def.Operations.HVAC.ConditioningSystems.Cooling = None
 

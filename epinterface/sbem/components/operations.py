@@ -252,6 +252,8 @@ class ZoneOperationsComponent(
 
         if self.HVAC.Ventilation.Provider in ("Natural", "Both"):
             doc = self.add_natural_ventilation_to_idf_zone(doc, target_zone_name)
+        if self.HVAC.Ventilation.IsScheduledVentilationOn:
+            doc = self.add_scheduled_ventilation_to_idf_zone(doc, target_zone_name)
 
         return doc
 
@@ -318,6 +320,55 @@ class ZoneOperationsComponent(
             _close_above_outdoor_humidity(
                 doc, vent_wind_stack_name, ventilation.NatVentMaxRelHumidity
             )
+        return doc
+
+    def add_scheduled_ventilation_to_idf_zone(
+        self, doc: EPDocument, target_zone_name: str
+    ) -> EPDocument:
+        """Add scheduled ventilation: outdoor air at a set number of air changes.
+
+        Writes a natural `ZoneVentilation:DesignFlowRate` of
+        `ScheduledVentilationAch` air changes per hour, multiplied by
+        `ScheduledVentilationSchedule` (constant when None) and stopped while the
+        zone is colder than `ScheduledVentilationSetpoint`.
+
+        Args:
+            doc (EPDocument): The IDF document to add the ventilation to.
+            target_zone_name (str): The name of the zone.
+
+        Returns:
+            doc (EPDocument): The updated IDF document.
+        """
+        ventilation = self.HVAC.Ventilation
+        if ventilation.ScheduledVentilationAch == 0:
+            return doc
+        name = f"{target_zone_name}_{ventilation.safe_name}_SCHEDULED_VENTILATION"
+        if ventilation.ScheduledVentilationSchedule is None:
+            schedule_name = add_constant_schedule(
+                doc, f"{name}_Schedule", 1, "Fraction"
+            ).name
+        else:
+            doc, schedule_name = (
+                ventilation.ScheduledVentilationSchedule.add_year_to_idf(
+                    doc, name_prefix=None
+                )
+            )
+        add_or_replace(
+            doc["ZoneVentilation:DesignFlowRate"].add,
+            name,
+            zone_or_zonelist_or_space_or_spacelist_name=target_zone_name,
+            schedule_name=schedule_name,
+            design_flow_rate_calculation_method="AirChanges/Hour",
+            air_changes_per_hour=ventilation.ScheduledVentilationAch,
+            ventilation_type="Natural",
+            constant_term_coefficient=1.0,
+            temperature_term_coefficient=0.0,
+            velocity_term_coefficient=0.0,
+            velocity_squared_term_coefficient=0.0,
+            minimum_indoor_temperature=ventilation.ScheduledVentilationSetpoint
+            if ventilation.ScheduledVentilationSetpoint is not None
+            else -100.0,
+        )
         return doc
 
 

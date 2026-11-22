@@ -19,6 +19,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-9, fractional year sum | `YearComponent.fractional_year_sum` counts the real weekdays of each month (a defect fix). |
 | UP-9, provider `Both` | `Provider="Both"` gives natural and mechanical ventilation (a defect fix). |
 | UP-9, natural-ventilation limits | Outdoor temperature and humidity limits, an indoor limit and wind and buoyancy switches on `VentilationComponent`. |
+| UP-9, scheduled ventilation | Air changes, schedule and minimum zone temperature of scheduled ventilation on `VentilationComponent`. |
 
 ## Classes
 
@@ -373,6 +374,26 @@ The builder writes them to each zone's `ZoneVentilation:WindandStackOpenArea`
 
 `epinterface.geometry.get_zone_windows(doc, zone_name)` returns a zone's
 windows.
+
+## Scheduled ventilation (UP-9)
+
+UMI zones can have scheduled ventilation, outdoor air at a set number of air
+changes (a night flush, for example), on top of their natural or mechanical
+ventilation. `VentilationComponent` now holds it, under UMI's names.
+
+| Field | Type | Unit | Default | Meaning |
+|---|---|---|---|---|
+| `IsScheduledVentilationOn` | `bool` | – | `False` | Whether the zone has scheduled ventilation, whatever `Provider` is. |
+| `ScheduledVentilationAch` | `float`, ≥ 0 | 1/h | `0.0` | Air changes per hour. 0: nothing is written. |
+| `ScheduledVentilationSchedule` | `YearComponent \| None` | – (multiplier) | `None` | Hourly multiplier (Fraction or AnyNumber type limits). `None`: constant. |
+| `ScheduledVentilationSetpoint` | `float \| None`, in [-100, 100] | °C | `None` | Scheduled ventilation stops while the zone air is colder. `None`: no indoor limit. |
+
+The builder writes a `ZoneVentilation:DesignFlowRate` per zone with
+`AirChanges/Hour`, ventilation type `Natural` (no fan energy), coefficients
+1/0/0/0 (a flow independent of weather), the schedule (or a constant schedule
+of 1) and the setpoint as minimum indoor temperature. Unconditioned attic and
+basement zones, whose ventilation provider the builder sets to `None`, get no
+scheduled ventilation either.
 
 ## Example
 

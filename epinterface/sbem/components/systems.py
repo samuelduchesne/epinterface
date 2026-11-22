@@ -305,6 +305,38 @@ class VentilationComponent(NamedObject, MetadataMixin, extra="forbid"):
         ),
     )
 
+    IsScheduledVentilationOn: bool = Field(
+        default=False,
+        title="Scheduled ventilation is on",
+        description=(
+            "Whether the zone also has scheduled ventilation: outdoor air at "
+            "`ScheduledVentilationAch`, whatever `Provider` is."
+        ),
+    )
+    ScheduledVentilationAch: float = Field(
+        default=0.0,
+        title="Scheduled ventilation air changes per hour [1/h]",
+        ge=0,
+    )
+    ScheduledVentilationSchedule: YearComponent | None = Field(
+        default=None,
+        title="Scheduled ventilation schedule",
+        description=(
+            "Hourly multiplier of the scheduled ventilation (Fraction or AnyNumber "
+            "type limits). None: constant."
+        ),
+    )
+    ScheduledVentilationSetpoint: float | None = Field(
+        default=None,
+        title="Scheduled ventilation minimum zone temperature [degC]",
+        description=(
+            "Scheduled ventilation stops while the zone air is colder. None: no "
+            "indoor limit."
+        ),
+        ge=-100,
+        le=100,
+    )
+
     @property
     def sensible_heat_recovery_effectiveness(self) -> float:
         """The sensible effectiveness the model uses: the field, or the assumed constant."""
@@ -318,6 +350,22 @@ class VentilationComponent(NamedObject, MetadataMixin, extra="forbid"):
         if self.LatentHeatRecoveryEffectiveness is not None:
             return self.LatentHeatRecoveryEffectiveness
         return assumed_constants.Latent_Heat_Recovery_Effectiveness
+
+    @model_validator(mode="after")
+    def validate_ventilation_limits(self):
+        """Natural-ventilation limits form a band; scheduled ventilation multiplies a flow."""
+        if (
+            self.ScheduledVentilationSchedule is not None
+            and self.ScheduledVentilationSchedule.schedule_type_limits == "Temperature"
+        ):
+            msg = (
+                "ScheduledVentilationSchedule must be a Fraction or AnyNumber schedule."
+            )
+            raise ValueError(msg)
+        if self.NatVentMinOutdoorAirTemp >= self.NatVentMaxOutdoorAirTemp:
+            msg = "NatVentMinOutdoorAirTemp must be below NatVentMaxOutdoorAirTemp."
+            raise ValueError(msg)
+        return self
 
     @model_validator(mode="after")
     def validate_ventilation_systems(self):
@@ -335,9 +383,6 @@ class VentilationComponent(NamedObject, MetadataMixin, extra="forbid"):
             if self.Economizer != "NoEconomizer":
                 msg = "Natural ventilation systems can't have an Economizer."
                 raise ValueError(msg)
-        if self.NatVentMinOutdoorAirTemp >= self.NatVentMaxOutdoorAirTemp:
-            msg = "NatVentMinOutdoorAirTemp must be below NatVentMaxOutdoorAirTemp."
-            raise ValueError(msg)
         if self.Provider == "None":
             if self.HRV != "NoHRV":
                 msg = "None ventilation systems can't have HRV."
