@@ -208,12 +208,13 @@ def test_simulated_fan_and_heating_use(zone: ZoneComponent, tmp_path: Path):
         end_uses = energy.loc["End Uses"]
         assert utilities.sum() == pytest.approx(end_uses.sum(), rel=1e-9)
         # heating, cooling and fans are all electric here
-        electric = (
-            end_uses.loc[["Lighting", "Equipment", "Heating", "Cooling", "Fans"]].sum()
-        )
+        electric = end_uses.loc[
+            ["Lighting", "Equipment", "Heating", "Cooling", "Fans"]
+        ].sum()
         assert utilities.loc["Electricity"].sum() == pytest.approx(electric, rel=1e-9)
-        assert result.energy_and_peak.loc["Peak"].loc["Utilities"].loc[
-            "Electricity"
-        ].max() > 0
+        assert (
+            result.energy_and_peak.loc["Peak"].loc["Utilities"].loc["Electricity"].max()
+            > 0
+        )
     finally:
         result.sql.close()

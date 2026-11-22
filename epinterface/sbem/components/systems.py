@@ -5,6 +5,7 @@ from typing import Literal, cast
 import numpy as np
 from pydantic import Field, model_validator
 
+from epinterface.constants import assumed_constants
 from epinterface.document import EPDocument
 from epinterface.sbem.common import BoolStr, MetadataMixin, NamedObject
 from epinterface.sbem.components.schedules import YearComponent
@@ -234,6 +235,40 @@ class VentilationComponent(NamedObject, MetadataMixin, extra="forbid"):
     HRV: HRVMethod = Field(..., title="HRV type of the object")
     Economizer: EconomizerMethod = Field(..., title="Economizer type of the object")
     DCV: DCVMethod = Field(..., title="DCV type of the object")
+    SensibleHeatRecoveryEffectiveness: float | None = Field(
+        default=None,
+        title="Sensible heat recovery effectiveness [0-1]",
+        description=(
+            "Sensible effectiveness of the heat recovery at 100% airflow. Used when "
+            "HRV is not NoHRV. None: epinterface's assumed constant (0.70)."
+        ),
+        ge=0,
+        le=1,
+    )
+    LatentHeatRecoveryEffectiveness: float | None = Field(
+        default=None,
+        title="Latent heat recovery effectiveness [0-1]",
+        description=(
+            "Latent effectiveness of the heat recovery at 100% airflow. Used when "
+            "HRV is Enthalpy. None: epinterface's assumed constant (0.65)."
+        ),
+        ge=0,
+        le=1,
+    )
+
+    @property
+    def sensible_heat_recovery_effectiveness(self) -> float:
+        """The sensible effectiveness the model uses: the field, or the assumed constant."""
+        if self.SensibleHeatRecoveryEffectiveness is not None:
+            return self.SensibleHeatRecoveryEffectiveness
+        return assumed_constants.Sensible_Heat_Recovery_Effectiveness
+
+    @property
+    def latent_heat_recovery_effectiveness(self) -> float:
+        """The latent effectiveness the model uses: the field, or the assumed constant."""
+        if self.LatentHeatRecoveryEffectiveness is not None:
+            return self.LatentHeatRecoveryEffectiveness
+        return assumed_constants.Latent_Heat_Recovery_Effectiveness
 
     @model_validator(mode="after")
     def validate_ventilation_systems(self):

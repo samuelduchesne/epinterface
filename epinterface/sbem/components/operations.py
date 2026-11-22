@@ -3,7 +3,6 @@
 from logging import getLogger
 from typing import TYPE_CHECKING
 
-from epinterface.constants import assumed_constants
 from epinterface.document import EPDocument, add_or_replace
 from epinterface.geometry import get_zone_floor_area, get_zone_glazed_area
 from epinterface.interface import add_constant_schedule, add_ideal_loads_template
@@ -240,8 +239,8 @@ class ZoneOperationsComponent(
             heat_recovery_type="None"
             if self.HVAC.Ventilation.HRV == "NoHRV"
             else self.HVAC.Ventilation.HRV,
-            sensible_heat_recovery_effectiveness=assumed_constants.Sensible_Heat_Recovery_Effectiveness,
-            latent_heat_recovery_effectiveness=assumed_constants.Latent_Heat_Recovery_Effectiveness,
+            sensible_heat_recovery_effectiveness=self.HVAC.Ventilation.sensible_heat_recovery_effectiveness,
+            latent_heat_recovery_effectiveness=self.HVAC.Ventilation.latent_heat_recovery_effectiveness,
         )
 
         if self.HVAC.Ventilation.Provider == "Natural":

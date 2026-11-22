@@ -10,6 +10,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-2, zone groups | `epinterface.sbem.archetype`: `Archetype`, `ZoneGroup`, `BuildingGeometry`, save and load. `Model.from_archetype` and `Model.CoreZone` in the builder. |
 | UP-2, unset shares | Floor-area shares may all be `None`: the geometry sets them when the archetype is applied. |
 | UP-2, any number of groups | `Model.from_archetype` places any number of groups: one zone per group on each storey, each with its group's zone definition. |
+| UP-2, heat recovery | Numeric sensible and latent heat-recovery effectiveness on `VentilationComponent`. |
 | UP-8 | Specific fan power and a fan end use, the ideal loads' supply-air temperature limits, and an energy input ratio linear in outdoor temperature. |
 
 ## Classes
@@ -151,6 +152,23 @@ sides of a partition match. The reference group is the largest perimeter group
 (the largest group without exposures); it also sets the attic and basement zone
 definitions, the ground temperatures and the COPs and fuels of
 `standard_results_postprocess`.
+
+## Heat-recovery effectiveness (UP-2)
+
+SBEM's `VentilationComponent.HRV` is a category (`NoHRV`, `Sensible`,
+`Enthalpy`); the effectiveness was a constant of epinterface. UMI and detailed
+models hold numbers, so the component now holds them too.
+
+| Field | Type | Unit | Default | Meaning |
+|---|---|---|---|---|
+| `VentilationComponent.SensibleHeatRecoveryEffectiveness` | `float \| None`, in [0, 1] | – | `None` | Sensible effectiveness at 100% airflow. Used when `HRV` is not `NoHRV`. `None`: the assumed constant 0.70. |
+| `VentilationComponent.LatentHeatRecoveryEffectiveness` | `float \| None`, in [0, 1] | – | `None` | Latent effectiveness at 100% airflow. Used when `HRV` is `Enthalpy`. `None`: the assumed constant 0.65. |
+
+The builder writes them to each zone's ideal loads template
+(`sensible_heat_recovery_effectiveness`, `latent_heat_recovery_effectiveness`);
+EnergyPlus ignores them when `HRV` is `NoHRV`. The properties
+`sensible_heat_recovery_effectiveness` and `latent_heat_recovery_effectiveness`
+return the value used.
 
 ## SBEM energy beyond a constant COP (UP-8)
 
