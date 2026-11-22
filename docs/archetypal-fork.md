@@ -10,6 +10,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-2, zone groups | `epinterface.sbem.archetype`: `Archetype`, `ZoneGroup`, `BuildingGeometry`, save and load. `Model.from_archetype` and `Model.CoreZone` in the builder. |
 | UP-2, unset shares | Floor-area shares may all be `None`: the geometry sets them when the archetype is applied. |
 | UP-2, any number of groups | `Model.from_archetype` places any number of groups: one zone per group on each storey, each with its group's zone definition. |
+| UP-8 | Specific fan power and a fan end use, the ideal loads' supply-air temperature limits, and an energy input ratio linear in outdoor temperature. |
 
 ## Classes
 
@@ -150,6 +151,62 @@ sides of a partition match. The reference group is the largest perimeter group
 (the largest group without exposures); it also sets the attic and basement zone
 definitions, the ground temperatures and the COPs and fuels of
 `standard_results_postprocess`.
+
+## SBEM energy beyond a constant COP (UP-8)
+
+SBEM converts the ideal loads' delivered energy to consumed energy. Without UP-8 it
+divides by one constant `SystemCOP × DistributionCOP` per mode and reports no fan
+energy. UP-8 adds three things, all optional; their defaults reproduce the earlier
+results exactly.
+
+### `ConditioningSystemsComponent` (`epinterface.sbem.components.systems`)
+
+| Field | Type | Unit | Default | Meaning |
+|---|---|---|---|---|
+| `MaximumHeatingSupplyAirTemperature` | `float`, in (0, 100) | °C | `30.0` | The ideal loads' maximum supply air temperature when heating (`HVACTemplate:Zone:IdealLoadsAirSystem`). Must be above the cooling limit. |
+| `MinimumCoolingSupplyAirTemperature` | `float`, in (-100, 50) | °C | `13.0` | The ideal loads' minimum supply air temperature when cooling. |
+| `SpecificFanPower` | `float \| None`, ≥ 0 | W/(m³/s) | `None` | Fan electric power per volume flow of supply air. `None`: no fan end use. |
+
+The defaults are the values the builder wrote before UP-8.
+
+### `ThermalSystemComponent` (`epinterface.sbem.components.systems`)
+
+| Field | Type | Unit | Default | Meaning |
+|---|---|---|---|---|
+| `EIRTemperatureSlope` | `float` | 1/K | `0.0` | Change of the energy input ratio (1/`SystemCOP`) per kelvin of outdoor dry-bulb temperature above the reference. `0`: a constant COP. |
+| `EIRReferenceTemperature` | `float \| None` | °C | `None` | Outdoor temperature at which the energy input ratio is 1/`SystemCOP`. Required when the slope is not 0. |
+
+`ThermalSystemComponent.energy_input_ratio(t_out)` returns, for each outdoor
+temperature `T`,
+
+```text
+EIR(T) = max(0, 1/SystemCOP + EIRTemperatureSlope × (T − EIRReferenceTemperature)) / DistributionCOP
+```
+
+The ratio is clipped at 0 so that no hour consumes negative energy.
+
+### What the builder does with them
+
+- **Supply limits.** Each zone's ideal loads template takes the two temperatures of
+  the zone's conditioning.
+- **Fan end use.** When any zone definition sets `SpecificFanPower`, the model also
+  requests the hourly output `Zone Ideal Loads Supply Air Standard Density Volume
+  Flow Rate` (`SUPPLY_AIR_VOLUME_VARIABLE`). `Model.fan_energy_hourly(sql)` sums,
+  over zones, the hour's mean flow times the specific fan power of the zone's
+  conditioning (`Model.conditioning_definition(zone_name)`: the group's definition,
+  or `Zone` for the attic and basement), and divides by the conditioned floor area.
+  `standard_results_postprocess` then adds a `Fans` end use, counted as
+  `Electricity` in the utilities and peaks. Without a specific fan power the
+  results have no `Fans` entry, as before.
+- **Temperature-dependent efficiency.** When the reference zone's heating or
+  cooling system has a non-zero slope, each hour's use is that hour's delivered
+  energy times `EIR(T_out)`, with `T_out` from `Site Outdoor Air Drybulb
+  Temperature`; monthly use is the sum of the hours. Like the constant COP, the
+  slope applies to the whole building's heating or cooling meter.
+
+`epinterface.analysis.energy_and_peak.standard_results_postprocess` takes the
+matching optional arguments `heat_eir_hourly`, `cool_eir_hourly` (consumed ÷
+delivered, one value per hour) and `fan_hourly` (kWh/m² per hour).
 
 ## Example
 

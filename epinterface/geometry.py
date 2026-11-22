@@ -734,13 +734,16 @@ class ShoeboxGeometry(BaseModel):
         """The index of the zone group a zone belongs to, from its name.
 
         Args:
-            zone_name: The zone name.
+            zone_name: The zone name, in any letter case (EnergyPlus upper-cases
+                zone names in its outputs).
 
         Returns:
             group_index: The index in `zone_groups`, or None if the zone is not a
                 group zone (for example the attic).
         """
-        match = re.fullmatch(r"Block Group(\d+) Storey \d+", zone_name)
+        match = re.fullmatch(
+            r"Block Group(\d+) Storey \d+", zone_name, flags=re.IGNORECASE
+        )
         return int(match.group(1)) - 1 if match else None
 
     @property

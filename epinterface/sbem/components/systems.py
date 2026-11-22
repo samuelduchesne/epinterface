@@ -1,7 +1,8 @@
 """Systems components for the SBEM library."""
 
-from typing import Literal
+from typing import Literal, cast
 
+import numpy as np
 from pydantic import Field, model_validator
 
 from epinterface.document import EPDocument
@@ -39,6 +40,54 @@ class ThermalSystemComponent(NamedObject, MetadataMixin, extra="forbid"):
         ge=0,
     )
     DistributionCOP: float = Field(..., title="Distribution COP", ge=0)
+    EIRTemperatureSlope: float = Field(
+        default=0.0,
+        title="Slope of the energy input ratio with outdoor temperature [1/K]",
+        description=(
+            "Change of the system's energy input ratio (1/SystemCOP) per kelvin of "
+            "outdoor dry-bulb temperature above `EIRReferenceTemperature`. Each "
+            "hour's consumed energy is delivered energy times "
+            "max(0, 1/SystemCOP + EIRTemperatureSlope * (T_out - "
+            "EIRReferenceTemperature)) / DistributionCOP. 0: a constant COP."
+        ),
+    )
+    EIRReferenceTemperature: float | None = Field(
+        default=None,
+        title="Reference outdoor temperature of the energy input ratio [degC]",
+        description=(
+            "Outdoor dry-bulb temperature at which the energy input ratio is "
+            "1/SystemCOP. Needed when `EIRTemperatureSlope` is not 0."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def check_eir_reference(self):
+        """A temperature-dependent energy input ratio needs its reference temperature."""
+        if self.EIRTemperatureSlope != 0 and self.EIRReferenceTemperature is None:
+            msg = "EIRTemperatureSlope needs an EIRReferenceTemperature."
+            raise ValueError(msg)
+        return self
+
+    def energy_input_ratio(
+        self, outdoor_temperature: "float | np.ndarray"
+    ) -> np.ndarray:
+        """The effective energy input ratio (consumed / delivered) at each outdoor temperature.
+
+        Args:
+            outdoor_temperature: Outdoor dry-bulb temperatures [degC], a float or an
+                array.
+
+        Returns:
+            eir: max(0, 1/SystemCOP + EIRTemperatureSlope * (T - EIRReferenceTemperature))
+                / DistributionCOP, of the same shape. With a zero slope this is
+                1 / effective_system_cop.
+        """
+        t = np.asarray(outdoor_temperature, dtype=float)
+        ratio = np.full_like(t, 1 / self.SystemCOP)
+        if self.EIRTemperatureSlope != 0:
+            reference = cast(float, self.EIRReferenceTemperature)
+            ratio = ratio + self.EIRTemperatureSlope * (t - reference)
+        return np.maximum(ratio, 0.0) / self.DistributionCOP
 
     @property
     def effective_system_cop(self) -> float:
@@ -103,6 +152,30 @@ class ConditioningSystemsComponent(NamedObject, MetadataMixin, extra="forbid"):
 
     Heating: ThermalSystemComponent | None
     Cooling: ThermalSystemComponent | None
+    MaximumHeatingSupplyAirTemperature: float = Field(
+        default=30.0,
+        title="Maximum heating supply air temperature [degC]",
+        description="The ideal loads' maximum supply air temperature when heating.",
+        gt=0,
+        lt=100,
+    )
+    MinimumCoolingSupplyAirTemperature: float = Field(
+        default=13.0,
+        title="Minimum cooling supply air temperature [degC]",
+        description="The ideal loads' minimum supply air temperature when cooling.",
+        gt=-100,
+        lt=50,
+    )
+    SpecificFanPower: float | None = Field(
+        default=None,
+        title="Specific fan power [W/(m3/s)]",
+        description=(
+            "Fan electric power per volume flow of supply air. The fan end use is "
+            "this times the ideal loads' hourly supply air volume (at standard "
+            "density). None: no fan end use."
+        ),
+        ge=0,
+    )
 
     @model_validator(mode="after")
     def validate_conditioning_types(self):
@@ -115,6 +188,15 @@ class ConditioningSystemsComponent(NamedObject, MetadataMixin, extra="forbid"):
             raise ValueError(msg)
         if self.Cooling and "cooling" not in self.Cooling.ConditioningType.lower():
             msg = "Cooling system type is only applicable to cooling systems."
+            raise ValueError(msg)
+        if (
+            self.MaximumHeatingSupplyAirTemperature
+            <= self.MinimumCoolingSupplyAirTemperature
+        ):
+            msg = (
+                "MaximumHeatingSupplyAirTemperature must be above "
+                "MinimumCoolingSupplyAirTemperature."
+            )
             raise ValueError(msg)
 
         return self

@@ -5,6 +5,7 @@ from typing import cast
 import numpy as np
 import pandas as pd
 from idfkit.simulation.parsers.sql import SQLResult
+from numpy.typing import NDArray
 
 from epinterface.results import tabular_frame, timeseries_frame
 from epinterface.settings import require_supported_major
@@ -67,7 +68,7 @@ TABULAR_DATA_COLUMNS_FOR_VERSION = {
 }
 
 
-def standard_results_postprocess(
+def standard_results_postprocess(  # noqa: C901
     sql: SQLResult,
     *,
     normalizing_floor_area: float,
@@ -79,6 +80,9 @@ def standard_results_postprocess(
     dhw_fuel: str,
     all_fuel_names: list[str],
     ep_version_major: int,
+    heat_eir_hourly: "NDArray[np.float64] | None" = None,
+    cool_eir_hourly: "NDArray[np.float64] | None" = None,
+    fan_hourly: "NDArray[np.float64] | None" = None,
 ) -> pd.Series:
     """Postprocess the sql file to get the standard results.
 
@@ -97,6 +101,13 @@ def standard_results_postprocess(
         dhw_fuel: Fuel type name for domestic hot water.
         all_fuel_names: Sorted list of all fuel type names (union of HVAC and DHW fuel types) for utilities columns.
         ep_version_major: EnergyPlus version major number.
+        heat_eir_hourly: Hourly energy input ratio of heating (consumed / delivered),
+            one value per hour of the hourly meters. None: 1 / heat_cop every hour.
+            When given, monthly heating use is the sum of the hourly use.
+        cool_eir_hourly: The same for cooling.
+        fan_hourly: Hourly fan electricity [kWh/m2], one value per hour of the
+            hourly meters. When given, a "Fans" end use is added and counted as
+            electricity; None: no fan end use.
 
     Returns:
         series: The postprocessed results (Energy and Peak, with Aggregation and Meter index levels).
@@ -160,6 +171,48 @@ def standard_results_postprocess(
     raw_hourly_max: pd.Series = raw_hourly.max(axis=0)
     raw_monthly_hourly_max = raw_hourly.resample("MS").max()
 
+    def monthly_sum(values: pd.Series) -> pd.Series:
+        """Sum hourly values by month, indexed like the monthly meters."""
+        index = cast(pd.DatetimeIndex, values.index)
+        summed = values.groupby(index.month).sum()
+        summed.index = pd.RangeIndex(1, 13, 1, name="Month")
+        return summed
+
+    def hourly_array(values: "NDArray[np.float64]", name: str) -> pd.Series:
+        array = np.asarray(values, dtype=float)
+        if array.shape != (len(raw_hourly),):
+            msg = (
+                f"{name} needs one value per hour of the hourly meters "
+                f"({len(raw_hourly)}); got shape {array.shape}."
+            )
+            raise ValueError(msg)
+        return pd.Series(array, index=raw_hourly.index)
+
+    zero_hourly = raw_hourly["Lighting"] * 0
+    heat_use_hourly = (
+        (raw_hourly["Heating"] / heat_cop)
+        if "Heating" in raw_hourly
+        else zero_hourly.rename("Heating")
+    )
+    if heat_eir_hourly is not None and "Heating" in raw_hourly:
+        heat_use_hourly = (
+            raw_hourly["Heating"] * hourly_array(heat_eir_hourly, "heat_eir_hourly")
+        ).rename("Heating")
+    cool_use_hourly = (
+        (raw_hourly["Cooling"] / cool_cop)
+        if "Cooling" in raw_hourly
+        else zero_hourly.rename("Cooling")
+    )
+    if cool_eir_hourly is not None and "Cooling" in raw_hourly:
+        cool_use_hourly = (
+            raw_hourly["Cooling"] * hourly_array(cool_eir_hourly, "cool_eir_hourly")
+        ).rename("Cooling")
+    fan_use_hourly = (
+        hourly_array(fan_hourly, "fan_hourly").rename("Fans")
+        if fan_hourly is not None
+        else None
+    )
+
     heat_use = (
         raw_monthly["Heating"] / heat_cop
         if "Heating" in raw_monthly
@@ -175,11 +228,17 @@ def standard_results_postprocess(
         if "Domestic Hot Water" in raw_monthly
         else (raw_monthly["Lighting"] * 0).rename("Domestic Hot Water")
     )
+    if heat_eir_hourly is not None:
+        heat_use = monthly_sum(heat_use_hourly)
+    if cool_eir_hourly is not None:
+        cool_use = monthly_sum(cool_use_hourly)
     lighting_use = raw_monthly["Lighting"]
     equipment_use = raw_monthly["Equipment"]
-    end_use_df = pd.concat(
-        [lighting_use, equipment_use, heat_use, cool_use, dhw_use], axis=1
-    )
+    monthly_end_uses = [lighting_use, equipment_use, heat_use, cool_use, dhw_use]
+    fan_use = monthly_sum(fan_use_hourly) if fan_use_hourly is not None else None
+    if fan_use is not None:
+        monthly_end_uses.append(fan_use)
+    end_use_df = pd.concat(monthly_end_uses, axis=1)
 
     utilities_df = pd.DataFrame(
         index=pd.RangeIndex(1, 13, 1, name="Month"),
@@ -188,6 +247,8 @@ def standard_results_postprocess(
         data=np.zeros((12, len(all_fuel_names))),
     )
     utilities_df["Electricity"] = lighting_use + equipment_use
+    if fan_use is not None:
+        utilities_df["Electricity"] += fan_use
     if heat_fuel is not None:
         utilities_df[heat_fuel] += heat_use
     if cool_fuel is not None:
@@ -210,16 +271,6 @@ def standard_results_postprocess(
     )
     energy_series = cast(pd.Series, energy_dfs).rename("kWh/m2")
 
-    heat_use_hourly = (
-        (raw_hourly["Heating"] / heat_cop)
-        if "Heating" in raw_hourly
-        else (raw_hourly["Lighting"] * 0).rename("Heating")
-    )
-    cool_use_hourly = (
-        (raw_hourly["Cooling"] / cool_cop)
-        if "Cooling" in raw_hourly
-        else (raw_hourly["Lighting"] * 0).rename("Cooling")
-    )
     dhw_use_hourly = (
         (raw_hourly["Domestic Hot Water"] / dhw_cop)
         if "Domestic Hot Water" in raw_hourly
@@ -235,6 +286,7 @@ def standard_results_postprocess(
             heat_use_hourly,
             cool_use_hourly,
             dhw_use_hourly,
+            *([fan_use_hourly] if fan_use_hourly is not None else []),
         ],
         axis=1,
     )
@@ -245,6 +297,8 @@ def standard_results_postprocess(
         data=np.zeros((len(raw_hourly), len(all_fuel_names))),
     )
     utilities_df_hourly["Electricity"] = lighting_use_hourly + equipment_use_hourly
+    if fan_use_hourly is not None:
+        utilities_df_hourly["Electricity"] += fan_use_hourly
     if heat_fuel is not None:
         utilities_df_hourly[heat_fuel] += heat_use_hourly
     if cool_fuel is not None:

@@ -100,6 +100,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+IDEAL_LOADS_SYSTEM_SUFFIX = " Ideal Loads Air System"
+"""Suffix of the `ZoneHVAC:IdealLoadsAirSystem` name the HVAC template gives each zone."""
+
+SUPPLY_AIR_VOLUME_VARIABLE = (
+    "Zone Ideal Loads Supply Air Standard Density Volume Flow Rate"
+)
+"""The ideal loads' supply air flow [m3/s] the fan end use is computed from."""
+
+OUTDOOR_TEMPERATURE_VARIABLE = "Site Outdoor Air Drybulb Temperature"
+"""The outdoor temperature a temperature-dependent energy input ratio uses."""
+
 
 def epw_monthly_ground_temperatures(epw_path: Path, depth: float) -> list[float]:
     """Read the twelve monthly ground temperatures at a depth from an EPW header.
@@ -851,6 +862,89 @@ class Model(BaseWeather, validate_assignment=True):
         return self.Zone
 
     @property
+    def zone_definitions(self) -> list[ZoneComponent]:
+        """Every zone definition of the model: `Zone`, `CoreZone` and `GroupZones`."""
+        definitions = [self.Zone]
+        if self.CoreZone is not None:
+            definitions.append(self.CoreZone)
+        definitions.extend(self.GroupZones or [])
+        return definitions
+
+    @property
+    def has_fan_energy(self) -> bool:
+        """Whether any zone definition sets a specific fan power."""
+        return any(
+            z.Operations.HVAC.ConditioningSystems.SpecificFanPower is not None
+            for z in self.zone_definitions
+        )
+
+    def conditioning_definition(self, zone_name: str) -> ZoneComponent:
+        """The zone definition whose conditioning a zone gets.
+
+        Attic and basement zones are conditioned as `Zone`, the reference group;
+        the main zones as `zone_definition` says.
+
+        Args:
+            zone_name: The zone name, in any letter case.
+
+        Returns:
+            zone: The zone definition.
+        """
+        lower = zone_name.lower()
+        if "attic" in lower:
+            return self.Zone
+        if self.geometry.basement and lower.endswith(
+            self.geometry.basement_suffix.lower()
+        ):
+            return self.Zone
+        if self.GroupZones is not None:
+            index = self.geometry.zone_group_index(zone_name)
+            return self.GroupZones[index] if index is not None else self.Zone
+        if self.CoreZone is not None and "core_zone" in lower:
+            return self.CoreZone
+        return self.Zone
+
+    def fan_energy_hourly(self, sql: SQLResult) -> NDArray[np.float64]:
+        """The hourly fan electricity of the whole model [kWh/m2].
+
+        Each zone's ideal loads supply air volume flow at standard density
+        (`SUPPLY_AIR_VOLUME_VARIABLE`, the hour's mean) times the specific fan power
+        of the zone's conditioning, summed over zones and divided by the total
+        conditioned area. A zone whose conditioning has no specific fan power adds
+        nothing.
+
+        Args:
+            sql (SQLResult): The simulation results.
+
+        Returns:
+            fan (NDArray[np.float64]): One value per hour of the run period.
+
+        Raises:
+            ValueError: If the results hold no supply air flow although a specific
+                fan power is set.
+        """
+        frame = timeseries_frame(sql, SUPPLY_AIR_VOLUME_VARIABLE, "Hourly")
+        if frame.empty:
+            msg = (
+                f"The results have no hourly {SUPPLY_AIR_VOLUME_VARIABLE!r}; build the "
+                "model with a SpecificFanPower set."
+            )
+            raise ValueError(msg)
+        total_w = np.zeros(len(frame))
+        suffix = IDEAL_LOADS_SYSTEM_SUFFIX.upper()
+        for column in frame.columns:
+            key = str(column[1]).upper()
+            zone_name = key[: -len(suffix)] if key.endswith(suffix) else key
+            sfp = self.conditioning_definition(
+                zone_name
+            ).Operations.HVAC.ConditioningSystems.SpecificFanPower
+            if sfp is None:
+                continue
+            total_w += frame[column].to_numpy(dtype=float) * sfp
+        # one hour at the hour's mean power: W -> Wh -> kWh
+        return total_w / 1000 / self.total_conditioned_area
+
+    @property
     def total_conditioned_area(self) -> float:
         """The total conditioned area of the model.
 
@@ -1136,6 +1230,12 @@ class Model(BaseWeather, validate_assignment=True):
         add_output_objects(
             doc, DESIRED_METERS_FOR_VERSION[energyplus_settings.supported_major]
         )
+        if self.has_fan_energy:
+            doc["Output:Variable"].add(
+                key_value="*",
+                variable_name=SUPPLY_AIR_VOLUME_VARIABLE,
+                reporting_frequency="Hourly",
+            )
 
         ddy = load_document(ddy_path, ep_version)
         # Sizing periods run in this order. archetypal added them in set order
@@ -1335,6 +1435,13 @@ class Model(BaseWeather, validate_assignment=True):
         - Aggregation: "Raw", "End Uses", "Utilities"
         - Meter: ["Electricity", "Cooling", "Heating", "Domestic Hot Water"], ["Electricity", "Propane", ...]
 
+        Heating and cooling use is delivered energy times the reference zone's
+        energy input ratio: 1 / effective COP, or, with an `EIRTemperatureSlope`,
+        a ratio linear in each hour's outdoor temperature
+        (`ThermalSystemComponent.energy_input_ratio`). When a zone definition sets a
+        `SpecificFanPower`, a "Fans" end use (`fan_energy_hourly`) is added and
+        counted as electricity.
+
         Args:
             sql (SQLResult): The sql file to postprocess.
             ep_version_major (int): The major version of EnergyPlus.
@@ -1355,6 +1462,30 @@ class Model(BaseWeather, validate_assignment=True):
         cool_fuel = cond_sys.Cooling.Fuel if cond_sys.Cooling is not None else None
         dhw_fuel = ops.DHW.FuelType
         all_fuel_names = sorted({*get_args(FuelType), *get_args(DHWFuelType)})
+        heat_eir_hourly = cool_eir_hourly = None
+        sloped_heat = (
+            cond_sys.Heating
+            if cond_sys.Heating is not None
+            and cond_sys.Heating.EIRTemperatureSlope != 0
+            else None
+        )
+        sloped_cool = (
+            cond_sys.Cooling
+            if cond_sys.Cooling is not None
+            and cond_sys.Cooling.EIRTemperatureSlope != 0
+            else None
+        )
+        if sloped_heat is not None or sloped_cool is not None:
+            outdoor = timeseries_frame(sql, OUTDOOR_TEMPERATURE_VARIABLE, "Hourly")
+            if outdoor.empty:
+                msg = f"The results have no hourly {OUTDOOR_TEMPERATURE_VARIABLE!r}."
+                raise ValueError(msg)
+            t_out = outdoor.iloc[:, 0].to_numpy(dtype=float)
+            if sloped_heat is not None:
+                heat_eir_hourly = sloped_heat.energy_input_ratio(t_out)
+            if sloped_cool is not None:
+                cool_eir_hourly = sloped_cool.energy_input_ratio(t_out)
+        fan_hourly = self.fan_energy_hourly(sql) if self.has_fan_energy else None
         return energy_and_peak_postprocess(
             sql,
             normalizing_floor_area=self.total_conditioned_area,
@@ -1366,6 +1497,9 @@ class Model(BaseWeather, validate_assignment=True):
             dhw_fuel=dhw_fuel,
             all_fuel_names=all_fuel_names,
             ep_version_major=ep_version_major,
+            heat_eir_hourly=heat_eir_hourly,
+            cool_eir_hourly=cool_eir_hourly,
+            fan_hourly=fan_hourly,
         )
 
     def run(
