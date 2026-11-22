@@ -10,6 +10,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-2, zone groups | `epinterface.sbem.archetype`: `Archetype`, `ZoneGroup`, `BuildingGeometry`, save and load. `Model.from_archetype` and `Model.CoreZone` in the builder. |
 | UP-2, unset shares | Floor-area shares may all be `None`: the geometry sets them when the archetype is applied. |
 | UP-2, any number of groups | `Model.from_archetype` places any number of groups: one zone per group on each storey, each with its group's zone definition. |
+| UP-2, schema version | Archetype files record schema 1.1; 1.0 files still load; newer files are refused for their version. |
 | UP-2, ratios by orientation | `BuildingGeometry.WindowToWallRatio` is applied by the builder: `ShoeboxGeometry.wwr_by_orientation`. |
 | UP-2, week slots | Holiday and design-day slots on `WeekComponent`. |
 | UP-2, infiltration schedule | An hourly schedule on `InfiltrationComponent`. |
@@ -29,7 +30,7 @@ A building described by its zone groups and building-level characteristics.
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `Name` | `str` | required | Name of the archetype. |
-| `SchemaVersion` | `str` | `"1.0"` | Version of the file format. Any other value is refused on load. |
+| `SchemaVersion` | `str` | `"1.1"` (`ARCHETYPE_SCHEMA_VERSION`) | Version of the file format. Versions in `SUPPORTED_ARCHETYPE_SCHEMA_VERSIONS` (`"1.0"`, `"1.1"`) are read and become `"1.1"`; any other is refused. |
 | `Groups` | `list[ZoneGroup]` | required, at least one | The zone groups. |
 | `Geometry` | `BuildingGeometry` | all fields `None` | Geometry characteristics of the building. |
 | `Attic` | `AtticAssumptions` | unused, unconditioned | Attic assumptions. |
@@ -49,7 +50,10 @@ Methods and properties:
 - `save(path) -> Path` writes indented JSON, keys in model order, ending with a newline.
   Two saves of the same archetype are byte-identical. The conventional suffix is
   `.sbem.json` (`ARCHETYPE_FILE_SUFFIX`).
-- `Archetype.load(path)` reads a file written by `save`.
+- `Archetype.load(path)` reads a file written by `save`, checking its schema
+  version first (see [Schema versions](#schema-versions-up-2)).
+- `Archetype.schema_version_of(path) -> str` returns the version a file
+  records, without validating the rest.
 - `to_json() -> str` and `Archetype.from_json(text)` do the same on text.
 - `group(name) -> ZoneGroup` returns a group by name (`KeyError` if absent).
 - `shares_set -> bool` tells whether the shares are set.
@@ -160,6 +164,29 @@ sides of a partition match. The reference group is the largest perimeter group
 (the largest group without exposures); it also sets the attic and basement zone
 definitions, the ground temperatures and the COPs and fuels of
 `standard_results_postprocess`.
+
+## Schema versions (UP-2)
+
+An archetype file records the version of its format in `SchemaVersion`, so a
+reader can tell whether it understands the file.
+
+| Version | Written by | Adds |
+|---|---|---|
+| `1.0` | the fork up to UP-4 | Zone groups, unset shares, geometry characteristics. |
+| `1.1` | this fork | The optional fields of UP-8 and of UP-2's extras on this page: specific fan power, supply-air limits, the energy input ratio's slope and reference, heat-recovery effectiveness, the infiltration schedule, and the holiday and design-day slots. |
+
+Every 1.0 file is a valid 1.1 file: the added fields are optional and their
+defaults reproduce the 1.0 behaviour. Reading works as follows.
+
+| File records | Result |
+|---|---|
+| `"1.0"`, `"1.1"`, or no `SchemaVersion` (read as `"1.0"`) | Loaded; the archetype's `SchemaVersion` becomes `"1.1"`, so saving it again writes `"1.1"`. |
+| Any other version | `ArchetypeSchemaVersionError` (a `ValueError`), raised by `Archetype.from_json` and `Archetype.load` before the rest of the file is read, so a newer file is refused for its version rather than for fields this version lacks. In `Archetype.model_validate` it surfaces as a `ValidationError` with the same message. |
+
+Constants: `ARCHETYPE_SCHEMA_VERSION = "1.1"`,
+`SUPPORTED_ARCHETYPE_SCHEMA_VERSIONS = ("1.0", "1.1")`.
+`tests/data/archetype_v1_0.sbem.json.gz` is a file written by the 1.0 fork; a
+test loads it.
 
 ## Window-to-wall ratios by orientation (UP-2)
 

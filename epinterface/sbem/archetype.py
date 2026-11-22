@@ -17,6 +17,7 @@ version of this model wrote it.
 This module needs neither a generated Prisma client nor EnergyPlus.
 """
 
+import json
 from pathlib import Path
 from typing import Literal
 
@@ -24,12 +25,15 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from epinterface.geometry import ORIENTATIONS, Orientation, orientation_of
 from epinterface.sbem.common import NamedObject
+from epinterface.sbem.components.zones import ZoneComponent
 
 __all__ = [
     "ARCHETYPE_FILE_SUFFIX",
     "ARCHETYPE_SCHEMA_VERSION",
     "ORIENTATIONS",
+    "SUPPORTED_ARCHETYPE_SCHEMA_VERSIONS",
     "Archetype",
+    "ArchetypeSchemaVersionError",
     "AtticAssumptions",
     "BasementAssumptions",
     "BuildingGeometry",
@@ -37,10 +41,33 @@ __all__ = [
     "ZoneGroup",
     "orientation_of",
 ]
-from epinterface.sbem.components.zones import ZoneComponent
 
-ARCHETYPE_SCHEMA_VERSION = "1.0"
-"""The version of the archetype file format this module reads and writes."""
+ARCHETYPE_SCHEMA_VERSION = "1.1"
+"""The version of the archetype file format this module writes.
+
+1.0: zone groups, unset shares, geometry characteristics.
+1.1: adds the optional fields of UP-8 and UP-2's extra fields (specific fan power,
+supply-air temperature limits, temperature-dependent energy input ratio, numeric
+heat-recovery effectiveness, infiltration schedule, holiday and design-day slots).
+A 1.0 file is a valid 1.1 file.
+"""
+
+SUPPORTED_ARCHETYPE_SCHEMA_VERSIONS: tuple[str, ...] = ("1.0", "1.1")
+"""The archetype file format versions this module reads."""
+
+
+class ArchetypeSchemaVersionError(ValueError):
+    """Raised when an archetype file has a schema version this module cannot read."""
+
+    def __init__(self, version: object) -> None:
+        """Name the file's version and the supported ones."""
+        super().__init__(
+            f"Archetype schema version {version!r} is not supported; this "
+            f"epinterface reads versions {list(SUPPORTED_ARCHETYPE_SCHEMA_VERSIONS)} "
+            f"and writes {ARCHETYPE_SCHEMA_VERSION!r}."
+        )
+        self.version = version
+
 
 ARCHETYPE_FILE_SUFFIX = ".sbem.json"
 """The conventional suffix of an archetype file (not enforced)."""
@@ -234,13 +261,14 @@ class Archetype(NamedObject):
     @field_validator("SchemaVersion", mode="after")
     @classmethod
     def _check_schema_version(cls, v: str) -> str:
-        if v != ARCHETYPE_SCHEMA_VERSION:
-            msg = (
-                f"Archetype schema version {v!r} is not supported; this epinterface "
-                f"reads version {ARCHETYPE_SCHEMA_VERSION!r}."
-            )
-            raise ValueError(msg)
-        return v
+        """Accept every supported version; the archetype is then of the current one.
+
+        Raises:
+            ArchetypeSchemaVersionError: If the version is not supported.
+        """
+        if v not in SUPPORTED_ARCHETYPE_SCHEMA_VERSIONS:
+            raise ArchetypeSchemaVersionError(v)
+        return ARCHETYPE_SCHEMA_VERSION
 
     @model_validator(mode="after")
     def _check_groups(self) -> "Archetype":
@@ -296,8 +324,33 @@ class Archetype(NamedObject):
 
     @classmethod
     def from_json(cls, text: str | bytes) -> "Archetype":
-        """Read an archetype from its JSON text."""
+        """Read an archetype from its JSON text.
+
+        The schema version is checked before the rest, so a file from a newer
+        epinterface is refused for its version rather than for its unknown
+        fields. A file of an older supported version (or without a version,
+        which is read as 1.0) is read as the current version.
+
+        Raises:
+            ArchetypeSchemaVersionError: If the file's version is not supported.
+            pydantic.ValidationError: If the file is not a valid archetype.
+        """
+        data = json.loads(text)
+        if isinstance(data, dict):
+            version = data.get("SchemaVersion", "1.0")
+            if version not in SUPPORTED_ARCHETYPE_SCHEMA_VERSIONS:
+                raise ArchetypeSchemaVersionError(version)
         return cls.model_validate_json(text)
+
+    @staticmethod
+    def schema_version_of(path: Path | str) -> str:
+        """The schema version recorded in an archetype file, without reading the rest.
+
+        Returns:
+            version: The file's `SchemaVersion`, or "1.0" when it records none.
+        """
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        return str(data.get("SchemaVersion", "1.0"))
 
     def save(self, path: Path | str) -> Path:
         """Write the archetype to a JSON file (conventionally `<name>.sbem.json`).

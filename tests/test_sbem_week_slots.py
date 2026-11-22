@@ -7,7 +7,6 @@ import pytest
 from pydantic import ValidationError
 
 from epinterface.document import EPDocument, minimal_document
-from epinterface.sbem.builder import SimulationPathConfig
 from epinterface.sbem.components.schedules import WeekComponent
 from epinterface.sbem.components.zones import ZoneComponent
 from epinterface.settings import energyplus_settings
