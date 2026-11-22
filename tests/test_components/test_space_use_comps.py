@@ -14,7 +14,6 @@ from epinterface.sbem.components.space_use import (
     WaterUseComponent,
     ZoneSpaceUseComponent,
 )
-from epinterface.sbem.exceptions import NotImplementedParameter
 from epinterface.sbem.prisma.client import deep_fetcher
 
 
@@ -68,7 +67,7 @@ def test_add_lighting_to_idf_zone(
 def test_add_lighting_to_idf_zone_with_dimming(
     doc: EPDocument, schedule: YearComponent, dimming_type: DimmingTypeType
 ):
-    """Test the add_lighting_to_idf_zone method with dimming."""
+    """Dimming needs the zone's floor to place its daylighting reference point."""
     lighting = LightingComponent(
         Name="new_office",
         PowerDensity=10,
@@ -76,7 +75,7 @@ def test_add_lighting_to_idf_zone_with_dimming(
         IsOn=True,
         DimmingType=dimming_type,
     )
-    with pytest.raises(NotImplementedParameter):
+    with pytest.raises(ValueError, match="floor surface"):
         lighting.add_lights_to_idf_zone(doc, "default_zone")
 
 

@@ -3,6 +3,7 @@
 import logging
 from typing import Literal
 
+from idfkit.geometry import get_surface_coords
 from pydantic import Field
 
 from epinterface.constants import assumed_constants, physical_constants
@@ -12,7 +13,6 @@ from epinterface.sbem.common import BoolStr, MetadataMixin, NamedObject
 from epinterface.sbem.components.schedules import (
     YearComponent,
 )
-from epinterface.sbem.exceptions import NotImplementedParameter
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +95,9 @@ class OccupancyComponent(NamedObject, MetadataMixin, extra="forbid"):
 
 DimmingTypeType = Literal["Off", "Stepped", "Continuous"]
 
+DAYLIGHTING_STEPS = 3
+"""Number of steps of a stepped daylighting control."""
+
 
 class LightingComponent(NamedObject, MetadataMixin, extra="forbid"):
     """A lighting object in the SBEM library."""
@@ -111,6 +114,30 @@ class LightingComponent(NamedObject, MetadataMixin, extra="forbid"):
     )
     Schedule: YearComponent = Field(..., title="Lighting schedule of the object [frac]")
     IsOn: BoolStr = Field(..., title="Lights are on")
+    IlluminanceTarget: float = Field(
+        default=500.0,
+        title="Daylighting illuminance setpoint [lux]",
+        description=(
+            "Illuminance at the reference point above which dimming lowers the "
+            "lights. Used when DimmingType is not Off."
+        ),
+        gt=0,
+    )
+    DaylightWorkplaneHeight: float = Field(
+        default=0.8,
+        title="Daylighting workplane height [m]",
+        description="Height of the daylighting reference point above the floor.",
+        ge=0,
+    )
+    DaylightMeshResolution: float | None = Field(
+        default=None,
+        title="Daylighting illuminance map spacing [m]",
+        description=(
+            "Spacing of the reported illuminance map's grid at the workplane "
+            "height, when DimmingType is not Off. None: no map."
+        ),
+        gt=0,
+    )
 
     def add_lights_to_idf_zone(
         self, doc: EPDocument, target_zone_or_zone_list_name: str
@@ -128,9 +155,6 @@ class LightingComponent(NamedObject, MetadataMixin, extra="forbid"):
         """
         if not self.IsOn:
             return doc
-
-        if self.DimmingType != "Off":
-            raise NotImplementedParameter("DimmingType:On", self.Name, "Lights")
 
         name_prefix = f"{target_zone_or_zone_list_name}_{self.safe_name}_LIGHTS"
         doc, year_name = self.Schedule.add_year_to_idf(
@@ -152,6 +176,93 @@ class LightingComponent(NamedObject, MetadataMixin, extra="forbid"):
             fraction_visible=assumed_constants.FractionVisibleLights,
             fraction_replaceable=assumed_constants.FractionReplaceableLights,
         )
+        if self.DimmingType != "Off":
+            doc = self.add_daylighting_to_idf_zone(doc, target_zone_or_zone_list_name)
+        return doc
+
+    def add_daylighting_to_idf_zone(
+        self, doc: EPDocument, target_zone_name: str
+    ) -> EPDocument:
+        """Dim the zone's lights with daylight.
+
+        Writes a `Daylighting:Controls` (split-flux method, the component's
+        dimming type) with one reference point controlling all the lights, at
+        `DaylightWorkplaneHeight` above the centre of the zone's largest floor
+        surface, with `IlluminanceTarget` as setpoint. With a
+        `DaylightMeshResolution`, also an `Output:IlluminanceMap` over the
+        floor's bounding box at the workplane height.
+
+        Args:
+            doc (EPDocument): The IDF document.
+            target_zone_name (str): The zone (not a zone list).
+
+        Returns:
+            EPDocument: The updated IDF document.
+
+        Raises:
+            ValueError: If the zone has no floor surface.
+        """
+        floors = [
+            srf
+            for srf in doc["BuildingSurface:Detailed"]
+            if (srf.zone_name or "").lower() == target_zone_name.lower()
+            and (srf.surface_type or "").lower() == "floor"
+        ]
+        polygons = [p for p in (get_surface_coords(f) for f in floors) if p]
+        if not polygons:
+            msg = f"Daylighting needs a floor surface in zone {target_zone_name!r}."
+            raise ValueError(msg)
+        largest = max(polygons, key=lambda p: p.area)
+        points = largest.as_tuple_list()
+        x = sum(c[0] for c in points) / len(points)
+        y = sum(c[1] for c in points) / len(points)
+        z = min(c[2] for c in points) + self.DaylightWorkplaneHeight
+        name = f"{target_zone_name}_{self.safe_name}_DAYLIGHTING"
+        point_name = f"{name}_POINT"
+        add_or_replace(
+            doc["Daylighting:ReferencePoint"].add,
+            point_name,
+            zone_or_space_name=target_zone_name,
+            x_coordinate_of_reference_point=x,
+            y_coordinate_of_reference_point=y,
+            z_coordinate_of_reference_point=z,
+        )
+        add_or_replace(
+            doc["Daylighting:Controls"].add,
+            name,
+            zone_or_space_name=target_zone_name,
+            daylighting_method="SplitFlux",
+            lighting_control_type=self.DimmingType,
+            number_of_stepped_control_steps=DAYLIGHTING_STEPS,
+            control_data=[
+                {
+                    "daylighting_reference_point_name": point_name,
+                    "fraction_of_lights_controlled_by_reference_point": 1.0,
+                    "illuminance_setpoint_at_reference_point": self.IlluminanceTarget,
+                }
+            ],
+        )
+        if self.DaylightMeshResolution is not None:
+            all_points = [c for p in polygons for c in p.as_tuple_list()]
+            xs = [c[0] for c in all_points]
+            ys = [c[1] for c in all_points]
+            step = self.DaylightMeshResolution
+
+            def count(lo: float, hi: float) -> int:
+                return max(2, int((hi - lo) / step) + 1)
+
+            add_or_replace(
+                doc["Output:IlluminanceMap"].add,
+                f"{name}_MAP",
+                zone_or_space_name=target_zone_name,
+                z_height=z,
+                x_minimum_coordinate=min(xs),
+                x_maximum_coordinate=max(xs),
+                number_of_x_grid_points=count(min(xs), max(xs)),
+                y_minimum_coordinate=min(ys),
+                y_maximum_coordinate=max(ys),
+                number_of_y_grid_points=count(min(ys), max(ys)),
+            )
         return doc
 
 

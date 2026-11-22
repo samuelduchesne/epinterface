@@ -25,6 +25,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-9, availability | Heating and cooling availability schedules on `ConditioningSystemsComponent`. |
 | UP-9, adiabatic assemblies | Adiabatic facade, roof, ground, partition and slab flags on `EnvelopeAssemblyComponent`. |
 | UP-9, internal partitions | Partition area per floor area on `EnvelopeAssemblyComponent`, written as internal mass. |
+| UP-9, daylighting | Daylight dimming of the lights, with the illuminance target, workplane height and illuminance map spacing on `LightingComponent`. |
 
 ## Classes
 
@@ -495,6 +496,35 @@ The builder writes, for each zone, an `InternalMass` named
 floor area. It does so for the same zones as the internal mass: every zone
 with the reference envelope, and each group's zones with the group's
 envelope. A UMI translator converts its ratio to this area.
+
+## Daylighting (UP-9)
+
+`LightingComponent.DimmingType` accepted `Stepped` and `Continuous`, but the
+builder refused them. It now dims the lights with daylight, and the component
+holds UMI's daylighting parameters (`ZoneLoads.IlluminanceTarget`,
+`ZoneDefinition.DaylightWorkplaneHeight` and `DaylightMeshResolution`).
+
+| Field | Type | Unit | Default | Meaning |
+|---|---|---|---|---|
+| `IlluminanceTarget` | `float`, > 0 | lux | `500.0` | Illuminance setpoint at the reference point. |
+| `DaylightWorkplaneHeight` | `float`, ≥ 0 | m | `0.8` | Height of the reference point above the floor. |
+| `DaylightMeshResolution` | `float \| None`, > 0 | m | `None` | Spacing of a reported illuminance map at the workplane height. `None`: no map. |
+
+When `DimmingType` is not `Off`, `LightingComponent.add_daylighting_to_idf_zone`
+writes for each zone:
+
+- a `Daylighting:ReferencePoint` at `DaylightWorkplaneHeight` above the mean of
+  the vertices of the zone's largest floor surface (its centre for a
+  rectangle);
+- a `Daylighting:Controls` with the split-flux method, the dimming type as
+  lighting control type (3 steps when stepped, `DAYLIGHTING_STEPS`) and that
+  point controlling all the lights at `IlluminanceTarget`;
+- with a mesh resolution, an `Output:IlluminanceMap` over the bounding box of
+  the zone's floors, with grid points `resolution` apart (at least two per
+  axis). The map is reported only; it does not change the energy results.
+
+A zone without a floor surface raises `ValueError`. With `DimmingType="Off"`
+nothing changes.
 
 ## Example
 
