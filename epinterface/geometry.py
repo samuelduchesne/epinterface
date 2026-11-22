@@ -1546,6 +1546,30 @@ def get_zone_floor_area(doc: EPDocument, zone_name: str) -> float:
     return area
 
 
+def get_zone_windows(doc: EPDocument, zone_name: str) -> list:
+    """The window fenestration surfaces of a zone.
+
+    Args:
+        doc (EPDocument): The IDF document.
+        zone_name (str): The zone's name, in any letter case.
+
+    Returns:
+        list: The zone's `FenestrationSurface:Detailed` objects of type window.
+    """
+    windows = []
+    for window in doc["FenestrationSurface:Detailed"]:
+        parent_name = window.building_surface_name or ""
+        parent_srf = doc["BuildingSurface:Detailed"].get(parent_name)
+        if parent_srf is None:
+            msg = f"BuildingSurface:Detailed:{parent_name} not found"
+            raise ValueError(msg)
+        if (parent_srf.zone_name or "").lower() == zone_name.lower() and (
+            window.surface_type or ""
+        ).lower() == "window":
+            windows.append(window)
+    return windows
+
+
 def get_zone_glazed_area(doc: EPDocument, zone_name: str) -> float:
     """Calculate the total area of windows for a specific zone in the IDF document.
 
@@ -1556,19 +1580,6 @@ def get_zone_glazed_area(doc: EPDocument, zone_name: str) -> float:
     Returns:
         float: The total area of windows in the specified zone.
     """
-    total_window_area = 0.0
-    total_windows = 0
-
-    for window in doc["FenestrationSurface:Detailed"]:
-        parent_name = window.building_surface_name or ""
-        parent_srf = doc["BuildingSurface:Detailed"].get(parent_name)
-        if parent_srf is None:
-            msg = f"BuildingSurface:Detailed:{parent_name} not found"
-            raise ValueError(msg)
-        if (parent_srf.zone_name or "").lower() == zone_name.lower() and (
-            window.surface_type or ""
-        ).lower() == "window":
-            total_window_area += calculate_surface_area(window)
-            total_windows += 1
-
-    return total_window_area
+    return float(
+        sum(calculate_surface_area(w) for w in get_zone_windows(doc, zone_name))
+    )

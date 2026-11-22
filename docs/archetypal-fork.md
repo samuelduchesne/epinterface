@@ -18,6 +18,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-8 | Specific fan power and a fan end use, the ideal loads' supply-air temperature limits, and an energy input ratio linear in outdoor temperature. |
 | UP-9, fractional year sum | `YearComponent.fractional_year_sum` counts the real weekdays of each month (a defect fix). |
 | UP-9, provider `Both` | `Provider="Both"` gives natural and mechanical ventilation (a defect fix). |
+| UP-9, natural-ventilation limits | Outdoor temperature and humidity limits, an indoor limit and wind and buoyancy switches on `VentilationComponent`. |
 
 ## Classes
 
@@ -338,6 +339,40 @@ writes both: the ideal loads' outdoor air (as for `"Mechanical"`) and the
 `ZoneVentilation:WindandStackOpenArea` through the zone's windows (as for
 `"Natural"`, see `ZoneOperationsComponent.add_natural_ventilation_to_idf_zone`).
 `Ventilation.Schedule` opens the windows in both cases.
+
+## Natural-ventilation limits and switches (UP-9)
+
+SBEM opened the windows between fixed outdoor temperatures of 12 and 25 °C,
+with wind but no stack effect. `VentilationComponent`
+(`epinterface.sbem.components.systems`) now holds these settings. The names
+are UMI's `ZoneVentilation` names.
+
+| Field | Type | Unit | Default | Meaning |
+|---|---|---|---|---|
+| `NatVentMinOutdoorAirTemp` | `float`, in [-100, 100] | °C | `12.0` | Windows stay closed below this outdoor dry-bulb temperature. |
+| `NatVentMaxOutdoorAirTemp` | `float`, in [-100, 100] | °C | `25.0` | Windows stay closed above it. Must be above the minimum. |
+| `NatVentMaxRelHumidity` | `float \| None`, in [0, 100] | % | `None` | Windows stay closed while the outdoor relative humidity is above it. `None`: no limit. |
+| `NatVentZoneTempSetpoint` | `float \| None`, in [-100, 100] | °C | `None` | Windows stay closed while the zone air is colder. `None`: no indoor limit. |
+| `IsWindOn` | `bool` | – | `True` | Wind drives air through the open windows. |
+| `IsBuoyancyOn` | `bool` | – | `False` | The stack effect drives air through the open windows. `False` reproduces the earlier model, which had none (UMI's default is `True`). |
+
+The builder writes them to each zone's `ZoneVentilation:WindandStackOpenArea`
+(used when `Provider` is `Natural` or `Both`):
+
+- the temperatures go to its minimum and maximum outdoor temperatures and its
+  minimum indoor temperature;
+- without wind, the opening effectiveness is 0, which removes the wind term;
+- with buoyancy, the height difference is half the height of the zone's
+  tallest window (EnergyPlus's neutral plane at mid-height of a single
+  opening); without it, 0, which removes the stack term;
+- with neither, no object is written;
+- the humidity limit is an EMS program that sets the object's air exchange
+  flow rate (actuator `Zone Ventilation`, `Air Exchange Flow Rate`) to 0 while
+  `Site Outdoor Air Relative Humidity` is above the limit, called at
+  `BeginTimestepBeforePredictor`.
+
+`epinterface.geometry.get_zone_windows(doc, zone_name)` returns a zone's
+windows.
 
 ## Example
 

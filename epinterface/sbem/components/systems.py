@@ -256,6 +256,55 @@ class VentilationComponent(NamedObject, MetadataMixin, extra="forbid"):
         le=1,
     )
 
+    NatVentMinOutdoorAirTemp: float = Field(
+        default=12.0,
+        title="Natural ventilation minimum outdoor temperature [degC]",
+        description="Windows stay closed below this outdoor dry-bulb temperature.",
+        ge=-100,
+        le=100,
+    )
+    NatVentMaxOutdoorAirTemp: float = Field(
+        default=25.0,
+        title="Natural ventilation maximum outdoor temperature [degC]",
+        description="Windows stay closed above this outdoor dry-bulb temperature.",
+        ge=-100,
+        le=100,
+    )
+    NatVentMaxRelHumidity: float | None = Field(
+        default=None,
+        title="Natural ventilation maximum outdoor relative humidity [%]",
+        description=(
+            "Windows stay closed when the outdoor relative humidity is above this "
+            "value. None: no humidity limit."
+        ),
+        ge=0,
+        le=100,
+    )
+    NatVentZoneTempSetpoint: float | None = Field(
+        default=None,
+        title="Natural ventilation minimum zone temperature [degC]",
+        description=(
+            "Windows stay closed when the zone air temperature is below this "
+            "value. None: no indoor limit."
+        ),
+        ge=-100,
+        le=100,
+    )
+    IsWindOn: bool = Field(
+        default=True,
+        title="Wind-driven natural ventilation",
+        description="Whether wind drives air through the open windows.",
+    )
+    IsBuoyancyOn: bool = Field(
+        default=False,
+        title="Buoyancy-driven natural ventilation",
+        description=(
+            "Whether the stack effect drives air through the open windows, with a "
+            "height difference of half the zone's tallest window. False: no stack "
+            "effect, as before this field existed."
+        ),
+    )
+
     @property
     def sensible_heat_recovery_effectiveness(self) -> float:
         """The sensible effectiveness the model uses: the field, or the assumed constant."""
@@ -286,6 +335,9 @@ class VentilationComponent(NamedObject, MetadataMixin, extra="forbid"):
             if self.Economizer != "NoEconomizer":
                 msg = "Natural ventilation systems can't have an Economizer."
                 raise ValueError(msg)
+        if self.NatVentMinOutdoorAirTemp >= self.NatVentMaxOutdoorAirTemp:
+            msg = "NatVentMinOutdoorAirTemp must be below NatVentMaxOutdoorAirTemp."
+            raise ValueError(msg)
         if self.Provider == "None":
             if self.HRV != "NoHRV":
                 msg = "None ventilation systems can't have HRV."

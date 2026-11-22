@@ -1,10 +1,17 @@
 """Operations components for the SBEM library."""
 
+import re
 from logging import getLogger
 from typing import TYPE_CHECKING
 
+from idfkit.geometry import get_surface_coords
+
 from epinterface.document import EPDocument, add_or_replace
-from epinterface.geometry import get_zone_floor_area, get_zone_glazed_area
+from epinterface.geometry import (
+    get_zone_floor_area,
+    get_zone_glazed_area,
+    get_zone_windows,
+)
 from epinterface.interface import add_constant_schedule, add_ideal_loads_template
 from epinterface.sbem.common import MetadataMixin, NamedObject
 from epinterface.sbem.components.space_use import ZoneSpaceUseComponent
@@ -281,19 +288,101 @@ class ZoneOperationsComponent(
             summer_design_day_sch_name="d_AllOff_00",
             winter_design_day_sch_name="d_AllOff_00",
         )
+        ventilation = self.HVAC.Ventilation
+        if not ventilation.IsWindOn and not ventilation.IsBuoyancyOn:
+            return doc
+        height_difference = (
+            0.5 * _tallest_window_height(doc, target_zone_name)
+            if ventilation.IsBuoyancyOn
+            else 0.0
+        )
         add_or_replace(
             doc["ZoneVentilation:WindandStackOpenArea"].add,
             vent_wind_stack_name,
             zone_or_space_name=target_zone_name,
             opening_area=float(total_window_area),
             opening_area_fraction_schedule_name=vent_wind_stack_name_sch,
-            opening_effectiveness="Autocalculate",
+            # an opening effectiveness of 0 removes the wind term
+            opening_effectiveness="Autocalculate" if ventilation.IsWindOn else 0.0,
             effective_angle=0.0,
-            height_difference=0.0,
+            # a height difference of 0 removes the stack term
+            height_difference=height_difference,
             discharge_coefficient_for_opening="Autocalculate",
+            minimum_indoor_temperature=ventilation.NatVentZoneTempSetpoint,
             delta_temperature=2.0,
-            minimum_outdoor_temperature=12.0,
-            maximum_outdoor_temperature=25.0,
+            minimum_outdoor_temperature=ventilation.NatVentMinOutdoorAirTemp,
+            maximum_outdoor_temperature=ventilation.NatVentMaxOutdoorAirTemp,
             maximum_wind_speed=40.0,
         )
+        if ventilation.NatVentMaxRelHumidity is not None:
+            _close_above_outdoor_humidity(
+                doc, vent_wind_stack_name, ventilation.NatVentMaxRelHumidity
+            )
         return doc
+
+
+OUTDOOR_HUMIDITY_SENSOR = "SBEM_Outdoor_RH"
+"""The EMS sensor of the outdoor relative humidity, shared by every zone."""
+
+
+def _ems_name(name: str) -> str:
+    """An EMS variable name (letters, digits, underscores) derived from `name`."""
+    return re.sub(r"\W", "_", name)
+
+
+def _tallest_window_height(doc: EPDocument, zone_name: str) -> float:
+    """The height of the zone's tallest window [m] (0 without windows)."""
+    heights = [0.0]
+    for window in get_zone_windows(doc, zone_name):
+        polygon = get_surface_coords(window)
+        if polygon is None:
+            continue
+        z = [c[2] for c in polygon.as_tuple_list()]
+        heights.append(max(z) - min(z))
+    return max(heights)
+
+
+def _close_above_outdoor_humidity(
+    doc: EPDocument, ventilation_name: str, max_relative_humidity: float
+) -> None:
+    """Shut a natural ventilation object while outdoor humidity is above a limit.
+
+    An EMS program sets the ventilation's air exchange flow rate to 0 whenever
+    the outdoor relative humidity exceeds `max_relative_humidity` [%], and leaves
+    it to EnergyPlus otherwise.
+    """
+    add_or_replace(
+        doc["EnergyManagementSystem:Sensor"].add,
+        OUTDOOR_HUMIDITY_SENSOR,
+        output_variable_or_output_meter_index_key_name="Environment",
+        output_variable_or_output_meter_name="Site Outdoor Air Relative Humidity",
+    )
+    actuator = f"{_ems_name(ventilation_name)}_Flow"
+    add_or_replace(
+        doc["EnergyManagementSystem:Actuator"].add,
+        actuator,
+        actuated_component_unique_name=ventilation_name,
+        actuated_component_type="Zone Ventilation",
+        actuated_component_control_type="Air Exchange Flow Rate",
+    )
+    program = f"{_ems_name(ventilation_name)}_RH_Limit"
+    add_or_replace(
+        doc["EnergyManagementSystem:Program"].add,
+        program,
+        lines=[
+            {"program_line": line}
+            for line in (
+                f"IF {OUTDOOR_HUMIDITY_SENSOR} > {max_relative_humidity}",
+                f"SET {actuator} = 0",
+                "ELSE",
+                f"SET {actuator} = Null",
+                "ENDIF",
+            )
+        ],
+    )
+    add_or_replace(
+        doc["EnergyManagementSystem:ProgramCallingManager"].add,
+        f"{program}_Manager",
+        energyplus_model_calling_point="BeginTimestepBeforePredictor",
+        programs=[{"program_name": program}],
+    )
