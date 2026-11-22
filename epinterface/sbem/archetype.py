@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from epinterface.geometry import ORIENTATIONS, Orientation, orientation_of
 from epinterface.sbem.common import NamedObject
+from epinterface.sbem.components.structure import StructureComponent
 from epinterface.sbem.components.zones import ZoneComponent
 
 __all__ = [
@@ -256,6 +257,10 @@ class Archetype(NamedObject):
     )
     Basement: BasementAssumptions = Field(
         default_factory=lambda: BasementAssumptions(UseFraction=None, Conditioned=False)
+    )
+    Structure: StructureComponent | None = Field(
+        default=None,
+        description="The building's structure, for life-cycle assessment; not simulated.",
     )
     YearFrom: int | None = Field(
         default=None, description="First construction year the archetype covers."

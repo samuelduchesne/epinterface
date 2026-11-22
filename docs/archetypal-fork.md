@@ -31,6 +31,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-9, composer | The composer leaves out the component fields of UP-9, which the database does not store. |
 | UP-9, archetype metadata | Construction years, countries, climate zones, authors, version, lifespan and descriptive fields on `Archetype`. |
 | UP-9, life-cycle fields | Embodied energy, transport, substitution and structural properties of materials; assembly and disassembly carbon, cost and energy of assemblies. |
+| UP-9, structure | The building structure for life-cycle assessment, `StructureComponent` on `Archetype`. |
 
 ## Classes
 
@@ -50,6 +51,7 @@ A building described by its zone groups and building-level characteristics.
 | `Geometry` | `BuildingGeometry` | all fields `None` | Geometry characteristics of the building. |
 | `Attic` | `AtticAssumptions` | unused, unconditioned | Attic assumptions. |
 | `Basement` | `BasementAssumptions` | unused, unconditioned | Basement assumptions. |
+| `Structure` | `StructureComponent \| None` | `None` | The building's structure, for life-cycle assessment; not simulated (UP-9). |
 | `YearFrom`, `YearTo` | `int \| None` | `None` | First and last construction year covered (UP-9). `YearFrom` must not be after `YearTo`. |
 | `Country`, `ClimateZone` | `list[str]` | `[]` | Countries and climate zones the archetype applies to (UP-9). |
 | `Authors`, `AuthorEmails` | `list[str]` | `[]` | Its authors and their e-mail addresses (UP-9). |
@@ -712,6 +714,45 @@ metre of assembly.
 
 The SBEM database does not store these fields: components read from it have
 them unset.
+
+## Structure (UP-9)
+
+UMI's life-cycle module counts the structure's materials, which a building
+template describes in its `StructureInformation`. `Archetype.Structure`
+(`StructureComponent | None`, default `None`) holds it, in
+`epinterface.sbem.components.structure`. It is not simulated.
+
+### `StructureComponent` (UMI `StructureInformation`)
+
+| Field | Type | Default | UMI field |
+|---|---|---|---|
+| `Name` | `str` | required | `Name` |
+| `MassRatios` | `list[MassRatioComponent]` | `[]` | `MassRatios` |
+| `UseAdvancedModel` | `bool` | `False` | `UseAdvancedModel` |
+| `AdvancedModel` | `AdvancedStructuralModelComponent` | UMI's defaults | `AdvancedModel` |
+
+It also has the metadata fields and the assembly life-cycle fields
+(`AssemblyLifeCycleMixin`).
+
+### Its parts
+
+| Class and field | Type | Unit | Default | UMI field |
+|---|---|---|---|---|
+| `MassRatioComponent.Material` | `ConstructionMaterialComponent` | – | required | `MassRatios.Material` |
+| `MassRatioComponent.NormalRatio` | `float`, ≥ 0 | kg/m² | required | `MassRatios.NormalRatio` |
+| `MassRatioComponent.HighLoadRatio` | `float`, ≥ 0 | kg/m² | required | `MassRatios.HighLoadRatio` |
+| `AdvancedStructuralModelComponent.ColumnWallSpacing` | `ColumnWallSpacingComponent` | – | spans of 8 m | `ColumnWallSpacing` |
+| `ColumnWallSpacingComponent.PrimarySpan`, `SecondarySpan` | `float`, > 0 | m | `8.0` | `PrimarySpan`, `SecondarySpan` |
+| `AdvancedStructuralModelComponent.ConstructionSystems` | `ConstructionSystemsComponent` | – | UMI's defaults | `ConstructionSystems` |
+| `ConstructionSystemsComponent.Beams`, `Columns`, `Floors`, `Foundations`, `LateralSystem` | one system component each | – | UMI's default type, no material | same names |
+| each system's `Material` | `ConstructionMaterialComponent \| None` | – | `None` | `Material` |
+| each system's `ConstructionSystemType` | the slot's UMI type names (`BeamSystemType`, `ColumnSystemType`, `FloorSystemType`, `FoundationSystemType`, `LateralSystemType`) | – | `RectangularSolid`, `SquareSolid`, `OneWayFlatSlab`, `SpreadFootings`, `CrossBracing` | `ConstructionSystemType` |
+| `AdvancedStructuralModelComponent.FoundationSoilSettings` | `FoundationSoilComponent` | – | clay, 72 | `FoundationSoilSettings` |
+| `FoundationSoilComponent.FoundationSoilPreset` | `"Clay" \| "Gravel" \| "Sand" \| "Other"` | – | `"Clay"` | `FoundationSoilPreset` |
+| `FoundationSoilComponent.FoundationSoilValue` | `float`, ≥ 0 | UMI's | `72.0` | `FoundationSoilValue` |
+| `AdvancedStructuralModelComponent.LoadingSettings` | `LoadingComponent` | – | offices, 2.4 | `LoadingSettings` |
+| `LoadingComponent.LiveLoadingPreset` | UMI's eleven presets (`LiveLoadingPresetName`) | – | `"Offices"` | `LiveLoadingPreset` |
+| `LoadingComponent.LiveLoadingValue` | `float`, ≥ 0 | kN/m² | `2.4` | `LiveLoadingValue` |
 
 ## Example
 
