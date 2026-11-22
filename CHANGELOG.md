@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-zone geometry matches within a relative tolerance of 1e-9 and an absolute
   tolerance of 0.01. The committed fixtures in `tests/data/regression` are the
   evidence.
-- idfkit is pinned to `>=1.3.0rc2,<1.4`.
+- idfkit is pinned to `>=1.3,<1.4`.
 - Documents are typed for the EnergyPlus releases epinterface supports, 22.2
   to 25.2, instead of idfkit's latest release (26.2), which epinterface never
   builds. `epinterface.document.EPDocument`, the union of idfkit's
