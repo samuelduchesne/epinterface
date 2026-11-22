@@ -305,6 +305,14 @@ class VentilationComponent(NamedObject, MetadataMixin, extra="forbid"):
         ),
     )
 
+    MechVentSchedule: YearComponent | None = Field(
+        default=None,
+        title="Mechanical ventilation schedule",
+        description=(
+            "Hourly multiplier of the mechanical outdoor air (Fraction type "
+            "limits), used when Provider is Mechanical or Both. None: constant."
+        ),
+    )
     IsScheduledVentilationOn: bool = Field(
         default=False,
         title="Scheduled ventilation is on",
@@ -354,6 +362,12 @@ class VentilationComponent(NamedObject, MetadataMixin, extra="forbid"):
     @model_validator(mode="after")
     def validate_ventilation_limits(self):
         """Natural-ventilation limits form a band; scheduled ventilation multiplies a flow."""
+        if (
+            self.MechVentSchedule is not None
+            and self.MechVentSchedule.schedule_type_limits != "Fraction"
+        ):
+            msg = "MechVentSchedule must be a Fraction schedule."
+            raise ValueError(msg)
         if (
             self.ScheduledVentilationSchedule is not None
             and self.ScheduledVentilationSchedule.schedule_type_limits == "Temperature"

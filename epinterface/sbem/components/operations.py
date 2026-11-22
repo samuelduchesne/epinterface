@@ -215,6 +215,9 @@ class ZoneOperationsComponent(
         if self.HVAC.Ventilation.DCV != "NoDCV":
             # check the design spec outdoor air for the DCV
             raise NotImplementedError("DCV not implemented.")
+        outdoor_air_method, outdoor_air_object = self._outdoor_air_specification(
+            doc, target_zone_name
+        )
         add_ideal_loads_template(
             doc,
             target_zone_name,
@@ -233,10 +236,8 @@ class ZoneOperationsComponent(
             cooling_availability_schedule_name=None
             if self.HVAC.ConditioningSystems.Cooling
             else "AlwaysOff",
-            outdoor_air_method="Sum"
-            if self.HVAC.Ventilation.Provider == "Mechanical"
-            or self.HVAC.Ventilation.Provider == "Both"
-            else "None",
+            outdoor_air_method=outdoor_air_method,
+            design_specification_outdoor_air_object_name=outdoor_air_object,
             outdoor_air_flow_rate_per_person=self.HVAC.Ventilation.FreshAirPerPerson,
             outdoor_air_flow_rate_per_zone_floor_area=self.HVAC.Ventilation.FreshAirPerFloorArea,
             demand_controlled_ventilation_type="None"
@@ -256,6 +257,41 @@ class ZoneOperationsComponent(
             doc = self.add_scheduled_ventilation_to_idf_zone(doc, target_zone_name)
 
         return doc
+
+    def _outdoor_air_specification(
+        self, doc: EPDocument, target_zone_name: str
+    ) -> tuple[str, str | None]:
+        """The ideal loads' outdoor air method and its detailed specification.
+
+        Without mechanical ventilation the method is `None`. With it, the
+        method is `Sum` (per person plus per floor area), or, when
+        `MechVentSchedule` is set, `DetailedSpecification`: a
+        `DesignSpecification:OutdoorAir` with the same flows and the schedule.
+
+        Returns:
+            method (str): The template's outdoor air method.
+            name (str | None): The `DesignSpecification:OutdoorAir` name, if any.
+        """
+        ventilation = self.HVAC.Ventilation
+        if ventilation.Provider not in ("Mechanical", "Both"):
+            return "None", None
+        if ventilation.MechVentSchedule is None:
+            return "Sum", None
+        doc, schedule_name = ventilation.MechVentSchedule.add_year_to_idf(
+            doc, name_prefix=None
+        )
+        name = f"{target_zone_name}_{ventilation.safe_name}_OUTDOOR_AIR"
+        add_or_replace(
+            doc["DesignSpecification:OutdoorAir"].add,
+            name,
+            outdoor_air_method="Sum",
+            outdoor_air_flow_per_person=ventilation.FreshAirPerPerson,
+            outdoor_air_flow_per_zone_floor_area=ventilation.FreshAirPerFloorArea,
+            outdoor_air_flow_per_zone=0.0,
+            outdoor_air_flow_air_changes_per_hour=0.0,
+            outdoor_air_schedule_name=schedule_name,
+        )
+        return "DetailedSpecification", name
 
     def add_natural_ventilation_to_idf_zone(
         self, doc: EPDocument, target_zone_name: str

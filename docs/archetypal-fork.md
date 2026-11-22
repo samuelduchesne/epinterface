@@ -20,6 +20,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-9, provider `Both` | `Provider="Both"` gives natural and mechanical ventilation (a defect fix). |
 | UP-9, natural-ventilation limits | Outdoor temperature and humidity limits, an indoor limit and wind and buoyancy switches on `VentilationComponent`. |
 | UP-9, scheduled ventilation | Air changes, schedule and minimum zone temperature of scheduled ventilation on `VentilationComponent`. |
+| UP-9, mechanical ventilation schedule | A schedule of the mechanical outdoor air on `VentilationComponent`. |
 
 ## Classes
 
@@ -394,6 +395,23 @@ The builder writes a `ZoneVentilation:DesignFlowRate` per zone with
 of 1) and the setpoint as minimum indoor temperature. Unconditioned attic and
 basement zones, whose ventilation provider the builder sets to `None`, get no
 scheduled ventilation either.
+
+## Mechanical ventilation schedule (UP-9)
+
+SBEM's mechanical outdoor air was constant: `VentilationComponent.Schedule`
+opens the windows of natural ventilation only. UMI's `ZoneConditioning`
+schedules the mechanical outdoor air (`MechVentSchedule`), so the component
+now holds such a schedule.
+
+| Field | Type | Unit | Default | Meaning |
+|---|---|---|---|---|
+| `VentilationComponent.MechVentSchedule` | `YearComponent \| None`, Fraction type limits | – (fraction) | `None` | Fraction of the design outdoor air (per person plus per floor area) supplied each hour, when `Provider` is `Mechanical` or `Both`. `None`: constant. |
+
+With a schedule, the builder sets the ideal loads' outdoor air method to
+`DetailedSpecification` and writes a `DesignSpecification:OutdoorAir`
+(`<zone>_<ventilation>_OUTDOOR_AIR`) with method `Sum`, the same flows per
+person and per floor area, and the schedule. Without one it writes `Sum` as
+before.
 
 ## Example
 
