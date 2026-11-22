@@ -66,7 +66,7 @@ from epinterface.sbem.components.composer import (
 from epinterface.sbem.components.envelope import (
     ConstructionAssemblyComponent,
     EnvelopeAssemblyComponent,
-    GlazingConstructionSimpleComponent,
+    WindowConstruction,
 )
 from epinterface.sbem.components.systems import DHWFuelType, FuelType
 from epinterface.sbem.components.zones import ZoneComponent
@@ -189,8 +189,7 @@ class SurfaceHandler(BaseModel):
     def assign_constructions_to_objs(
         self,
         doc: EPDocument,
-        construction: ConstructionAssemblyComponent
-        | GlazingConstructionSimpleComponent,
+        construction: ConstructionAssemblyComponent | WindowConstruction,
     ) -> EPDocument:
         """Adds a construction (and its materials) to a document and assigns it to matching surfaces.
 
@@ -477,7 +476,7 @@ class SurfaceHandlers(BaseModel):
         self,
         doc: EPDocument,
         constructions: EnvelopeAssemblyComponent,
-        window: GlazingConstructionSimpleComponent | None,
+        window: WindowConstruction | None,
         with_attic: bool,
         with_basement: bool,
         exposed_basement_frac: float = 0,
@@ -489,7 +488,7 @@ class SurfaceHandlers(BaseModel):
         Args:
             doc (EPDocument): The document to add the envelope to.
             constructions (ZoneConstruction): The construction names for the envelope.
-            window (GlazingConstructionSimpleComponent | None): The window definition.
+            window (WindowConstruction | None): The window definition.
             with_attic (bool): Whether to add the attic floor and ceiling constructions.
             with_basement (bool): Whether to add the basement floor and ceiling constructions.
             exposed_basement_frac (float): The fraction of the basement walls that are exposed above ground.
@@ -1155,7 +1154,7 @@ class Model(BaseWeather, validate_assignment=True):
         self,
         doc: EPDocument,
         constructions: EnvelopeAssemblyComponent,
-        window_def: GlazingConstructionSimpleComponent | None,
+        window_def: WindowConstruction | None,
     ) -> EPDocument:
         """Assigns the constructions to the surfaces in the model.
 
@@ -1725,7 +1724,7 @@ def assign_zone_envelope(  # noqa: C901
     doc: EPDocument,
     zone_names: set[str],
     constructions: EnvelopeAssemblyComponent,
-    window: GlazingConstructionSimpleComponent | None,
+    window: WindowConstruction | None,
     with_attic: bool,
     basement_suffix: str | None,
 ) -> EPDocument:
@@ -1741,7 +1740,7 @@ def assign_zone_envelope(  # noqa: C901
         doc (EPDocument): The document.
         zone_names (set[str]): The zones to reassign.
         constructions (EnvelopeAssemblyComponent): Their assemblies.
-        window (GlazingConstructionSimpleComponent | None): Their window; None
+        window (WindowConstruction | None): Their window; None
             leaves the windows as they are.
         with_attic (bool): Whether the model has an attic.
         basement_suffix (str | None): The basement zone name suffix, or None

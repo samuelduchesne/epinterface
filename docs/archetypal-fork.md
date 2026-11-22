@@ -26,6 +26,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-9, adiabatic assemblies | Adiabatic facade, roof, ground, partition and slab flags on `EnvelopeAssemblyComponent`. |
 | UP-9, internal partitions | Partition area per floor area on `EnvelopeAssemblyComponent`, written as internal mass. |
 | UP-9, daylighting | Daylight dimming of the lights, with the illuminance target, workplane height and illuminance map spacing on `LightingComponent`. |
+| UP-9, layered glazing | Windows of glass and gas layers, `GlazingConstructionLayeredComponent`, as an alternative to simple glazing. |
 
 ## Classes
 
@@ -525,6 +526,63 @@ writes for each zone:
 
 A zone without a floor surface raises `ValueError`. With `DimmingType="Off"`
 nothing changes.
+
+## Layered glazing (UP-9)
+
+SBEM windows were simple glazing: a U-value, a solar heat gain coefficient and
+a visible transmittance. UMI windows are layers of glass and gas. The window
+slot `ZoneEnvelopeComponent.Window` now takes either,
+`WindowConstruction = GlazingConstructionSimpleComponent |
+GlazingConstructionLayeredComponent` (`epinterface.sbem.components.envelope`).
+A file with simple glazing reads as before.
+
+### `GlazingConstructionLayeredComponent`
+
+| Field | Type | Unit | Default | Meaning |
+|---|---|---|---|---|
+| `Name` | `str` | – | required | The window construction's name. |
+| `Layers` | `list[GlazingLayerComponent \| GasLayerComponent]` | – | required | Layers from outside to inside: panes and cavities alternate, starting and ending with a pane, at most 4 panes (`MAX_GLAZING_LAYERS`). UMI `WindowConstruction.Layers`. |
+| `Type` | `"Single" \| "Double" \| "Triple" \| None` | – | `None` | Descriptive type. `pane_count` gives the number of panes. |
+
+It also has the metadata and environmental fields of simple glazing
+(`Category`, `Comment`, `DataSource`, `Version`, `Cost`, `RateUnit`, `Life`,
+`EmbodiedCarbon`).
+
+`GlazingLayerComponent` has `Thickness` (m, in (0, 0.1]) and
+`GlazingMaterial`; `GasLayerComponent` has `Thickness` (m, in (0, 0.1]) and
+`GasMaterial`.
+
+### `GlazingMaterialComponent` (UMI `GlazingMaterial`)
+
+All optical properties are at normal incidence.
+
+| Field | Type | Unit | Default | UMI field |
+|---|---|---|---|---|
+| `Conductivity` | `float`, > 0 | W/(m·K) | required | `Conductivity` |
+| `Density` | `float \| None`, ≥ 0 | kg/m³ | `None` | `Density` (not simulated) |
+| `SolarTransmittance` | `float`, in [0, 1] | – | required | `SolarTransmittance` |
+| `SolarReflectanceFront`, `SolarReflectanceBack` | `float`, in [0, 1] | – | required | same names |
+| `VisibleTransmittance` | `float`, in [0, 1] | – | required | `VisibleTransmittance` |
+| `VisibleReflectanceFront`, `VisibleReflectanceBack` | `float`, in [0, 1] | – | required | same names |
+| `IRTransmittance` | `float`, in [0, 1) | – | required | `IRTransmittance` |
+| `IREmissivityFront`, `IREmissivityBack` | `float`, in (0, 1) | – | required | same names |
+| `DirtFactor` | `float`, in (0, 1] | – | `1.0` | `DirtFactor` |
+
+### `GasMaterialComponent` (UMI `GasMaterial`)
+
+| Field | Type | Default | UMI field |
+|---|---|---|---|
+| `GasType` | `"Air" \| "Argon" \| "Krypton" \| "Xenon"` | required | `Type` |
+
+Both material classes also have the metadata and environmental fields of the
+other materials.
+
+### What the builder writes
+
+Each pane becomes a spectral-average `WindowMaterial:Glazing` and each cavity
+a `WindowMaterial:Gas`, named `<material>_<thickness>m` like opaque layers,
+and the window a `Construction` of them, outside first, named after the
+component. EnergyPlus then computes the window's properties layer by layer.
 
 ## Example
 

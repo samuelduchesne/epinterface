@@ -65,6 +65,192 @@ class GlazingConstructionSimpleComponent(
         return doc
 
 
+GasTypeName = Literal["Air", "Argon", "Krypton", "Xenon"]
+
+
+class GlazingMaterialComponent(
+    NamedObject,
+    StandardMaterialMetadataMixin,
+    MetadataMixin,
+    extra="forbid",
+):
+    """A glass pane's optical and thermal properties, at normal incidence."""
+
+    Conductivity: float = Field(..., title="Conductivity [W/mK]", gt=0)
+    Density: float | None = Field(
+        default=None, title="Density [kg/m3]", ge=0, description="Not simulated."
+    )
+    SolarTransmittance: float = Field(..., title="Solar transmittance", ge=0, le=1)
+    SolarReflectanceFront: float = Field(
+        ..., title="Front-side solar reflectance", ge=0, le=1
+    )
+    SolarReflectanceBack: float = Field(
+        ..., title="Back-side solar reflectance", ge=0, le=1
+    )
+    VisibleTransmittance: float = Field(..., title="Visible transmittance", ge=0, le=1)
+    VisibleReflectanceFront: float = Field(
+        ..., title="Front-side visible reflectance", ge=0, le=1
+    )
+    VisibleReflectanceBack: float = Field(
+        ..., title="Back-side visible reflectance", ge=0, le=1
+    )
+    IRTransmittance: float = Field(..., title="Infrared transmittance", ge=0, lt=1)
+    IREmissivityFront: float = Field(
+        ..., title="Front-side infrared hemispherical emissivity", gt=0, lt=1
+    )
+    IREmissivityBack: float = Field(
+        ..., title="Back-side infrared hemispherical emissivity", gt=0, lt=1
+    )
+    DirtFactor: float = Field(
+        default=1.0,
+        title="Dirt correction factor for solar and visible transmittance",
+        gt=0,
+        le=1,
+    )
+
+
+class GasMaterialComponent(
+    NamedObject,
+    StandardMaterialMetadataMixin,
+    MetadataMixin,
+    extra="forbid",
+):
+    """The gas filling a cavity between two panes."""
+
+    GasType: GasTypeName = Field(..., title="Gas")
+
+
+class GlazingLayerComponent(BaseModel, extra="forbid"):
+    """A glass pane of a layered window."""
+
+    Thickness: float = Field(..., title="Thickness [m]", gt=0, le=0.1)
+    GlazingMaterial: GlazingMaterialComponent
+
+    @property
+    def name(self) -> str:
+        """The name of the layer's `WindowMaterial:Glazing`."""
+        return f"{self.GlazingMaterial.Name}_{self.Thickness}m"
+
+    def add_to_idf(self, doc: EPDocument) -> EPDocument:
+        """Write the pane as a spectral-average `WindowMaterial:Glazing`."""
+        m = self.GlazingMaterial
+        add_or_replace(
+            doc["WindowMaterial:Glazing"].add,
+            self.name,
+            optical_data_type="SpectralAverage",
+            thickness=self.Thickness,
+            solar_transmittance_at_normal_incidence=m.SolarTransmittance,
+            front_side_solar_reflectance_at_normal_incidence=m.SolarReflectanceFront,
+            back_side_solar_reflectance_at_normal_incidence=m.SolarReflectanceBack,
+            visible_transmittance_at_normal_incidence=m.VisibleTransmittance,
+            front_side_visible_reflectance_at_normal_incidence=m.VisibleReflectanceFront,
+            back_side_visible_reflectance_at_normal_incidence=m.VisibleReflectanceBack,
+            infrared_transmittance_at_normal_incidence=m.IRTransmittance,
+            front_side_infrared_hemispherical_emissivity=m.IREmissivityFront,
+            back_side_infrared_hemispherical_emissivity=m.IREmissivityBack,
+            conductivity=m.Conductivity,
+            dirt_correction_factor_for_solar_and_visible_transmittance=m.DirtFactor,
+        )
+        return doc
+
+
+class GasLayerComponent(BaseModel, extra="forbid"):
+    """A gas-filled cavity of a layered window."""
+
+    Thickness: float = Field(..., title="Thickness [m]", gt=0, le=0.1)
+    GasMaterial: GasMaterialComponent
+
+    @property
+    def name(self) -> str:
+        """The name of the layer's `WindowMaterial:Gas`."""
+        return f"{self.GasMaterial.Name}_{self.Thickness}m"
+
+    def add_to_idf(self, doc: EPDocument) -> EPDocument:
+        """Write the cavity as a `WindowMaterial:Gas`."""
+        add_or_replace(
+            doc["WindowMaterial:Gas"].add,
+            self.name,
+            gas_type=self.GasMaterial.GasType,
+            thickness=self.Thickness,
+        )
+        return doc
+
+
+MAX_GLAZING_LAYERS = 4
+"""The most panes EnergyPlus's window model takes."""
+
+
+class GlazingConstructionLayeredComponent(
+    NamedObject,
+    StandardMaterialMetadataMixin,
+    MetadataMixin,
+    extra="forbid",
+):
+    """A window of glass panes and gas cavities, outside first.
+
+    An alternative to `GlazingConstructionSimpleComponent` in a zone envelope's
+    window slot: EnergyPlus computes its U-value, solar heat gain and visible
+    transmittance from the layers, angle by angle.
+    """
+
+    Layers: list[GlazingLayerComponent | GasLayerComponent] = Field(
+        ...,
+        title="Layers, outside first",
+        description=(
+            "Panes and cavities alternate, starting and ending with a pane; at most "
+            "4 panes."
+        ),
+    )
+    Type: WindowType | None = Field(
+        default=None,
+        title="Type of the glazing construction",
+        description="None: named by its number of panes.",
+    )
+
+    @field_validator("Layers", mode="after")
+    @classmethod
+    def validate_layers(
+        cls, v: list["GlazingLayerComponent | GasLayerComponent"]
+    ) -> list["GlazingLayerComponent | GasLayerComponent"]:
+        """Panes and gases alternate, panes outermost; at most four panes."""
+        if not v:
+            msg = "A layered window needs at least one pane."
+            raise ValueError(msg)
+        for i, layer in enumerate(v):
+            expected = GlazingLayerComponent if i % 2 == 0 else GasLayerComponent
+            if not isinstance(layer, expected):
+                msg = (
+                    "Layers must alternate pane and gas, starting with a pane; "
+                    f"layer {i} is a {type(layer).__name__}."
+                )
+                raise ValueError(msg)  # noqa: TRY004 (pydantic needs ValueError)
+        if len(v) % 2 == 0:
+            msg = "The innermost layer of a window must be a pane."
+            raise ValueError(msg)
+        if (len(v) + 1) // 2 > MAX_GLAZING_LAYERS:
+            msg = f"A window has at most {MAX_GLAZING_LAYERS} panes."
+            raise ValueError(msg)
+        return v
+
+    @property
+    def pane_count(self) -> int:
+        """The number of glass panes."""
+        return (len(self.Layers) + 1) // 2
+
+    def add_to_idf(self, doc: EPDocument) -> EPDocument:
+        """Write the layers and the window `Construction` named `Name`."""
+        for layer in self.Layers:
+            doc = layer.add_to_idf(doc)
+        add_construction(doc, self.Name, [layer.name for layer in self.Layers])
+        return doc
+
+
+WindowConstruction = (
+    GlazingConstructionSimpleComponent | GlazingConstructionLayeredComponent
+)
+"""A window construction: simple glazing or glass and gas layers."""
+
+
 class InfiltrationComponent(
     NamedObject,
     MetadataMixin,
@@ -422,7 +608,7 @@ class ZoneEnvelopeComponent(NamedObject, MetadataMixin, extra="forbid"):
     Infiltration: InfiltrationComponent
     AtticInfiltration: InfiltrationComponent
     BasementInfiltration: InfiltrationComponent
-    Window: GlazingConstructionSimpleComponent | None
+    Window: WindowConstruction | None
 
     # Foundation: Foundation | None
     # OtherSettings: OtherSettings | None
