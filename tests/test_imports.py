@@ -1,4 +1,4 @@
-"""The SBEM data model imports without archetypal, eppy or a generated Prisma client."""
+"""The SBEM data model and builder import without archetypal, eppy or the optional extras."""
 
 import subprocess
 import sys
@@ -6,9 +6,20 @@ import textwrap
 
 import pytest
 
-# Modules that must not be needed to describe an SBEM archetype. `prisma` is
-# blocked as a whole, which also covers a client that was never generated.
-BLOCKED = ("archetypal", "eppy", "geomeppy", "prisma")
+# Modules that must not be needed to describe and build an SBEM archetype. `prisma` is
+# blocked as a whole, which also covers a client that was never generated. The others
+# come with the optional extras (geo, prisma, comfort) or are no longer used (ladybug).
+BLOCKED = (
+    "archetypal",
+    "eppy",
+    "geomeppy",
+    "prisma",
+    "shapely",
+    "geopandas",
+    "ladybug",
+    "pythermalcomfort",
+    "openpyxl",
+)
 
 MODULES = (
     "epinterface.sbem.archetype",
@@ -16,6 +27,8 @@ MODULES = (
     "epinterface.sbem.components.zones",
     "epinterface.sbem.components.composer",
     "epinterface.sbem.builder",
+    "epinterface.geometry",
+    "epinterface.cli",
 )
 
 
@@ -46,3 +59,11 @@ def test_imports_without_blocked_modules(module: str):
         [sys.executable, "-c", script], capture_output=True, text=True, check=False
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_require_names_the_extra():
+    """A missing optional module fails with an error naming the extra to install."""
+    from epinterface._optional import MissingOptionalDependencyError, require
+
+    with pytest.raises(MissingOptionalDependencyError, match=r"epinterface\[geo\]"):
+        require("a_module_that_does_not_exist", "geo", "Neighbour shading")

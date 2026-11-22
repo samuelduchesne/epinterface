@@ -10,6 +10,7 @@ from typing import Any, Generic, Literal, TypeVar
 from pydantic import FilePath, validate_call
 from pydantic_settings import BaseSettings
 
+from epinterface._optional import missing
 from epinterface.sbem.common import NamedObject
 from epinterface.sbem.components.envelope import (
     ConstructionAssemblyComponent,
@@ -36,6 +37,11 @@ from epinterface.sbem.components.systems import (
     ZoneHVACComponent,
 )
 from epinterface.sbem.components.zones import ZoneComponent
+
+try:
+    import prisma  # noqa: F401
+except ModuleNotFoundError as e:
+    raise missing("prisma", "prisma", "The SBEM component database") from e
 
 try:
     from prisma import Prisma

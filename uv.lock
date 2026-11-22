@@ -555,25 +555,41 @@ version = "1.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
-    { name = "geopandas" },
     { name = "httpx" },
     { name = "idfkit" },
-    { name = "ladybug-core" },
     { name = "networkx", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "networkx", version = "3.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "networkx", version = "3.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "openpyxl" },
     { name = "pandas" },
-    { name = "prisma" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
-    { name = "pythermalcomfort" },
     { name = "pyyaml" },
     { name = "tqdm" },
 ]
 
+[package.optional-dependencies]
+all = [
+    { name = "geopandas" },
+    { name = "openpyxl" },
+    { name = "prisma" },
+    { name = "pythermalcomfort" },
+    { name = "shapely" },
+]
+comfort = [
+    { name = "pythermalcomfort" },
+]
+geo = [
+    { name = "geopandas" },
+    { name = "shapely" },
+]
+prisma = [
+    { name = "openpyxl" },
+    { name = "prisma" },
+]
+
 [package.dev-dependencies]
 dev = [
+    { name = "epinterface", extra = ["all"] },
     { name = "jupyter" },
     { name = "matplotlib", version = "3.10.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "matplotlib", version = "3.11.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -596,24 +612,27 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = "==8.1.7" },
-    { name = "geopandas", specifier = "~=1.0.1" },
-    { name = "httpx", specifier = "~=0.27.2" },
+    { name = "click", specifier = ">=8.1,<9" },
+    { name = "epinterface", extras = ["geo", "prisma", "comfort"], marker = "extra == 'all'" },
+    { name = "geopandas", marker = "extra == 'geo'", specifier = ">=1.0.1,<2" },
+    { name = "httpx", specifier = ">=0.27.2,<1" },
     { name = "idfkit", specifier = ">=1.3.0rc2,<2" },
-    { name = "ladybug-core", specifier = ">=0.44.30" },
     { name = "networkx", specifier = ">=3.3" },
-    { name = "openpyxl", specifier = "~=3.1.5" },
-    { name = "pandas", specifier = ">=2.2,<2.3" },
-    { name = "prisma", specifier = "~=0.15.0" },
+    { name = "openpyxl", marker = "extra == 'prisma'", specifier = ">=3.1.5,<4" },
+    { name = "pandas", specifier = ">=2.2,<3" },
+    { name = "prisma", marker = "extra == 'prisma'", specifier = ">=0.15,<0.16" },
     { name = "pydantic", specifier = ">=2.9,<3" },
     { name = "pydantic-settings", specifier = ">=2.0,<3" },
-    { name = "pythermalcomfort", specifier = ">=3.8.0" },
+    { name = "pythermalcomfort", marker = "extra == 'comfort'", specifier = ">=3.8.0" },
     { name = "pyyaml", specifier = ">=6.0.2" },
+    { name = "shapely", marker = "extra == 'geo'", specifier = ">=2,<3" },
     { name = "tqdm", specifier = ">=4.66" },
 ]
+provides-extras = ["geo", "prisma", "comfort", "all"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "epinterface", extras = ["all"] },
     { name = "jupyter", specifier = "~=1.1.1" },
     { name = "matplotlib", specifier = ">=3.10.9" },
     { name = "pandas-stubs", specifier = ">=2.2,<2.3" },
@@ -1336,28 +1355,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f4/ce/a7dc71353dd06a4cbe02222773f52d4a28c81e5a452a75797f8ed113dc99/kiwisolver-1.5.1-pp311-pypy311_pp73-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:5daa1f19e097050b9c4d9a78fcc9263cb96c9dfae08037ddc1b7c4ad1889f2a2", size = 79891, upload-time = "2026-08-28T10:28:22.936Z" },
     { url = "https://files.pythonhosted.org/packages/10/b1/d61c61a84ff85d1a36a99df2c152b59ffedb1d356c598902aba44abcdb60/kiwisolver-1.5.1-pp311-pypy311_pp73-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:cdaeeb6c350106df6bf9d873395973e5f066a9713200b72cd64f55d0a3eafab6", size = 77605, upload-time = "2026-08-28T10:28:24.322Z" },
     { url = "https://files.pythonhosted.org/packages/d3/52/5aef56f21a460a6e43ab3cdfc7697d59d7b87deb0ec97a0f7b91aa4a521b/kiwisolver-1.5.1-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:17851e5dad4484be0cbccbde3b15331deae036de9aebd45eed964487802b172f", size = 98465, upload-time = "2026-08-28T10:28:25.696Z" },
-]
-
-[[package]]
-name = "ladybug-core"
-version = "0.44.30"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "click" },
-    { name = "ladybug-geometry" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/bf/d5/c97c70cfbe345d3076a7a4c1c39285bd8617d47a170a9d931882d93019d3/ladybug_core-0.44.30.tar.gz", hash = "sha256:c01e1953b598a4d379d3996403ec6d1686870a3bd8474501be7281068c260aff", size = 242468, upload-time = "2026-01-06T17:26:42.834Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c8/f9/90a46ce7e20d404c310ea1a68479a0ab0be4f995dc5c741bc17fda1702a3/ladybug_core-0.44.30-py3-none-any.whl", hash = "sha256:e5b65802adfd00d65cc1122a52b7ec561fa166c9bc78b240e05940c5f15be96f", size = 272523, upload-time = "2026-01-06T17:26:40.842Z" },
-]
-
-[[package]]
-name = "ladybug-geometry"
-version = "1.34.14"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/91/0c/1803f43741957787399c802ce07b833f0b69e8bf93630f5b275f88d65881/ladybug_geometry-1.34.14.tar.gz", hash = "sha256:7531f4d6a9f35e1c15f8307282af6ef43056e1652910bd0188114fcecae9a01d", size = 617102, upload-time = "2025-11-07T04:16:48.676Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d4/52/7b8421a8ace22a17ae77dd9a8367e916364ed8be72502cb744805f06d6ac/ladybug_geometry-1.34.14-py3-none-any.whl", hash = "sha256:af91ee9285333ca1ddfaf439530306dff7f0a891cae40d4dc5491f139fcf7d36", size = 198221, upload-time = "2025-11-07T04:16:46.986Z" },
 ]
 
 [[package]]

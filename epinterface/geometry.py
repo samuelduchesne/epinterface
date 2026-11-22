@@ -1,5 +1,7 @@
 """Geometry utilities for the UBEM construction."""
 
+from __future__ import annotations
+
 import itertools
 import re
 import warnings
@@ -23,9 +25,8 @@ from idfkit.geometry import get_surface_coords, set_surface_coords
 from idfkit.zoning import ZoneFootprint, ZoningScheme, create_block
 from numpy.typing import ArrayLike
 from pydantic import BaseModel, Field, field_validator
-from shapely import LineString, Polygon, from_wkt
-from shapely.affinity import translate
 
+from epinterface._optional import require
 from epinterface.document import EPDocument, add_construction, add_or_replace
 
 if TYPE_CHECKING:
@@ -34,6 +35,22 @@ if TYPE_CHECKING:
         AnyBuildingSurfaceDetailed,
         AnyFenestrationSurfaceDetailed,
         AnyZone,
+    )
+    from shapely import Polygon
+
+
+_SHAPELY_FEATURE = "Neighbour shading from building footprints (scene_context)"
+
+
+def _shapely() -> Any:
+    """Return the shapely module, which comes with the ``geo`` extra."""
+    return require("shapely", "geo", _SHAPELY_FEATURE)
+
+
+def _translate(geom: Any, xoff: float, yoff: float) -> Any:
+    """Translate a shapely geometry."""
+    return require("shapely.affinity", "geo", _SHAPELY_FEATURE).translate(
+        geom, xoff=xoff, yoff=yoff
     )
 
 
@@ -73,11 +90,14 @@ def match_idf_to_building_and_neighbors(
     Returns:
         doc (EPDocument): The matched IDF document.
     """
+    shapely = _shapely()
     building_geo = (
-        cast(Polygon, from_wkt(building)) if isinstance(building, str) else building
+        cast("Polygon", shapely.from_wkt(building))
+        if isinstance(building, str)
+        else building
     )
     neighbor_geos = [
-        (cast(Polygon, from_wkt(n)), h * neighbor_f2f_height)
+        (cast("Polygon", shapely.from_wkt(n)), h * neighbor_f2f_height)
         if isinstance(n, str)
         else (n, h * neighbor_f2f_height)
         for n, h in zip(neighbor_polys, neighbor_floors, strict=True)
@@ -85,7 +105,7 @@ def match_idf_to_building_and_neighbors(
     ]
     centroid = building_geo.centroid
     translated_neighbors = [
-        (translate(n, xoff=-centroid.x, yoff=-centroid.y), h) for n, h in neighbor_geos
+        (_translate(n, xoff=-centroid.x, yoff=-centroid.y), h) for n, h in neighbor_geos
     ]
     bbox = bounding_box(doc)
     if bbox is None:
@@ -177,10 +197,16 @@ def compute_shading_mask(
     Returns:
         shading_mask (np.ndarray): The shading mask for the building.
     """
-    building_geom = building if isinstance(building, Polygon) else from_wkt(building)
+    shapely = _shapely()
+    building_geom = cast(
+        "Polygon",
+        shapely.from_wkt(building) if isinstance(building, str) else building,
+    )
 
     neighbor_geo_and_height = [
-        (cast(Polygon, from_wkt(n)), float(h)) if isinstance(n, str) else (n, float(h))
+        (cast("Polygon", shapely.from_wkt(n)), float(h))
+        if isinstance(n, str)
+        else (n, float(h))
         for n, h in zip(neighbors, neighbor_heights, strict=True)
         if n is not None and h is not None
     ]
@@ -205,8 +231,8 @@ def compute_shading_mask(
             ray_distance * np.cos(ray_angle),
             ray_distance * np.sin(ray_angle),
         )
-        centroid_moved = translate(centroid, x_off, y_off)
-        ray = LineString([centroid, centroid_moved])
+        centroid_moved = _translate(centroid, x_off, y_off)
+        ray = shapely.LineString([centroid, centroid_moved])
 
         # track the max elevation angle for this ray so far
         max_elevation_angle = 0
@@ -225,7 +251,7 @@ def compute_shading_mask(
                 y_coords[1:],
                 strict=True,
             ):
-                line = LineString([(x0, y0), (x1, y1)])
+                line = shapely.LineString([(x0, y0), (x1, y1)])
 
                 # compute the intersection and continue
                 # if there is no intersection
@@ -338,7 +364,11 @@ def prepare_neighbor_shading_for_idf(
         elevations=shading_mask, d=fence_radius
     )
 
-    building_geom = building if isinstance(building, Polygon) else from_wkt(building)
+    shapely = _shapely()
+    building_geom = cast(
+        "Polygon",
+        shapely.from_wkt(building) if isinstance(building, str) else building,
+    )
     centroid = building_geom.centroid
     cx, cy = centroid.x, centroid.y
 
@@ -348,7 +378,7 @@ def prepare_neighbor_shading_for_idf(
     p3 = p0 + outward_offset * outward
 
     mask_polys = [
-        Polygon([
+        shapely.Polygon([
             (p0[i, 0] + cx, p0[i, 1] + cy),
             (p1[i, 0] + cx, p1[i, 1] + cy),
             (p2[i, 0] + cx, p2[i, 1] + cy),
@@ -495,10 +525,15 @@ def _ring_pieces(
 
 
 class SceneContext(BaseModel, arbitrary_types_allowed=True):
-    """A context for the scene."""
+    """A context for the scene.
 
-    building: Polygon = Field(..., description="The building polygon to match.")
-    neighbors: list[Polygon] = Field(..., description="The neighbor polygons to match.")
+    The polygons are shapely polygons, so a scene context needs the ``geo`` extra.
+    """
+
+    building: Any = Field(..., description="The building polygon (shapely) to match.")
+    neighbors: list[Any] = Field(
+        ..., description="The neighbor polygons (shapely) to match."
+    )
     neighbor_heights: list[float] = Field(
         ..., description="The heights of the neighbors."
     )
@@ -510,6 +545,25 @@ class SceneContext(BaseModel, arbitrary_types_allowed=True):
         default=2 * np.pi / 48,
         description="The azimuthal angle for the shading mask (radians).",
     )
+
+    @field_validator("building", mode="after")
+    @classmethod
+    def check_building(cls, value: Any) -> Any:
+        """Require a shapely polygon for the building."""
+        if not isinstance(value, _shapely().Polygon):
+            msg = "The building must be a shapely Polygon."
+            raise ValueError(msg)  # noqa: TRY004
+        return value
+
+    @field_validator("neighbors", mode="after")
+    @classmethod
+    def check_neighbors(cls, value: list[Any]) -> list[Any]:
+        """Require shapely polygons for the neighbors."""
+        polygon = _shapely().Polygon
+        if not all(isinstance(n, polygon) for n in value):
+            msg = "The neighbors must be shapely Polygons."
+            raise ValueError(msg)
+        return value
 
 
 class ShoeboxGeometry(BaseModel):
@@ -862,7 +916,7 @@ class ShoeboxGeometry(BaseModel):
 
     def _create_zoned_block(
         self, doc: EPDocument, footprint: list[tuple[float, float]], storey_count: int
-    ) -> tuple[Sequence["AnyZone"], Sequence["AnyBuildingSurfaceDetailed"]]:
+    ) -> tuple[Sequence[AnyZone], Sequence[AnyBuildingSurfaceDetailed]]:
         """Create the block zoned by storey or core/perimeter, with `create_block`."""
         created = create_block(
             doc,
@@ -892,8 +946,8 @@ class ShoeboxGeometry(BaseModel):
     def _create_group_block(
         self, doc: EPDocument, footprint: list[tuple[float, float]], storey_count: int
     ) -> tuple[
-        Sequence["AnyZone"],
-        Sequence["AnyBuildingSurfaceDetailed"],
+        Sequence[AnyZone],
+        Sequence[AnyBuildingSurfaceDetailed],
         dict[str, tuple[int, int]],
     ]:
         """Create one zone per rectangle of every group's footprint, on every storey.
@@ -944,9 +998,9 @@ class ShoeboxGeometry(BaseModel):
     def _merge_group_pieces(  # noqa: C901
         self,
         doc: EPDocument,
-        zones: Sequence["AnyZone"],
+        zones: Sequence[AnyZone],
         pieces: dict[str, tuple[int, int]],
-        attic_floors: Sequence["AnyBuildingSurfaceDetailed"],
+        attic_floors: Sequence[AnyBuildingSurfaceDetailed],
     ) -> None:
         """Merge each group's pieces on a storey into one zone, and name it.
 
@@ -995,8 +1049,8 @@ class ShoeboxGeometry(BaseModel):
 
     def _bury_lowest_storey(
         self,
-        basement_zones: Sequence["AnyZone"],
-        surfaces: Sequence["AnyBuildingSurfaceDetailed"],
+        basement_zones: Sequence[AnyZone],
+        surfaces: Sequence[AnyBuildingSurfaceDetailed],
     ) -> None:
         """Move the block down one storey and put its lowest storey in the ground."""
         offset = Vector3D(0, 0, -self.h)
@@ -1015,8 +1069,8 @@ class ShoeboxGeometry(BaseModel):
                 srf.wind_exposure = "NoWind"
 
     def _add_attic(
-        self, doc: EPDocument, surfaces: Sequence["AnyBuildingSurfaceDetailed"]
-    ) -> list["AnyBuildingSurfaceDetailed"]:
+        self, doc: EPDocument, surfaces: Sequence[AnyBuildingSurfaceDetailed]
+    ) -> list[AnyBuildingSurfaceDetailed]:
         """Add a gabled attic zone on top of the block.
 
         The block's roofs become ceilings, and the attic gets one floor per
@@ -1158,9 +1212,9 @@ class ShoeboxGeometry(BaseModel):
     def _rename_like_geomeppy(
         self,
         doc: EPDocument,
-        zones: Sequence["AnyZone"],
-        surfaces: Sequence["AnyBuildingSurfaceDetailed"],
-        attic_floors: Sequence["AnyBuildingSurfaceDetailed"],
+        zones: Sequence[AnyZone],
+        surfaces: Sequence[AnyBuildingSurfaceDetailed],
+        attic_floors: Sequence[AnyBuildingSurfaceDetailed],
     ) -> None:
         """Give the block's zones and surfaces geomeppy's names, in geomeppy's zone order.
 
@@ -1232,7 +1286,7 @@ _DEFAULT_GLAZING: dict[str, Any] = {
 }
 
 
-def _default_construction_name(surface: "AnyBuildingSurfaceDetailed") -> str | None:
+def _default_construction_name(surface: AnyBuildingSurfaceDetailed) -> str | None:
     """The placeholder construction geomeppy gave a building surface, by type."""
     surface_type = (surface.surface_type or "").lower()
     if surface_type == "wall":
@@ -1328,10 +1382,10 @@ def _geomeppy_surface_name(zone_name: str, suffix: str, is_perimeter: bool) -> s
 
 def _add_window(
     doc: EPDocument,
-    wall: "AnyBuildingSurfaceDetailed",
+    wall: AnyBuildingSurfaceDetailed,
     wwr: float,
     construction: str = "Project External Window",
-) -> "AnyFenestrationSurfaceDetailed":
+) -> AnyFenestrationSurfaceDetailed:
     """Add geomeppy's ribbon window to a wall.
 
     The window is the wall shrunk about its vertex average: by the

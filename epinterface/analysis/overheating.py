@@ -315,7 +315,11 @@ def calculate_edh(
         pd.DataFrame: MultiIndex (Polarity, Threshold [degC], Aggregation Unit, Group),
             column "EDH [degC-hr]".
     """
-    from pythermalcomfort.models import set_tmp
+    from epinterface._optional import require
+
+    set_tmp = require(
+        "pythermalcomfort.models", "comfort", "The SET-based overheating metrics"
+    ).set_tmp
 
     _zone_weights = (
         zone_weights if zone_weights is not None else np.ones(dbt_mat.shape[0])

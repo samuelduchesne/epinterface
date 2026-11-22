@@ -19,7 +19,7 @@ import pandas as pd
 import yaml
 from idfkit.geometry import Polygon3D, get_surface_coords, set_surface_coords
 from idfkit.simulation.parsers.sql import SQLResult
-from ladybug.epw import EPW
+from idfkit.weather import load_epw
 from numpy.typing import NDArray
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -99,6 +99,26 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+
+def epw_monthly_ground_temperatures(epw_path: Path, depth: float) -> list[float]:
+    """Read the twelve monthly ground temperatures at a depth from an EPW header.
+
+    Args:
+        epw_path (Path): The EPW file.
+        depth (float): The depth below grade [m], one of those the header lists.
+
+    Returns:
+        temperatures (list[float]): The monthly ground temperatures, January first [°C].
+
+    Raises:
+        KeyError: If the header lists no ground temperatures at that depth.
+    """
+    for ground in load_epw(epw_path).ground_temperatures:
+        if np.isclose(ground.depth, depth):
+            return list(ground.monthly)
+    msg = f"{epw_path} lists no ground temperatures at {depth} m."
+    raise KeyError(msg)
 
 
 class SimulationPathConfig(BaseModel):
@@ -1148,14 +1168,11 @@ class Model(BaseWeather, validate_assignment=True):
         has_cooling = self.Zone.Operations.HVAC.ConditioningSystems.Cooling is not None
         hsp = self.Zone.Operations.SpaceUse.Thermostat.HeatingSchedule
         csp = self.Zone.Operations.SpaceUse.Thermostat.CoolingSchedule
-        epw = EPW(epw_path.as_posix())
-        epw_ground_vals_all = epw.monthly_ground_temperature
-        if self.geometry.basement:
-            # if there is a basement, we use the 2m depth to account for the basement depth.
-            epw_ground_vals = epw_ground_vals_all[4].values
-        else:
-            # if there is no basement, we use the 0.5m depth to account for the ground temperature.
-            epw_ground_vals = epw_ground_vals_all[0.5].values
+        # if there is a basement, we use the 4m depth to account for the basement depth;
+        # otherwise the 0.5m depth.
+        epw_ground_vals = epw_monthly_ground_temperatures(
+            epw_path, 4 if self.geometry.basement else 0.5
+        )
         low_ground_val = min(epw_ground_vals)
         high_ground_val = max(epw_ground_vals)
         phase = (np.array(epw_ground_vals) - low_ground_val) / (

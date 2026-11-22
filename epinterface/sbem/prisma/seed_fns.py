@@ -3,9 +3,14 @@
 NB: The data in here is mostly junk and just written as quickly as possible for testing purposes!
 """
 
-from prisma import Prisma
-from prisma.models import Day
-from prisma.types import DayCreateInput, WeekCreateInput
+try:
+    from prisma import Prisma
+    from prisma.models import Day
+    from prisma.types import DayCreateInput, WeekCreateInput
+except ModuleNotFoundError as e:
+    from epinterface._optional import missing
+
+    raise missing("prisma", "prisma", "The SBEM seed data") from e
 
 typologies = ["office", "residential"]
 ages = ["new", "old"]

@@ -156,6 +156,9 @@ def construct_composer_model(  # noqa: C901
     Returns:
         composer_model (BaseResolutionTree): A pydantic model that can be used to execute component mapping and composition.
     """
+    from epinterface._optional import require
+
+    require("prisma", "prisma", "Composing a model from the SBEM database")
     from prisma import Prisma
 
     from epinterface.sbem.prisma.client import deep_fetcher

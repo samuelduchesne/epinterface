@@ -6,9 +6,19 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from prisma import Prisma
-from prisma.types import EnvelopeAssemblyCreateInput
 from pydantic import Field
+
+from epinterface._optional import missing, require
+
+try:
+    from prisma import Prisma
+    from prisma.types import EnvelopeAssemblyCreateInput
+except ModuleNotFoundError as e:
+    if e.name is None or e.name.split(".")[0] != "prisma":
+        raise
+    raise missing(
+        "prisma", "prisma", "Loading component libraries into the SBEM database"
+    ) from e
 
 from epinterface.sbem.common import MetadataMixin
 from epinterface.sbem.components.envelope import (
@@ -108,6 +118,7 @@ class ComponentLibrary(MetadataMixin, arbitrary_types_allowed=True):
 
 def load_excel_to_dict(base_path: Path, sheet_name: str) -> dict[str, Any]:
     """Load the excel file into a dictionary."""
+    require("openpyxl", "prisma", "Reading component libraries from Excel")
     df = pd.read_excel(base_path, sheet_name=sheet_name, engine="openpyxl")
     df.columns = df.iloc[0]
     df = df[1:]
