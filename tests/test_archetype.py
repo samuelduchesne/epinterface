@@ -5,13 +5,18 @@ committed JSON file. Only the build test needs an EnergyPlus version setting.
 """
 
 import math
+import re
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
 from epinterface.data import DefaultEPWZipPath
-from epinterface.geometry import ShoeboxGeometry
+from epinterface.geometry import (
+    ShoeboxGeometry,
+    ZoneGroupLayout,
+    get_zone_floor_area,
+)
 from epinterface.sbem.archetype import (
     ARCHETYPE_SCHEMA_VERSION,
     ORIENTATIONS,
@@ -282,15 +287,16 @@ def test_from_archetype_refuses_unplaceable_groups(
     zone: ZoneComponent, core_zone: ZoneComponent
 ):
     """Groups a shoebox cannot place, or a geometry without a core, are refused."""
-    three = Archetype(
+    mixed = Archetype(
         Name="x",
         Groups=[
-            ZoneGroup(Name=n, Zone=zone, FloorAreaShare=s, Exposure="perimeter")
-            for n, s in (("a", 0.25), ("b", 0.25), ("c", 0.5))
+            ZoneGroup(Name="a", Zone=zone, FloorAreaShare=0.25, Exposure="perimeter"),
+            ZoneGroup(Name="b", Zone=zone, FloorAreaShare=0.25, Exposure="core"),
+            ZoneGroup(Name="c", Zone=zone, FloorAreaShare=0.5),
         ],
     )
-    with pytest.raises(ValueError, match="Merge the groups"):
-        Model.from_archetype(three, _geometry(), Weather=DefaultEPWZipPath)
+    with pytest.raises(ValueError, match="every zone group has an exposure"):
+        Model.from_archetype(mixed, _geometry(), Weather=DefaultEPWZipPath)
     with pytest.raises(ValueError, match="core/perimeter geometry"):
         Model.from_archetype(
             _archetype(zone, core_zone),
@@ -441,3 +447,281 @@ def test_build_unset_shares_areas_follow_geometry(
     core = sum(a for n, a in areas.items() if "Core_Zone" in n)
     total = sum(areas.values())
     assert core / total == pytest.approx((20 - 8) * (12 - 8) / (20 * 12), rel=1e-6)
+
+
+# --- any number of zone groups ---------------------------------------------------
+
+FOUR_GROUPS: list[tuple[str, float, str]] = [
+    ("office/core", 0.30, "core"),
+    ("office/perimeter", 0.35, "perimeter"),
+    ("corridor/core", 0.10, "core"),
+    ("lab/perimeter", 0.25, "perimeter"),
+]
+
+
+def _lab_zone(zone: ZoneComponent) -> ZoneComponent:
+    """A zone definition with its own lighting density and facade assembly."""
+    lab = zone.model_copy(deep=True)
+    lab.Name = "lab_zone"
+    lab.Operations.SpaceUse.Lighting.PowerDensity = 7.5
+    assemblies = lab.Envelope.Assemblies
+    assemblies.FacadeAssembly = assemblies.FacadeAssembly.model_copy(
+        update={"Name": "lab facade"}
+    )
+    return lab
+
+
+def _four_groups(zone: ZoneComponent, core_zone: ZoneComponent) -> Archetype:
+    zones = {
+        "office/core": core_zone,
+        "office/perimeter": zone,
+        "corridor/core": core_zone,
+        "lab/perimeter": _lab_zone(zone),
+    }
+    return Archetype(
+        Name="mixed",
+        Groups=[
+            ZoneGroup(Name=n, Zone=zones[n], FloorAreaShare=s, Exposure=e)  # pyright: ignore[reportArgumentType]
+            for n, s, e in FOUR_GROUPS
+        ],
+    )
+
+
+def _rect_area(r: tuple[float, float, float, float]) -> float:
+    return (r[2] - r[0]) * (r[3] - r[1])
+
+
+def _touches_facade(r: tuple[float, float, float, float], g: ShoeboxGeometry) -> bool:
+    x1, y1 = g.x + g.w, g.y + g.d
+    return any(
+        math.isclose(a, b, abs_tol=1e-9)
+        for a, b in ((r[0], g.x), (r[1], g.y), (r[2], x1), (r[3], y1))
+    )
+
+
+@pytest.mark.parametrize(
+    "layout",
+    [
+        [(s, e) for _, s, e in FOUR_GROUPS],
+        [(0.5, None), (0.3, None), (0.2, None)],
+        [(0.4, "perimeter"), (0.6, "perimeter")],
+        [(0.7, "perimeter"), (0.3, "core")],
+        [(0.6, "perimeter"), (0.1, "core"), (0.2, "core"), (0.1, "core")],
+        [
+            (0.1, "perimeter"),
+            (0.2, "perimeter"),
+            (0.3, "perimeter"),
+            (0.1, "perimeter"),
+            (0.3, "core"),
+        ],
+        [(1.0, None)],
+    ],
+)
+def test_group_footprints_follow_shares(layout: list[tuple[float, str | None]]):
+    """Each group's rectangles cover its share; perimeter groups touch the facade, core groups do not."""
+    g = _geometry(
+        zone_groups=[ZoneGroupLayout(share=s, exposure=e) for s, e in layout]  # pyright: ignore[reportArgumentType]
+    )
+    footprints = g.group_footprints()
+    assert len(footprints) == len(layout)
+    for (share, exposure), rects in zip(layout, footprints, strict=True):
+        assert sum(map(_rect_area, rects)) == pytest.approx(
+            share * g.footprint_area, rel=1e-8
+        )
+        if exposure == "perimeter" or exposure is None:
+            assert all(_touches_facade(r, g) for r in rects)
+        has_both = {e for _, e in layout} == {"core", "perimeter"}
+        if exposure == "core" and has_both:
+            assert not any(_touches_facade(r, g) for r in rects)
+
+
+def test_zone_groups_validation():
+    """Shares must sum to 1 and exposures be all set or all unset."""
+    with pytest.raises(ValidationError, match="sum to 1"):
+        _geometry(zone_groups=[ZoneGroupLayout(share=0.5)])
+    with pytest.raises(ValidationError, match="every zone group has an exposure"):
+        _geometry(
+            zone_groups=[
+                ZoneGroupLayout(share=0.5, exposure="core"),
+                ZoneGroupLayout(share=0.5),
+            ]
+        )
+    with pytest.raises(ValidationError, match="at least one group"):
+        _geometry(zone_groups=[])
+
+
+@pytest.mark.parametrize(
+    ("basement", "roof_height"), [(False, None), (True, None), (True, 2.5)]
+)
+def test_group_geometry_zone_areas(doc, basement: bool, roof_height: float | None):
+    """One zone per group per storey, with floor areas proportional to the shares."""
+    g = _geometry(
+        basement=basement,
+        roof_height=roof_height,
+        zone_groups=[ZoneGroupLayout(share=s, exposure=e) for _, s, e in FOUR_GROUPS],  # pyright: ignore[reportArgumentType]
+    )
+    g.add(doc)
+    storeys = g.num_stories + (1 if basement else 0)
+    names = {z.name for z in doc["Zone"]}
+    expected = {
+        g.group_zone_name(i, k) for i in range(len(FOUR_GROUPS)) for k in range(storeys)
+    }
+    assert names - {"Attic"} == expected
+    assert ("Attic" in names) == (roof_height is not None)
+    for name in expected:
+        index = g.zone_group_index(name)
+        assert index is not None
+        assert get_zone_floor_area(doc, name) == pytest.approx(
+            FOUR_GROUPS[index][1] * g.footprint_area, rel=1e-6
+        )
+    surfaces = doc["BuildingSurface:Detailed"]
+    for srf in surfaces:
+        if srf.outside_boundary_condition.lower() == "surface":
+            other = surfaces.get(srf.outside_boundary_condition_object)
+            assert other is not None
+            assert other.zone_name != srf.zone_name
+            assert srf.name.startswith(srf.zone_name) or "attic" in srf.name.lower()
+    # every group zone above ground has a window on its facade, core zones none
+    glazed = {
+        surfaces.get(w.building_surface_name).zone_name
+        for w in doc["FenestrationSurface:Detailed"]
+    }
+    for name in expected:
+        index = g.zone_group_index(name)
+        assert index is not None
+        above_ground = not (basement and name.endswith("Storey 0"))
+        assert (name in glazed) == (
+            FOUR_GROUPS[index][2] == "perimeter" and above_ground
+        )
+
+
+def test_from_archetype_any_number_of_groups(
+    zone: ZoneComponent, core_zone: ZoneComponent
+):
+    """Four groups become zone groups of the shoebox, each with its zone definition."""
+    a = _four_groups(zone, core_zone)
+    geometry = _geometry()
+    m = Model.from_archetype(a, geometry, Weather=DefaultEPWZipPath)
+    assert m.geometry.zone_groups == [
+        ZoneGroupLayout(share=s, exposure=e)  # pyright: ignore[reportArgumentType]
+        for _, s, e in FOUR_GROUPS
+    ]
+    assert m.GroupZones == [g.Zone for g in a.Groups]
+    assert m.Zone == zone  # the largest perimeter group
+    assert m.CoreZone is None
+    for i, group in enumerate(a.Groups):
+        assert m.zone_definition(m.geometry.group_zone_name(i, 1)) == group.Zone
+    assert m.zone_definition("Attic") == zone
+
+
+def test_from_archetype_groups_without_exposure(zone: ZoneComponent):
+    """Groups without exposures are placed as strips; any zoning is accepted."""
+    a = Archetype(
+        Name="uses",
+        Groups=[
+            ZoneGroup(Name=n, Zone=zone, FloorAreaShare=s)
+            for n, s in (("a", 0.2), ("b", 0.5), ("c", 0.3))
+        ],
+    )
+    m = Model.from_archetype(
+        a, _geometry(zoning="by_storey"), Weather=DefaultEPWZipPath
+    )
+    assert m.geometry.zone_groups is not None
+    assert [g.exposure for g in m.geometry.zone_groups] == [None] * 3
+    assert m.geometry.zones_per_storey == 3
+
+
+def test_group_zones_need_zone_groups(zone: ZoneComponent):
+    """GroupZones and the geometry's zone groups go together, one to one."""
+    common = {
+        "Zone": zone,
+        "Attic": AtticAssumptions(UseFraction=None, Conditioned=False),
+        "Basement": BasementAssumptions(UseFraction=None, Conditioned=False),
+        "Weather": DefaultEPWZipPath,
+    }
+    with pytest.raises(ValidationError, match="set together"):
+        Model(geometry=_geometry(), GroupZones=[zone], **common)
+    grouped = _geometry(zone_groups=[ZoneGroupLayout(share=1.0)])
+    with pytest.raises(ValidationError, match="set together"):
+        Model(geometry=grouped, **common)
+    with pytest.raises(ValidationError, match="1 zone groups"):
+        Model(geometry=grouped, GroupZones=[zone, zone], **common)
+
+
+@pytest.mark.skipif(
+    energyplus_settings.energyplus_version is None,
+    reason="building needs an EnergyPlus version (EPINTERFACE_ENERGYPLUS_VERSION)",
+)
+def test_build_four_groups_loads_and_envelope(
+    zone: ZoneComponent, core_zone: ZoneComponent, tmp_path: Path
+):
+    """Each zone gets its group's loads, and its facade its group's assembly."""
+    a = _four_groups(zone, core_zone)
+    m = Model.from_archetype(a, _geometry(), Weather=DefaultEPWZipPath)
+    doc = m.build(SimulationPathConfig(output_dir=tmp_path))
+    field = (
+        "watts_per_floor_area"
+        if doc.version >= (24, 1, 0)
+        else "watts_per_zone_floor_area"
+    )
+    density = {
+        lights.zone_or_zonelist_or_space_or_spacelist_name: getattr(lights, field)
+        for lights in doc.get_collection("Lights")
+    }
+    assert len(density) == 8
+    for name, value in density.items():
+        index = m.geometry.zone_group_index(name)
+        assert index is not None
+        expected = a.Groups[index].Zone.Operations.SpaceUse.Lighting.PowerDensity
+        assert math.isclose(value, expected)
+    facades = {}
+    for srf in doc["BuildingSurface:Detailed"]:
+        if (
+            srf.outside_boundary_condition.lower() == "outdoors"
+            and srf.surface_type.lower() == "wall"
+        ):
+            facades.setdefault(srf.zone_name, set()).add(srf.construction_name)
+    lab = {m.geometry.group_zone_name(3, k) for k in range(2)}
+    office = {m.geometry.group_zone_name(1, k) for k in range(2)}
+    assert set(facades) == lab | office
+    assert all(facades[n] == {"lab facade"} for n in lab)
+    reference = zone.Envelope.Assemblies.FacadeAssembly.Name
+    assert all(facades[n] == {reference} for n in office)
+
+
+@pytest.mark.skipif(
+    energyplus_settings.energyplus_version is None,
+    reason="simulating needs EnergyPlus",
+)
+def test_simulate_four_groups_floor_areas_match_shares(
+    zone: ZoneComponent, core_zone: ZoneComponent, tmp_path: Path
+):
+    """A four-group archetype simulates, and EnergyPlus's zone floor areas match the shares."""
+    import sqlite3
+
+    a = _four_groups(zone, core_zone)
+    m = Model.from_archetype(
+        a, _geometry(basement=True, roof_height=2.0), Weather=DefaultEPWZipPath
+    )
+    m.Basement = BasementAssumptions(UseFraction=None, Conditioned=False)
+    result = m.run(eplus_parent_dir=tmp_path)
+    result.sql.close()
+    assert result.output_dir is not None
+    assert "** Severe  **" not in result.err_text
+    (sql_path,) = result.output_dir.glob("*.sql")
+    with sqlite3.connect(sql_path) as conn:
+        rows = conn.execute("SELECT ZoneName, FloorArea FROM Zones").fetchall()
+    by_group: dict[int, float] = {}
+    for name, area in rows:
+        # zone names are upper-cased in the SQLite output
+        match = re.fullmatch(r"BLOCK GROUP(\d+) STOREY (\d+)", name.upper())
+        if match is None or match.group(2) == "0":
+            continue  # the attic and the basement storey
+        index = int(match.group(1)) - 1
+        by_group[index] = by_group.get(index, 0.0) + area
+    assert len(by_group) == len(FOUR_GROUPS)
+    total = sum(by_group.values())
+    assert total == pytest.approx(m.geometry.total_living_area, rel=1e-3)
+    for index, (_, share, _) in enumerate(FOUR_GROUPS):
+        assert by_group[index] / total == pytest.approx(share, rel=1e-3)
+    assert result.energy_and_peak.notna().all()

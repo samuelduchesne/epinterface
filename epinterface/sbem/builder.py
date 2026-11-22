@@ -41,7 +41,12 @@ from epinterface.document import (
     load_document,
     minimal_document,
 )
-from epinterface.geometry import ShoeboxGeometry, get_zone_floor_area
+from epinterface.geometry import (
+    ShoeboxGeometry,
+    ZoneGroupLayout,
+    get_zone_floor_area,
+    perimeter_depth_for_share,
+)
 from epinterface.interface import (
     add_default_schedules,
     add_default_sim_controls,
@@ -620,6 +625,16 @@ class Model(BaseWeather, validate_assignment=True):
             "always follow `Zone`."
         ),
     )
+    GroupZones: list[ZoneComponent] | None = Field(
+        default=None,
+        description=(
+            "Zone definition of each of the geometry's zone groups, in the order "
+            "of `geometry.zone_groups`. Each group's zones take its loads, "
+            "schedules, conditioning and envelope; `Zone` is the reference group, "
+            "whose partition assembly is used between groups and which sets the "
+            "attic, basement, ground temperatures and results post-processing."
+        ),
+    )
 
     @field_validator("geometry", mode="after")
     @classmethod
@@ -653,6 +668,33 @@ class Model(BaseWeather, validate_assignment=True):
             raise ValueError(msg)
         return self
 
+    @model_validator(mode="after")
+    def group_zones_check(self):
+        """Group zone definitions match the geometry's zone groups one to one.
+
+        Raises:
+            ValueError
+        """
+        groups = self.geometry.zone_groups
+        if (self.GroupZones is None) != (groups is None):
+            msg = (
+                "GroupZones and geometry.zone_groups must be set together; got "
+                f"GroupZones {'unset' if self.GroupZones is None else 'set'} and "
+                f"zone_groups {'unset' if groups is None else 'set'}."
+            )
+            raise ValueError(msg)
+        if self.GroupZones is not None and groups is not None:
+            if len(self.GroupZones) != len(groups):
+                msg = (
+                    f"Got {len(self.GroupZones)} GroupZones for {len(groups)} zone "
+                    "groups."
+                )
+                raise ValueError(msg)
+            if self.CoreZone is not None:
+                msg = "A CoreZone cannot be combined with GroupZones."
+                raise ValueError(msg)
+        return self
+
     @classmethod
     def from_archetype(
         cls, archetype: Archetype, geometry: ShoeboxGeometry, **kwargs
@@ -668,13 +710,19 @@ class Model(BaseWeather, validate_assignment=True):
           is replaced by the depth that gives the perimeter group's floor-area
           share on the footprint. When they are unset, the geometry is used as
           it is: the core and perimeter areas follow from its width, depth and
-          perimeter depth.
+          perimeter depth. The envelope assemblies and window come from the
+          perimeter group, which holds the facade.
+        - any other set of groups (shares set): the geometry gets one zone
+          group per archetype group (`ShoeboxGeometry.zone_groups`), so each
+          storey has one zone per group, with floor areas proportional to the
+          shares: perimeter groups share the perimeter ring and core groups the
+          core, or, without exposures, every group is a strip across the
+          footprint. Each zone takes its group's zone definition, envelope
+          included (`GroupZones`); `Zone` is the largest perimeter group (the
+          largest group without exposures).
 
-        Any other set of groups cannot be placed on a shoebox and raises
-        `ValueError`. The envelope assemblies and window come from the perimeter
-        group, which holds the facade. The archetype's attic and basement
-        assumptions are used as they are; its geometry characteristics are
-        descriptive and do not change `geometry`.
+        The archetype's attic and basement assumptions are used as they are; its
+        geometry characteristics are descriptive and do not change `geometry`.
 
         Args:
             archetype: The archetype to model.
@@ -685,7 +733,10 @@ class Model(BaseWeather, validate_assignment=True):
             model: The model.
 
         Raises:
-            ValueError: If the groups cannot be placed on the shoebox.
+            ValueError: If the groups cannot be placed on the shoebox: core and
+                perimeter groups on a geometry that is not core/perimeter, more
+                than two groups with unset shares, or exposures set for some
+                groups only.
         """
         groups = archetype.Groups
         if len(groups) == 1:
@@ -698,12 +749,7 @@ class Model(BaseWeather, validate_assignment=True):
             )
         by_exposure = {g.Exposure: g for g in groups}
         if len(groups) != 2 or set(by_exposure) != {"core", "perimeter"}:
-            msg = (
-                "A shoebox can place one zone group, or a 'perimeter' and a 'core' "
-                "group; got "
-                f"{[(g.Name, g.Exposure) for g in groups]}. Merge the groups first."
-            )
-            raise ValueError(msg)
+            return cls._from_zone_groups(archetype, geometry, **kwargs)
         if geometry.zoning != "core/perim":
             msg = (
                 "Core and perimeter groups need a core/perimeter geometry; got "
@@ -728,6 +774,43 @@ class Model(BaseWeather, validate_assignment=True):
             **kwargs,
         )
 
+    @classmethod
+    def _from_zone_groups(
+        cls, archetype: Archetype, geometry: ShoeboxGeometry, **kwargs
+    ) -> "Model":
+        """Build a model with one zone per archetype group on each storey."""
+        groups = archetype.Groups
+        if not archetype.shares_set:
+            msg = (
+                "Placing more than a 'perimeter' and a 'core' group needs every "
+                "group's FloorAreaShare; got unset shares for "
+                f"{[g.Name for g in groups]}."
+            )
+            raise ValueError(msg)
+        layouts = [
+            ZoneGroupLayout(share=cast(float, g.FloorAreaShare), exposure=g.Exposure)
+            for g in groups
+        ]
+        exposures = {g.Exposure for g in groups}
+        if None in exposures and len(exposures) > 1:
+            msg = (
+                "Either every zone group has an exposure or none has; got "
+                f"{[(g.Name, g.Exposure) for g in groups]}."
+            )
+            raise ValueError(msg)
+        geometry = geometry.model_copy(update={"zone_groups": layouts})
+        # the reference group holds the most facade: the largest perimeter group
+        candidates = [g for g in groups if g.Exposure == "perimeter"] or groups
+        reference = max(candidates, key=lambda g: cast(float, g.FloorAreaShare))
+        return cls(
+            geometry=geometry,
+            Zone=reference.Zone,
+            GroupZones=[g.Zone for g in groups],
+            Attic=archetype.Attic,
+            Basement=archetype.Basement,
+            **kwargs,
+        )
+
     def zone_definition(self, zone_name: str) -> ZoneComponent:
         """The zone definition used for one of the shoebox's main zones.
 
@@ -735,8 +818,14 @@ class Model(BaseWeather, validate_assignment=True):
             zone_name: The EnergyPlus zone name.
 
         Returns:
-            zone: `CoreZone` for a core zone when it is set, else `Zone`.
+            zone: The zone group's definition for a zone of a group (`GroupZones`),
+                `CoreZone` for a core zone when it is set, else `Zone`.
         """
+        if self.GroupZones is not None:
+            index = self.geometry.zone_group_index(zone_name)
+            if index is not None:
+                return self.GroupZones[index]
+            return self.Zone
         if self.CoreZone is not None and "core_zone" in zone_name.lower():
             return self.CoreZone
         return self.Zone
@@ -968,6 +1057,44 @@ class Model(BaseWeather, validate_assignment=True):
 
         return doc
 
+    def add_group_constructions(self, doc: EPDocument) -> EPDocument:
+        """Give each zone group's zones the group's envelope.
+
+        `add_constructions` first gives every surface the reference envelope
+        (`Zone`). Each group whose envelope differs then reassigns the surfaces of
+        its own zones: facade, roof, ground slab and walls, floors and ceilings
+        between its storeys and to the basement and attic, windows and internal
+        mass. Walls between two groups keep the reference partition assembly, so
+        both sides of a partition have the same construction.
+
+        Args:
+            doc (EPDocument): The document, with the reference envelope assigned.
+
+        Returns:
+            doc (EPDocument): The document.
+        """
+        if self.GroupZones is None:
+            return doc
+        zone_names: dict[int, set[str]] = {}
+        for zone in doc["Zone"]:
+            index = self.geometry.zone_group_index(zone.name)
+            if index is not None:
+                zone_names.setdefault(index, set()).add(zone.name)
+        for index, group_zone in enumerate(self.GroupZones):
+            if group_zone.Envelope == self.Zone.Envelope:
+                continue
+            doc = assign_zone_envelope(
+                doc,
+                zone_names.get(index, set()),
+                group_zone.Envelope.Assemblies,
+                group_zone.Envelope.Window,
+                with_attic=(self.geometry.roof_height or 0) > 0,
+                basement_suffix=self.geometry.basement_suffix
+                if self.geometry.basement
+                else None,
+            )
+        return doc
+
     def build(  # noqa: C901
         self,
         config: SimulationPathConfig,
@@ -1110,6 +1237,8 @@ class Model(BaseWeather, validate_assignment=True):
         doc = self.add_constructions(
             doc, self.Zone.Envelope.Assemblies, self.Zone.Envelope.Window
         )
+        if self.GroupZones is not None:
+            doc = self.add_group_constructions(doc)
 
         # > operations
         # ----> space use
@@ -1330,29 +1459,127 @@ class Model(BaseWeather, validate_assignment=True):
         return zone_weights, zone_names
 
 
-def perimeter_depth_for_share(w: float, d: float, share: float) -> float:
-    """The perimeter depth that gives a perimeter floor-area share on a footprint.
+def assign_zone_envelope(  # noqa: C901
+    doc: EPDocument,
+    zone_names: set[str],
+    constructions: EnvelopeAssemblyComponent,
+    window: GlazingConstructionSimpleComponent | None,
+    with_attic: bool,
+    basement_suffix: str | None,
+) -> EPDocument:
+    """Assign an envelope to the surfaces of some zones only.
 
-    A `w` by `d` footprint with perimeter depth `p` has a perimeter area of
-    `w*d - (w - 2p)(d - 2p)`. This solves that area equal to `share * w * d` for
-    the root with `0 < p < min(w, d) / 2`.
+    The surfaces of the zones get the assemblies `SurfaceHandlers.handle_envelope`
+    would give them, except walls to other zones (partitions), which are left as
+    they are. Floors and ceilings are reassigned only when the zone on their other
+    side is one of `zone_names`, the basement below them or the attic above them,
+    so both sides of every interzone surface stay consistent.
 
     Args:
-        w: Footprint width [m].
-        d: Footprint depth [m].
-        share: Perimeter share of the floor area, in (0, 1).
+        doc (EPDocument): The document.
+        zone_names (set[str]): The zones to reassign.
+        constructions (EnvelopeAssemblyComponent): Their assemblies.
+        window (GlazingConstructionSimpleComponent | None): Their window; None
+            leaves the windows as they are.
+        with_attic (bool): Whether the model has an attic.
+        basement_suffix (str | None): The basement zone name suffix, or None
+            without a basement.
 
     Returns:
-        perim_depth: The perimeter depth [m].
-
-    Raises:
-        ValueError: If the share is not strictly between 0 and 1.
+        doc (EPDocument): The document.
     """
-    if not 0 < share < 1:
-        msg = f"A perimeter share must be strictly between 0 and 1 to leave a core; got {share!r}."
-        raise ValueError(msg)
-    s = w + d
-    return (s - float(np.sqrt(s * s - 4 * share * w * d))) / 4
+
+    def is_basement(zone_name: str) -> bool:
+        return basement_suffix is not None and zone_name.lower().endswith(
+            basement_suffix.lower()
+        )
+
+    def is_attic(zone_name: str) -> bool:
+        return "attic" in zone_name.lower()
+
+    surfaces = doc["BuildingSurface:Detailed"]
+    zone_of = {srf.name: srf.zone_name or "" for srf in surfaces}
+    assignments: list[
+        tuple[AnyBuildingSurfaceDetailed, ConstructionAssemblyComponent]
+    ] = []
+    for srf in surfaces:
+        zone = srf.zone_name or ""
+        own = zone in zone_names
+        kind = (srf.surface_type or "").lower()
+        bc = (srf.outside_boundary_condition or "").lower()
+        other = zone_of.get(srf.outside_boundary_condition_object or "", "")
+        chosen: ConstructionAssemblyComponent | None = None
+        if own and kind == "roof" and bc == "outdoors":
+            chosen = (
+                constructions.AtticRoofAssembly
+                if with_attic
+                else constructions.FlatRoofAssembly
+            )
+        elif own and kind == "wall" and bc in ("outdoors", "ground"):
+            # exposed basement walls keep the ground wall assembly, as in
+            # handle_envelope
+            chosen = (
+                constructions.GroundWallAssembly
+                if bc == "ground" or is_basement(zone)
+                else constructions.FacadeAssembly
+            )
+        elif own and kind == "floor" and bc == "ground":
+            chosen = constructions.GroundSlabAssembly
+        elif bc == "surface" and kind in ("floor", "ceiling"):
+            if own and other in zone_names:
+                if kind == "ceiling" and is_basement(zone):
+                    chosen = constructions.BasementCeilingAssembly
+                elif kind == "floor" and is_basement(other):
+                    chosen = constructions.BasementCeilingAssembly.reversed
+                elif kind == "ceiling":
+                    chosen = constructions.FloorCeilingAssembly
+                else:
+                    chosen = constructions.FloorCeilingAssembly.reversed
+            elif own and kind == "ceiling" and is_attic(other):
+                chosen = constructions.AtticFloorAssembly.reversed
+            elif is_attic(zone) and kind == "floor" and other in zone_names:
+                chosen = constructions.AtticFloorAssembly
+        if chosen is not None:
+            assignments.append((srf, chosen))
+    added: set[str] = set()
+    for srf, construction in assignments:
+        if construction.Name not in added:
+            doc = construction.add_to_idf(doc)
+            added.add(construction.Name)
+        srf.construction_name = construction.Name
+
+    if window is not None:
+        windows = [
+            win
+            for win in doc["FenestrationSurface:Detailed"]
+            if zone_of.get(win.building_surface_name or "", "") in zone_names
+        ]
+        if windows:
+            doc = window.add_to_idf(doc)
+            for win in windows:
+                win.construction_name = window.Name
+
+    for zone_name in sorted(zone_names):
+        mass_name = f"{zone_name}_InternalMass"
+        if constructions.InternalMassAssembly is None:
+            existing = doc["InternalMass"].get(mass_name)
+            if existing is not None:
+                doc.removeidfobject(existing)
+            continue
+        if constructions.InternalMassAssembly.Name not in added:
+            doc = constructions.InternalMassAssembly.add_to_idf(doc)
+            added.add(constructions.InternalMassAssembly.Name)
+        add_or_replace(
+            doc["InternalMass"].add,
+            mass_name,
+            construction_name=constructions.InternalMassAssembly.Name,
+            zone_or_zonelist_name=zone_name,
+            surface_area=float(
+                get_zone_floor_area(doc, zone_name)
+                * (constructions.InternalMassExposedAreaPerArea or 0)
+            ),
+        )
+    return doc
 
 
 def construct_zone_def(

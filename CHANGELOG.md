@@ -61,6 +61,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Model.from_archetype` places an archetype with any number of zone groups
+  (shares set): each storey of the shoebox gets one zone per group, with floor
+  areas proportional to the shares. Perimeter groups share the perimeter ring,
+  core groups the core; groups without exposures are strips across the
+  footprint. Each zone takes its group's zone definition, envelope included.
+  New: `ShoeboxGeometry.zone_groups` (`ZoneGroupLayout`),
+  `ShoeboxGeometry.group_footprints`, `group_zone_name`, `zone_group_index`,
+  `Model.GroupZones` and `assign_zone_envelope`. `perimeter_depth_for_share`
+  moves to `epinterface.geometry` and stays importable from the builder.
+- `get_zone_floor_area` accepts zones with any number of floor surfaces, and
+  `get_zone_glazed_area` zones with any number of windows.
 - A zone group's `FloorAreaShare` may be `None`, meaning "set by the
   building's geometry when applied". Shares are either all set (summing to 1)
   or all `None`; with unset shares, each group needs its own exposure.

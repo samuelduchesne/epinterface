@@ -9,6 +9,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-1 | idfkit replaces archetypal and eppy. `epinterface.sbem.components`, `epinterface.sbem.archetype` and `epinterface.sbem.builder` import without archetypal, eppy or a generated Prisma client. PyYAML is declared. |
 | UP-2, zone groups | `epinterface.sbem.archetype`: `Archetype`, `ZoneGroup`, `BuildingGeometry`, save and load. `Model.from_archetype` and `Model.CoreZone` in the builder. |
 | UP-2, unset shares | Floor-area shares may all be `None`: the geometry sets them when the archetype is applied. |
+| UP-2, any number of groups | `Model.from_archetype` places any number of groups: one zone per group on each storey, each with its group's zone definition. |
 
 ## Classes
 
@@ -99,13 +100,56 @@ returns a `Model` for a `ShoeboxGeometry`. `kwargs` are other `Model` fields, su
 | One | set or unset | Its zone definition is used for every zone. The geometry is unchanged. |
 | `perimeter` and `core` | set | The perimeter group's zone definition becomes `Model.Zone`, the core group's `Model.CoreZone`. The geometry must be core/perimeter. Its `perim_depth` is replaced by the depth that gives the perimeter share (`perimeter_depth_for_share(w, d, share)`). |
 | `perimeter` and `core` | unset | As above, but the geometry is unchanged: core and perimeter areas follow from `w`, `d` and `perim_depth`. |
-| Any other set | | `ValueError`: merge the groups first. |
+| Any other set | set | One zone per group on each storey (see below). Any `zoning` is accepted. |
+| Any other set | unset | `ValueError`: the archetype's validation already refuses most of these. |
+| Exposures set for some groups only | | `ValueError`. |
 
 `Model.CoreZone` (default `None`) is the zone definition of the core zones of a
 core/perimeter shoebox; `Model.zone_definition(zone_name)` returns the definition a
-zone gets. The envelope assemblies, window, ground temperatures and the attic and
-basement zones follow `Model.Zone`, the perimeter group, which holds the facade. The
-archetype's `Geometry` is descriptive: `from_archetype` does not read it.
+zone gets. With one or two groups, the envelope assemblies, window, ground
+temperatures and the attic and basement zones follow `Model.Zone`, the perimeter
+group, which holds the facade. The archetype's `Geometry` is descriptive:
+`from_archetype` does not read it.
+
+### One zone per group
+
+For any other set of groups, `from_archetype` copies the geometry with
+`zone_groups`, one `ZoneGroupLayout(share, exposure)` per archetype group, in
+order, and sets `Model.GroupZones` to the groups' zone definitions, in the same
+order.
+
+On each storey, basement included, the shoebox then has one zone per group,
+named `"Block Group{n} Storey {k}"` (`ShoeboxGeometry.group_zone_name(i, k)`, with
+`n = i + 1` and storey `k` counted from 0 at the lowest storey).
+`ShoeboxGeometry.zone_group_index(name)` returns the group index of a zone, or
+`None` for the attic. `ShoeboxGeometry.group_footprints()` gives each group's
+footprint as rectangles:
+
+- **Perimeter and core groups.** The perimeter depth is the one that gives the
+  perimeter groups' total share. The perimeter ring is four rectangles of that
+  depth in a pinwheel (south, east, north, west, counter-clockwise from the
+  south-west corner). Walking it, the ring is cut at the perimeter groups'
+  cumulative shares, so each perimeter group gets a chain of rectangles that all
+  touch the facade. The core is cut across its long axis into one strip per core
+  group.
+- **No exposures, or one kind only.** The footprint is cut across its long axis
+  into one strip per group, each spanning the full depth.
+
+Each group's floor area is its share of the footprint, to within a cut snapped
+by at most 2 mm onto a ring corner. A group's rectangles are built as separate
+zones, matched with their neighbours, and then merged into one zone; the walls
+between two rectangles of the same zone are removed.
+
+Each zone takes its group's zone definition: loads, schedules, conditioning and
+envelope. After the reference envelope is assigned to every surface,
+`assign_zone_envelope` gives each group's facade, roof, ground slab and ground
+walls, floors and ceilings (between its storeys, to the basement and to the
+attic), windows and internal mass its group's assemblies. Walls between two
+groups keep the partition assembly of `Model.Zone`, the reference group, so both
+sides of a partition match. The reference group is the largest perimeter group
+(the largest group without exposures); it also sets the attic and basement zone
+definitions, the ground temperatures and the COPs and fuels of
+`standard_results_postprocess`.
 
 ## Example
 
