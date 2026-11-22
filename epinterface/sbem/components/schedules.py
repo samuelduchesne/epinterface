@@ -8,7 +8,7 @@ from pydantic import Field, field_validator, model_validator
 
 from epinterface.document import EPDocument, add_or_replace
 from epinterface.interface import PROTECTED_SCHEDULE_NAMES
-from epinterface.sbem.common import NamedObject
+from epinterface.sbem.common import MetadataMixin, NamedObject
 from epinterface.schedules import NON_LEAP_MONTH_LENGTHS, add_day_hourly_schedule
 
 if TYPE_CHECKING:
@@ -69,7 +69,7 @@ TypeLimits: dict[ScheduleTypeLimitType, TypeLimitsSpec] = {
 }
 
 
-class DayComponent(NamedObject, extra="forbid"):
+class DayComponent(NamedObject, MetadataMixin, extra="forbid"):
     """A day of the week with a schedule type limit and a list of values."""
 
     Type: ScheduleTypeLimitType = Field(
@@ -181,7 +181,7 @@ class DayComponent(NamedObject, extra="forbid"):
         return doc, desired_name
 
 
-class WeekComponent(NamedObject, extra="forbid"):
+class WeekComponent(NamedObject, MetadataMixin, extra="forbid"):
     """A week with a list of days."""
 
     Monday: DayComponent
@@ -386,7 +386,7 @@ YearScheduleCategory = Literal[
 ]
 
 
-class YearComponent(NamedObject, extra="forbid"):
+class YearComponent(NamedObject, MetadataMixin, extra="forbid"):
     """A year with a schedule type limit and a list of repeated weeks."""
 
     Type: YearScheduleCategory = Field(

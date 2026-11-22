@@ -32,6 +32,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-9, archetype metadata | Construction years, countries, climate zones, authors, version, lifespan and descriptive fields on `Archetype`. |
 | UP-9, life-cycle fields | Embodied energy, transport, substitution and structural properties of materials; assembly and disassembly carbon, cost and energy of assemblies. |
 | UP-9, structure | The building structure for life-cycle assessment, `StructureComponent` on `Archetype`. |
+| UP-9, schedule metadata | Category, comment and data source on day, week and year schedules. |
 
 ## Classes
 
@@ -753,6 +754,22 @@ It also has the metadata fields and the assembly life-cycle fields
 | `AdvancedStructuralModelComponent.LoadingSettings` | `LoadingComponent` | – | offices, 2.4 | `LoadingSettings` |
 | `LoadingComponent.LiveLoadingPreset` | UMI's eleven presets (`LiveLoadingPresetName`) | – | `"Offices"` | `LiveLoadingPreset` |
 | `LoadingComponent.LiveLoadingValue` | `float`, ≥ 0 | kN/m² | `2.4` | `LiveLoadingValue` |
+
+## Schedule metadata (UP-9)
+
+Every UMI schedule, day, week and year, has a category, comments and a data
+source. SBEM schedules had a name only. `DayComponent`, `WeekComponent` and
+`YearComponent` now take the metadata fields of the other components
+(`MetadataMixin`).
+
+| Field | Type | Default | UMI field |
+|---|---|---|---|
+| `Category` | `str \| None` | `None` | `Category` |
+| `Comment` | `str \| None` | `None` | `Comments` |
+| `DataSource` | `str \| None` | `None` | `DataSource` |
+| `Version` | `str \| None` | `None` | none |
+
+They are descriptive; the builder does not read them.
 
 ## Example
 
