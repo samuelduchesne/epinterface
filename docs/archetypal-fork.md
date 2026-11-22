@@ -21,6 +21,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-9, natural-ventilation limits | Outdoor temperature and humidity limits, an indoor limit and wind and buoyancy switches on `VentilationComponent`. |
 | UP-9, scheduled ventilation | Air changes, schedule and minimum zone temperature of scheduled ventilation on `VentilationComponent`. |
 | UP-9, mechanical ventilation schedule | A schedule of the mechanical outdoor air on `VentilationComponent`. |
+| UP-9, ideal-loads limits | Heating and cooling limit types, flows and capacities per floor area on `ConditioningSystemsComponent`. |
 
 ## Classes
 
@@ -412,6 +413,26 @@ With a schedule, the builder sets the ideal loads' outdoor air method to
 (`<zone>_<ventilation>_OUTDOOR_AIR`) with method `Sum`, the same flows per
 person and per floor area, and the schedule. Without one it writes `Sum` as
 before.
+
+## Ideal-loads limits (UP-9)
+
+SBEM always limited the ideal loads' air flow and capacity to autosized
+values. `ConditioningSystemsComponent` now holds the limits, per floor area as
+UMI's `ZoneConditioning` does.
+
+| Field | Type | Unit | Default | Meaning |
+|---|---|---|---|---|
+| `HeatingLimitType` | `"NoLimit" \| "LimitFlowRate" \| "LimitCapacity" \| "LimitFlowRateAndCapacity"` | – | `"LimitFlowRateAndCapacity"` | What limits heating (UMI `HeatingLimitType`). |
+| `CoolingLimitType` | same | – | `"LimitFlowRateAndCapacity"` | What limits cooling (UMI `CoolingLimitType`). |
+| `MaxHeatingFlowPerFloorArea` | `float \| None`, ≥ 0 | m³/(s·m²) | `None` | Maximum heating supply air flow (UMI `MaxHeatFlow`). `None`: autosized. |
+| `MaxCoolingFlowPerFloorArea` | `float \| None`, ≥ 0 | m³/(s·m²) | `None` | Maximum cooling supply air flow (UMI `MaxCoolFlow`). `None`: autosized. |
+| `MaxHeatingCapacityPerFloorArea` | `float \| None`, ≥ 0 | W/m² | `None` | Maximum sensible heating capacity (UMI `MaxHeatingCapacity`). `None`: autosized. |
+| `MaxCoolingCapacityPerFloorArea` | `float \| None`, ≥ 0 | W/m² | `None` | Maximum total cooling capacity (UMI `MaxCoolingCapacity`). `None`: autosized. |
+
+The builder writes each zone's limits to its ideal loads template, the values
+per floor area multiplied by the zone's floor area. EnergyPlus uses a flow or
+capacity only when the limit type names it. The defaults reproduce the
+earlier template.
 
 ## Example
 

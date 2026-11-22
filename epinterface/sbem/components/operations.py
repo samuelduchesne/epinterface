@@ -224,12 +224,7 @@ class ZoneOperationsComponent(
             thermostat.name,
             maximum_heating_supply_air_temperature=self.HVAC.ConditioningSystems.MaximumHeatingSupplyAirTemperature,
             minimum_cooling_supply_air_temperature=self.HVAC.ConditioningSystems.MinimumCoolingSupplyAirTemperature,
-            heating_limit="LimitFlowRateAndCapacity",
-            maximum_heating_air_flow_rate="autosize",
-            maximum_sensible_heating_capacity="autosize",
-            cooling_limit="LimitFlowRateAndCapacity",
-            maximum_cooling_air_flow_rate="autosize",
-            maximum_total_cooling_capacity="autosize",
+            **self._ideal_loads_limits(doc, target_zone_name),
             heating_availability_schedule_name=None
             if self.HVAC.ConditioningSystems.Heating
             else "AlwaysOff",
@@ -257,6 +252,42 @@ class ZoneOperationsComponent(
             doc = self.add_scheduled_ventilation_to_idf_zone(doc, target_zone_name)
 
         return doc
+
+    def _ideal_loads_limits(
+        self, doc: EPDocument, target_zone_name: str
+    ) -> dict[str, str | float]:
+        """The ideal loads' heating and cooling limits for a zone.
+
+        The limits per floor area are multiplied by the zone's floor area; an
+        unset one is autosized.
+
+        Returns:
+            fields (dict[str, str | float]): The template's limit fields.
+        """
+        systems = self.HVAC.ConditioningSystems
+        per_area = (
+            systems.MaxHeatingFlowPerFloorArea,
+            systems.MaxCoolingFlowPerFloorArea,
+            systems.MaxHeatingCapacityPerFloorArea,
+            systems.MaxCoolingCapacityPerFloorArea,
+        )
+        area = (
+            get_zone_floor_area(doc, target_zone_name)
+            if any(v is not None for v in per_area)
+            else 0.0
+        )
+
+        def limit(value: float | None) -> str | float:
+            return "autosize" if value is None else float(value * area)
+
+        return {
+            "heating_limit": systems.HeatingLimitType,
+            "maximum_heating_air_flow_rate": limit(per_area[0]),
+            "maximum_sensible_heating_capacity": limit(per_area[2]),
+            "cooling_limit": systems.CoolingLimitType,
+            "maximum_cooling_air_flow_rate": limit(per_area[1]),
+            "maximum_total_cooling_capacity": limit(per_area[3]),
+        }
 
     def _outdoor_air_specification(
         self, doc: EPDocument, target_zone_name: str

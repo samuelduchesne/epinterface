@@ -28,6 +28,9 @@ HeatingSystemType = Literal[
 ]
 CoolingSystemType = Literal["DX", "EvapCooling"]
 DistributionType = Literal["Hydronic", "Air", "Steam"]
+IdealLoadsLimit = Literal[
+    "NoLimit", "LimitFlowRate", "LimitCapacity", "LimitFlowRateAndCapacity"
+]
 
 
 class ThermalSystemComponent(NamedObject, MetadataMixin, extra="forbid"):
@@ -175,6 +178,47 @@ class ConditioningSystemsComponent(NamedObject, MetadataMixin, extra="forbid"):
             "this times the ideal loads' hourly supply air volume (at standard "
             "density). None: no fan end use."
         ),
+        ge=0,
+    )
+
+    HeatingLimitType: IdealLoadsLimit = Field(
+        default="LimitFlowRateAndCapacity",
+        title="Heating limit of the ideal loads",
+        description=(
+            "Which of the heating air flow rate and capacity are limited. A limit "
+            "whose value is None is autosized."
+        ),
+    )
+    CoolingLimitType: IdealLoadsLimit = Field(
+        default="LimitFlowRateAndCapacity",
+        title="Cooling limit of the ideal loads",
+        description=(
+            "Which of the cooling air flow rate and capacity are limited. A limit "
+            "whose value is None is autosized."
+        ),
+    )
+    MaxHeatingFlowPerFloorArea: float | None = Field(
+        default=None,
+        title="Maximum heating air flow rate per floor area [m3/s/m2]",
+        description="Used by LimitFlowRate limits. None: autosized.",
+        ge=0,
+    )
+    MaxCoolingFlowPerFloorArea: float | None = Field(
+        default=None,
+        title="Maximum cooling air flow rate per floor area [m3/s/m2]",
+        description="Used by LimitFlowRate limits. None: autosized.",
+        ge=0,
+    )
+    MaxHeatingCapacityPerFloorArea: float | None = Field(
+        default=None,
+        title="Maximum sensible heating capacity per floor area [W/m2]",
+        description="Used by LimitCapacity limits. None: autosized.",
+        ge=0,
+    )
+    MaxCoolingCapacityPerFloorArea: float | None = Field(
+        default=None,
+        title="Maximum total cooling capacity per floor area [W/m2]",
+        description="Used by LimitCapacity limits. None: autosized.",
         ge=0,
     )
 
