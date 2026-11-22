@@ -243,39 +243,57 @@ class ZoneOperationsComponent(
             latent_heat_recovery_effectiveness=self.HVAC.Ventilation.latent_heat_recovery_effectiveness,
         )
 
-        if self.HVAC.Ventilation.Provider == "Natural":
-            # total_window_area = calculate_window_area_for_zone(doc, target_zone_name)
-            total_window_area = get_zone_glazed_area(doc, target_zone_name)
+        if self.HVAC.Ventilation.Provider in ("Natural", "Both"):
+            doc = self.add_natural_ventilation_to_idf_zone(doc, target_zone_name)
 
-            if total_window_area == 0:
-                logger.warning(
-                    f"No windows found for natural ventilation in zone {target_zone_name}"
-                )
-                return doc
-            vent_wind_stack_name = f"{target_zone_name}_{self.SpaceUse.Thermostat.safe_name}_{self.HVAC.Ventilation.safe_name}_VENTILATION_WIND_AND_STACK_OPEN_AREA"
+        return doc
 
-            doc, vent_wind_stack_name_sch = (
-                self.HVAC.Ventilation.Schedule.add_year_to_idf(
-                    doc,
-                    name_prefix=None,
-                    summer_design_day_sch_name="d_AllOff_00",
-                    winter_design_day_sch_name="d_AllOff_00",
-                )
+    def add_natural_ventilation_to_idf_zone(
+        self, doc: EPDocument, target_zone_name: str
+    ) -> EPDocument:
+        """Add natural ventilation through the zone's windows.
+
+        Used when the ventilation provider is `Natural` or `Both` (natural and
+        mechanical). Writes a `ZoneVentilation:WindandStackOpenArea` whose
+        opening area is the zone's glazed area, opened by the ventilation
+        schedule.
+
+        Args:
+            doc (EPDocument): The IDF document to add the ventilation to.
+            target_zone_name (str): The name of the zone.
+
+        Returns:
+            doc (EPDocument): The updated IDF document.
+        """
+        # total_window_area = calculate_window_area_for_zone(doc, target_zone_name)
+        total_window_area = get_zone_glazed_area(doc, target_zone_name)
+
+        if total_window_area == 0:
+            logger.warning(
+                f"No windows found for natural ventilation in zone {target_zone_name}"
             )
-            add_or_replace(
-                doc["ZoneVentilation:WindandStackOpenArea"].add,
-                vent_wind_stack_name,
-                zone_or_space_name=target_zone_name,
-                opening_area=float(total_window_area),
-                opening_area_fraction_schedule_name=vent_wind_stack_name_sch,
-                opening_effectiveness="Autocalculate",
-                effective_angle=0.0,
-                height_difference=0.0,
-                discharge_coefficient_for_opening="Autocalculate",
-                delta_temperature=2.0,
-                minimum_outdoor_temperature=12.0,
-                maximum_outdoor_temperature=25.0,
-                maximum_wind_speed=40.0,
-            )
+            return doc
+        vent_wind_stack_name = f"{target_zone_name}_{self.SpaceUse.Thermostat.safe_name}_{self.HVAC.Ventilation.safe_name}_VENTILATION_WIND_AND_STACK_OPEN_AREA"
 
+        doc, vent_wind_stack_name_sch = self.HVAC.Ventilation.Schedule.add_year_to_idf(
+            doc,
+            name_prefix=None,
+            summer_design_day_sch_name="d_AllOff_00",
+            winter_design_day_sch_name="d_AllOff_00",
+        )
+        add_or_replace(
+            doc["ZoneVentilation:WindandStackOpenArea"].add,
+            vent_wind_stack_name,
+            zone_or_space_name=target_zone_name,
+            opening_area=float(total_window_area),
+            opening_area_fraction_schedule_name=vent_wind_stack_name_sch,
+            opening_effectiveness="Autocalculate",
+            effective_angle=0.0,
+            height_difference=0.0,
+            discharge_coefficient_for_opening="Autocalculate",
+            delta_temperature=2.0,
+            minimum_outdoor_temperature=12.0,
+            maximum_outdoor_temperature=25.0,
+            maximum_wind_speed=40.0,
+        )
         return doc

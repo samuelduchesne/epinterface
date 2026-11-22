@@ -17,6 +17,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-2, heat recovery | Numeric sensible and latent heat-recovery effectiveness on `VentilationComponent`. |
 | UP-8 | Specific fan power and a fan end use, the ideal loads' supply-air temperature limits, and an energy input ratio linear in outdoor temperature. |
 | UP-9, fractional year sum | `YearComponent.fractional_year_sum` counts the real weekdays of each month (a defect fix). |
+| UP-9, provider `Both` | `Provider="Both"` gives natural and mechanical ventilation (a defect fix). |
 
 ## Classes
 
@@ -328,6 +329,15 @@ weekdays as if every month began on a Tuesday, which skewed the peak flow of
 any schedule whose weekdays differ. It now counts the weekdays of the given
 year's real calendar, so the result equals the hour-by-hour mean of the
 schedule. The builder still evaluates the schedule over 2018.
+
+## Ventilation provider `Both` (UP-9)
+
+`VentilationComponent.Provider` accepts `"Both"`, natural and mechanical
+ventilation, but the builder gave it mechanical ventilation only. It now
+writes both: the ideal loads' outdoor air (as for `"Mechanical"`) and the
+`ZoneVentilation:WindandStackOpenArea` through the zone's windows (as for
+`"Natural"`, see `ZoneOperationsComponent.add_natural_ventilation_to_idf_zone`).
+`Ventilation.Schedule` opens the windows in both cases.
 
 ## Example
 
