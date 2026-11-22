@@ -664,8 +664,11 @@ class Model(BaseWeather, validate_assignment=True):
         - one group: its zone definition is used for every zone;
         - two groups with exposures `perimeter` and `core`: the perimeter group's
           zone definition is `Zone`, the core group's is `CoreZone`. The geometry
-          must be core/perimeter. Its perimeter depth is replaced by the depth
-          that gives the perimeter group's floor-area share on the footprint.
+          must be core/perimeter. When the shares are set, its perimeter depth
+          is replaced by the depth that gives the perimeter group's floor-area
+          share on the footprint. When they are unset, the geometry is used as
+          it is: the core and perimeter areas follow from its width, depth and
+          perimeter depth.
 
         Any other set of groups cannot be placed on a shoebox and raises
         `ValueError`. The envelope assemblies and window come from the perimeter
@@ -708,13 +711,14 @@ class Model(BaseWeather, validate_assignment=True):
             )
             raise ValueError(msg)
         perimeter, core = by_exposure["perimeter"], by_exposure["core"]
-        geometry = geometry.model_copy(
-            update={
-                "perim_depth": perimeter_depth_for_share(
-                    geometry.w, geometry.d, perimeter.FloorAreaShare
-                )
-            }
-        )
+        if perimeter.FloorAreaShare is not None:
+            geometry = geometry.model_copy(
+                update={
+                    "perim_depth": perimeter_depth_for_share(
+                        geometry.w, geometry.d, perimeter.FloorAreaShare
+                    )
+                }
+            )
         return cls(
             geometry=geometry,
             Zone=perimeter.Zone,

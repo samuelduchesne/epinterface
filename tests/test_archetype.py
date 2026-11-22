@@ -342,3 +342,102 @@ def test_build_writes_each_group_to_its_zones(
     assert all(math.isclose(v, 2.5) for v in core.values())
     expected = zone.Operations.SpaceUse.Lighting.PowerDensity
     assert all(math.isclose(v, expected) for v in perimeter.values())
+
+
+# --- unset floor-area shares (set by the geometry) ------------------------------
+
+
+def _unset(zone: ZoneComponent, core_zone: ZoneComponent) -> Archetype:
+    return Archetype(
+        Name="umi",
+        Groups=[
+            ZoneGroup(Name="perimeter", Zone=zone, Exposure="perimeter"),
+            ZoneGroup(Name="core", Zone=core_zone, Exposure="core"),
+        ],
+    )
+
+
+def test_unset_shares_accepted(zone: ZoneComponent, core_zone: ZoneComponent):
+    """Every share None is valid when each group has its own exposure."""
+    a = _unset(zone, core_zone)
+    assert not a.shares_set
+    assert _archetype(zone, core_zone).shares_set
+    single = Archetype(Name="one", Groups=[ZoneGroup(Name="all", Zone=zone)])
+    assert not single.shares_set
+
+
+def test_mixed_shares_refused(zone: ZoneComponent):
+    """Some shares set and others unset is refused, naming the unset groups."""
+    groups = [
+        ZoneGroup(Name="a", Zone=zone, FloorAreaShare=1.0, Exposure="perimeter"),
+        ZoneGroup(Name="b", Zone=zone, Exposure="core"),
+    ]
+    with pytest.raises(
+        ValidationError, match=r"every group or for none; unset for \['b'\]"
+    ):
+        Archetype(Name="x", Groups=groups)
+
+
+@pytest.mark.parametrize(
+    "exposures", [("perimeter", None), ("core", "core"), (None, None)]
+)
+def test_unset_shares_need_distinct_exposures(
+    zone: ZoneComponent, exposures: tuple[str | None, str | None]
+):
+    """With unset shares, the geometry can only tell groups apart by exposure."""
+    groups = [
+        ZoneGroup(Name=f"g{i}", Zone=zone, Exposure=e)  # pyright: ignore[reportArgumentType]
+        for i, e in enumerate(exposures)
+    ]
+    with pytest.raises(ValidationError, match="its own Exposure"):
+        Archetype(Name="x", Groups=groups)
+
+
+def test_unset_shares_round_trip(
+    zone: ZoneComponent, core_zone: ZoneComponent, tmp_path: Path
+):
+    """Unset shares are written as null and read back as None."""
+    a = _unset(zone, core_zone)
+    path = a.save(tmp_path / "umi.sbem.json")
+    assert '"FloorAreaShare": null' in path.read_text()
+    assert Archetype.load(path) == a
+
+
+def test_from_archetype_unset_shares_keeps_geometry(
+    zone: ZoneComponent, core_zone: ZoneComponent
+):
+    """With unset shares the shoebox's own perimeter depth sets the areas."""
+    geometry = _geometry(perim_depth=4.0)
+    m = Model.from_archetype(
+        _unset(zone, core_zone), geometry, Weather=DefaultEPWZipPath
+    )
+    assert m.geometry == geometry
+    assert m.Zone == zone
+    assert m.CoreZone == core_zone
+    with pytest.raises(ValueError, match="core/perimeter geometry"):
+        Model.from_archetype(
+            _unset(zone, core_zone),
+            _geometry(zoning="by_storey"),
+            Weather=DefaultEPWZipPath,
+        )
+
+
+@pytest.mark.skipif(
+    energyplus_settings.energyplus_version is None,
+    reason="building needs an EnergyPlus version (EPINTERFACE_ENERGYPLUS_VERSION)",
+)
+def test_build_unset_shares_areas_follow_geometry(
+    zone: ZoneComponent, core_zone: ZoneComponent, tmp_path: Path
+):
+    """Built core and perimeter floor areas are those of w, d and perim_depth."""
+    from epinterface.geometry import get_zone_floor_area
+
+    geometry = _geometry(perim_depth=4.0)
+    m = Model.from_archetype(
+        _unset(zone, core_zone), geometry, Weather=DefaultEPWZipPath
+    )
+    doc = m.build(SimulationPathConfig(output_dir=tmp_path))
+    areas = {z.name: get_zone_floor_area(doc, z.name) for z in doc["Zone"]}
+    core = sum(a for n, a in areas.items() if "Core_Zone" in n)
+    total = sum(areas.values())
+    assert core / total == pytest.approx((20 - 8) * (12 - 8) / (20 * 12), rel=1e-6)

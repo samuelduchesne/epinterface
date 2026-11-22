@@ -61,6 +61,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A zone group's `FloorAreaShare` may be `None`, meaning "set by the
+  building's geometry when applied". Shares are either all set (summing to 1)
+  or all `None`; with unset shares, each group needs its own exposure.
+  `Model.from_archetype` then keeps the shoebox's perimeter depth, so core and
+  perimeter areas follow from `w`, `d` and `perim_depth`.
 - `epinterface.sbem.archetype`: an `Archetype` made of several `ZoneGroup`s,
   each a `ZoneComponent` with its floor-area share and exposure, plus
   building-level `BuildingGeometry` characteristics (storeys, window-to-wall

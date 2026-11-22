@@ -8,6 +8,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 |---|---|
 | UP-1 | idfkit replaces archetypal and eppy. `epinterface.sbem.components`, `epinterface.sbem.archetype` and `epinterface.sbem.builder` import without archetypal, eppy or a generated Prisma client. PyYAML is declared. |
 | UP-2, zone groups | `epinterface.sbem.archetype`: `Archetype`, `ZoneGroup`, `BuildingGeometry`, save and load. `Model.from_archetype` and `Model.CoreZone` in the builder. |
+| UP-2, unset shares | Floor-area shares may all be `None`: the geometry sets them when the archetype is applied. |
 
 ## Classes
 
@@ -31,7 +32,11 @@ A building described by its zone groups and building-level characteristics.
 Validation:
 
 - group names are unique;
-- the `FloorAreaShare`s sum to 1 within `1e-6` (`SHARE_SUM_TOLERANCE`).
+- either every `FloorAreaShare` is set and the shares sum to 1 within `1e-6`
+  (`SHARE_SUM_TOLERANCE`), or every share is `None`;
+- with unset shares and more than one group, each group has an `Exposure` and no two
+  groups have the same one, since a geometry can only split floor area between core
+  and perimeter.
 
 Methods and properties:
 
@@ -41,6 +46,7 @@ Methods and properties:
 - `Archetype.load(path)` reads a file written by `save`.
 - `to_json() -> str` and `Archetype.from_json(text)` do the same on text.
 - `group(name) -> ZoneGroup` returns a group by name (`KeyError` if absent).
+- `shares_set -> bool` tells whether the shares are set.
 
 ### `ZoneGroup`
 
@@ -48,7 +54,7 @@ Methods and properties:
 |---|---|---|---|
 | `Name` | `str` | required | Unique within the archetype, for example `"office/perimeter"`. |
 | `Zone` | `ZoneComponent` | required | The SBEM zone definition (`Operations`, `Envelope`). |
-| `FloorAreaShare` | `float` | required | Share of conditioned floor area, in (0, 1]. |
+| `FloorAreaShare` | `float \| None` | `None` | Share of conditioned floor area, in (0, 1]. `None`: set by the geometry when applied. |
 | `Exposure` | `"core" \| "perimeter" \| None` | `None` | Where the group's zones sit. `None`: not tied to an exposure, for example a single-zone or space-use-only layout. |
 
 ### `BuildingGeometry`
@@ -88,11 +94,12 @@ Unchanged from the builder, which re-exports them: `UseFraction: float | None` i
 returns a `Model` for a `ShoeboxGeometry`. `kwargs` are other `Model` fields, such as
 `Weather`.
 
-| Groups | Result |
-|---|---|
-| One | Its zone definition is used for every zone. The geometry is unchanged. |
-| `perimeter` and `core` | The perimeter group's zone definition becomes `Model.Zone`, the core group's `Model.CoreZone`. The geometry must be core/perimeter. Its `perim_depth` is replaced by the depth that gives the perimeter share (`perimeter_depth_for_share(w, d, share)`). |
-| Any other set | `ValueError`: merge the groups first. |
+| Groups | Shares | Result |
+|---|---|---|
+| One | set or unset | Its zone definition is used for every zone. The geometry is unchanged. |
+| `perimeter` and `core` | set | The perimeter group's zone definition becomes `Model.Zone`, the core group's `Model.CoreZone`. The geometry must be core/perimeter. Its `perim_depth` is replaced by the depth that gives the perimeter share (`perimeter_depth_for_share(w, d, share)`). |
+| `perimeter` and `core` | unset | As above, but the geometry is unchanged: core and perimeter areas follow from `w`, `d` and `perim_depth`. |
+| Any other set | | `ValueError`: merge the groups first. |
 
 `Model.CoreZone` (default `None`) is the zone definition of the core zones of a
 core/perimeter shoebox; `Model.zone_definition(zone_name)` returns the definition a
@@ -108,9 +115,8 @@ from epinterface.sbem.archetype import Archetype, BuildingGeometry, ZoneGroup
 archetype = Archetype(
     Name="office",
     Groups=[
-        ZoneGroup(Name="perimeter", Zone=perimeter_zone, FloorAreaShare=0.6,
-                  Exposure="perimeter"),
-        ZoneGroup(Name="core", Zone=core_zone, FloorAreaShare=0.4, Exposure="core"),
+        ZoneGroup(Name="perimeter", Zone=perimeter_zone, Exposure="perimeter"),
+        ZoneGroup(Name="core", Zone=core_zone, Exposure="core"),
     ],
     Geometry=BuildingGeometry(WindowToWallRatio=BuildingGeometry.uniform(0.3)),
 )

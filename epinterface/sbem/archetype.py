@@ -3,7 +3,12 @@
 A single SBEM `ZoneComponent` describes one kind of zone. An archetype describes a
 whole building as a set of zone groups, each a zone definition with the share of the
 conditioned floor area it covers, plus building-level characteristics: geometry
-characteristics and attic and basement assumptions. The shares sum to 1.
+characteristics and attic and basement assumptions.
+
+Floor-area shares are either all set, summing to 1, or all unset (`None`). Unset
+shares mean "set by the building's geometry when the archetype is applied": the
+shoebox builder then takes the core and perimeter areas from its width, depth and
+perimeter depth (see `epinterface.sbem.builder.Model.from_archetype`).
 
 An archetype is saved as indented JSON (`Archetype.save`) and read back with
 `Archetype.load`. The file records `SchemaVersion`, so a reader can tell which
@@ -191,8 +196,11 @@ class ZoneGroup(BaseModel):
 
     Name: str = Field(..., min_length=1, description="Unique within the archetype.")
     Zone: ZoneComponent
-    FloorAreaShare: float = Field(
-        ..., gt=0, le=1, description="Share of conditioned floor area."
+    FloorAreaShare: float | None = Field(
+        default=None,
+        gt=0,
+        le=1,
+        description="Share of conditioned floor area; None: set by the geometry when applied.",
     )
     Exposure: ExposureType | None = Field(
         default=None,
@@ -206,7 +214,11 @@ class Archetype(NamedObject):
     Validation:
 
     - group names are unique;
-    - the `FloorAreaShare`s sum to 1 (within `SHARE_SUM_TOLERANCE`).
+    - either every `FloorAreaShare` is set and they sum to 1 (within
+      `SHARE_SUM_TOLERANCE`), or every one is `None`;
+    - when shares are unset and there are several groups, each group has an
+      `Exposure` and no two groups share one: the geometry can only split the
+      floor area between core and perimeter.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -243,11 +255,34 @@ class Archetype(NamedObject):
             msg = f"Zone group names must be unique; repeated: {duplicates}."
             raise ValueError(msg)
 
-        total = sum(g.FloorAreaShare for g in self.Groups)
-        if abs(total - 1) > SHARE_SUM_TOLERANCE:
-            msg = f"Floor-area shares must sum to 1; they sum to {total!r}."
+        shares = [g.FloorAreaShare for g in self.Groups]
+        set_count = sum(s is not None for s in shares)
+        if 0 < set_count < len(shares):
+            unset = [g.Name for g in self.Groups if g.FloorAreaShare is None]
+            msg = (
+                "Floor-area shares must be set for every group or for none; "
+                f"unset for {unset}."
+            )
             raise ValueError(msg)
+        if set_count:
+            total = sum(s for s in shares if s is not None)
+            if abs(total - 1) > SHARE_SUM_TOLERANCE:
+                msg = f"Floor-area shares must sum to 1; they sum to {total!r}."
+                raise ValueError(msg)
+        elif len(self.Groups) > 1:
+            exposures = [g.Exposure for g in self.Groups]
+            if None in exposures or len(set(exposures)) != len(exposures):
+                msg = (
+                    "With unset floor-area shares, each group needs its own Exposure "
+                    f"('core' or 'perimeter'); got {dict(zip(names, exposures, strict=True))}."
+                )
+                raise ValueError(msg)
         return self
+
+    @property
+    def shares_set(self) -> bool:
+        """Whether the floor-area shares are set (else the geometry sets them)."""
+        return self.Groups[0].FloorAreaShare is not None
 
     def group(self, name: str) -> ZoneGroup:
         """Return the group with this name.
