@@ -10,6 +10,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-2, zone groups | `epinterface.sbem.archetype`: `Archetype`, `ZoneGroup`, `BuildingGeometry`, save and load. `Model.from_archetype` and `Model.CoreZone` in the builder. |
 | UP-2, unset shares | Floor-area shares may all be `None`: the geometry sets them when the archetype is applied. |
 | UP-2, any number of groups | `Model.from_archetype` places any number of groups: one zone per group on each storey, each with its group's zone definition. |
+| UP-2, infiltration schedule | An hourly schedule on `InfiltrationComponent`. |
 | UP-2, heat recovery | Numeric sensible and latent heat-recovery effectiveness on `VentilationComponent`. |
 | UP-8 | Specific fan power and a fan end use, the ideal loads' supply-air temperature limits, and an energy input ratio linear in outdoor temperature. |
 
@@ -152,6 +153,21 @@ sides of a partition match. The reference group is the largest perimeter group
 (the largest group without exposures); it also sets the attic and basement zone
 definitions, the ground temperatures and the COPs and fuels of
 `standard_results_postprocess`.
+
+## Infiltration schedule (UP-2)
+
+SBEM's infiltration was constant in time: the builder gave it a schedule of 1.
+A detailed model's infiltration often follows a schedule (fans on, doors open),
+so `InfiltrationComponent` now carries one.
+
+| Field | Type | Unit | Default | Meaning |
+|---|---|---|---|---|
+| `InfiltrationComponent.Schedule` | `YearComponent \| None` | – (multiplier) | `None` | Hourly multiplier of the infiltration flow. Its type limits must be `Fraction` or `AnyNumber`. `None`: constant flow. |
+
+The builder writes the schedule as a `Schedule:Year` and uses it as the
+`ZoneInfiltration:DesignFlowRate` schedule. The attic and basement
+infiltration components take their own `Schedule`. `YearScheduleCategory` gains
+`"Infiltration"` for such schedules.
 
 ## Heat-recovery effectiveness (UP-2)
 

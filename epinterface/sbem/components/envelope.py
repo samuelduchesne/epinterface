@@ -19,6 +19,7 @@ from epinterface.sbem.components.materials import (
     ConstructionMaterialComponent,
     StandardMaterialMetadataMixin,
 )
+from epinterface.sbem.components.schedules import YearComponent
 
 if TYPE_CHECKING:
     # The object classes exist only in idfkit's stubs.
@@ -109,6 +110,23 @@ class InfiltrationComponent(
         ...,
         title="Calculation method",
     )
+    Schedule: YearComponent | None = Field(
+        default=None,
+        title="Infiltration schedule",
+        description=(
+            "Hourly multiplier of the infiltration flow (Fraction or AnyNumber "
+            "type limits). None: the flow is constant (a schedule of 1)."
+        ),
+    )
+
+    @field_validator("Schedule", mode="after")
+    @classmethod
+    def check_schedule_type(cls, v: YearComponent | None) -> YearComponent | None:
+        """An infiltration schedule is a multiplier, not a temperature."""
+        if v is not None and v.schedule_type_limits == "Temperature":
+            msg = "The infiltration schedule must be a Fraction or AnyNumber schedule."
+            raise ValueError(msg)
+        return v
 
     def add_infiltration_to_idf_zone(
         self, doc: EPDocument, target_zone_or_zone_list_name: str
@@ -131,9 +149,12 @@ class InfiltrationComponent(
         infiltration_name = (
             f"{target_zone_or_zone_list_name}_{self.safe_name}_INFILTRATION"
         )
-        inf_schedule = add_constant_schedule(
-            doc, infiltration_schedule_name, 1, "Fraction"
-        )
+        if self.Schedule is None:
+            schedule_name = add_constant_schedule(
+                doc, infiltration_schedule_name, 1, "Fraction"
+            ).name
+        else:
+            doc, schedule_name = self.Schedule.add_year_to_idf(doc, name_prefix=None)
         # The coefficients are 1/0/0/0 rather than this component's own: the
         # infiltration values are taken as actual rates, and no assumption is
         # made about the wind velocity.
@@ -141,7 +162,7 @@ class InfiltrationComponent(
             doc["ZoneInfiltration:DesignFlowRate"].add,
             infiltration_name,
             zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
-            schedule_name=inf_schedule.name,
+            schedule_name=schedule_name,
             design_flow_rate_calculation_method=self.CalculationMethod,
             flow_rate_per_exterior_surface_area=self.FlowPerExteriorSurfaceArea,
             air_changes_per_hour=self.AirChangesPerHour,
