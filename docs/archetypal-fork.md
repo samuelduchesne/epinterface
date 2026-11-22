@@ -22,6 +22,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-9, scheduled ventilation | Air changes, schedule and minimum zone temperature of scheduled ventilation on `VentilationComponent`. |
 | UP-9, mechanical ventilation schedule | A schedule of the mechanical outdoor air on `VentilationComponent`. |
 | UP-9, ideal-loads limits | Heating and cooling limit types, flows and capacities per floor area on `ConditioningSystemsComponent`. |
+| UP-9, availability | Heating and cooling availability schedules on `ConditioningSystemsComponent`. |
 
 ## Classes
 
@@ -433,6 +434,23 @@ The builder writes each zone's limits to its ideal loads template, the values
 per floor area multiplied by the zone's floor area. EnergyPlus uses a flow or
 capacity only when the limit type names it. The defaults reproduce the
 earlier template.
+
+## Heating and cooling availability (UP-9)
+
+SBEM's heating and cooling were available all year whenever the system
+existed. `ConditioningSystemsComponent` now holds availability schedules, UMI's
+`ZoneConditioning.HeatingSchedule` and `CoolingSchedule`.
+
+| Field | Type | Unit | Default | Meaning |
+|---|---|---|---|---|
+| `HeatingAvailabilitySchedule` | `YearComponent \| None`, Fraction type limits | – (0 off, else on) | `None` | When heating is available. `None`: always. |
+| `CoolingAvailabilitySchedule` | `YearComponent \| None`, Fraction type limits | – (0 off, else on) | `None` | When cooling is available. `None`: always. |
+
+The builder writes each set schedule as a `Schedule:Year` and uses it as the
+ideal loads' heating or cooling availability schedule. Its design days are
+"always on" (`d_AllOn_00`), so that sizing sees an available system, unless
+the week sets its own design-day slots. A missing system stays `AlwaysOff`,
+whatever its schedule.
 
 ## Example
 

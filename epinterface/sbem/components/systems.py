@@ -222,6 +222,23 @@ class ConditioningSystemsComponent(NamedObject, MetadataMixin, extra="forbid"):
         ge=0,
     )
 
+    HeatingAvailabilitySchedule: YearComponent | None = Field(
+        default=None,
+        title="Heating availability schedule",
+        description=(
+            "When heating is available (Fraction type limits; 0 is off, any other "
+            "value on). None: always available."
+        ),
+    )
+    CoolingAvailabilitySchedule: YearComponent | None = Field(
+        default=None,
+        title="Cooling availability schedule",
+        description=(
+            "When cooling is available (Fraction type limits; 0 is off, any other "
+            "value on). None: always available."
+        ),
+    )
+
     @model_validator(mode="after")
     def validate_conditioning_types(self):
         """Validate that the conditioning types are correct.
@@ -234,6 +251,11 @@ class ConditioningSystemsComponent(NamedObject, MetadataMixin, extra="forbid"):
         if self.Cooling and "cooling" not in self.Cooling.ConditioningType.lower():
             msg = "Cooling system type is only applicable to cooling systems."
             raise ValueError(msg)
+        for name in ("HeatingAvailabilitySchedule", "CoolingAvailabilitySchedule"):
+            schedule = getattr(self, name)
+            if schedule is not None and schedule.schedule_type_limits != "Fraction":
+                msg = f"{name} must be a Fraction schedule."
+                raise ValueError(msg)
         if (
             self.MaximumHeatingSupplyAirTemperature
             <= self.MinimumCoolingSupplyAirTemperature

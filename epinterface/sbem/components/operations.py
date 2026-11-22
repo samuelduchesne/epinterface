@@ -225,12 +225,7 @@ class ZoneOperationsComponent(
             maximum_heating_supply_air_temperature=self.HVAC.ConditioningSystems.MaximumHeatingSupplyAirTemperature,
             minimum_cooling_supply_air_temperature=self.HVAC.ConditioningSystems.MinimumCoolingSupplyAirTemperature,
             **self._ideal_loads_limits(doc, target_zone_name),
-            heating_availability_schedule_name=None
-            if self.HVAC.ConditioningSystems.Heating
-            else "AlwaysOff",
-            cooling_availability_schedule_name=None
-            if self.HVAC.ConditioningSystems.Cooling
-            else "AlwaysOff",
+            **self._availability_schedules(doc),
             outdoor_air_method=outdoor_air_method,
             design_specification_outdoor_air_object_name=outdoor_air_object,
             outdoor_air_flow_rate_per_person=self.HVAC.Ventilation.FreshAirPerPerson,
@@ -252,6 +247,33 @@ class ZoneOperationsComponent(
             doc = self.add_scheduled_ventilation_to_idf_zone(doc, target_zone_name)
 
         return doc
+
+    def _availability_schedules(self, doc: EPDocument) -> dict[str, str | None]:
+        """The ideal loads' heating and cooling availability schedule names.
+
+        A missing system is always off; a present one follows its availability
+        schedule, or is always available (blank) without one.
+        """
+        systems = self.HVAC.ConditioningSystems
+        names: dict[str, str | None] = {}
+        for mode, system, schedule in (
+            ("heating", systems.Heating, systems.HeatingAvailabilitySchedule),
+            ("cooling", systems.Cooling, systems.CoolingAvailabilitySchedule),
+        ):
+            key = f"{mode}_availability_schedule_name"
+            if system is None:
+                names[key] = "AlwaysOff"
+            elif schedule is None:
+                names[key] = None
+            else:
+                # sized with the system available, unless the week says otherwise
+                doc, names[key] = schedule.add_year_to_idf(
+                    doc,
+                    name_prefix=None,
+                    summer_design_day_sch_name="d_AllOn_00",
+                    winter_design_day_sch_name="d_AllOn_00",
+                )
+        return names
 
     def _ideal_loads_limits(
         self, doc: EPDocument, target_zone_name: str
