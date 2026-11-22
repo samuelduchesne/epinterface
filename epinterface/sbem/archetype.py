@@ -43,17 +43,22 @@ __all__ = [
     "orientation_of",
 ]
 
-ARCHETYPE_SCHEMA_VERSION = "1.1"
+ARCHETYPE_SCHEMA_VERSION = "1.2"
 """The version of the archetype file format this module writes.
 
 1.0: zone groups, unset shares, geometry characteristics.
 1.1: adds the optional fields of UP-8 and UP-2's extra fields (specific fan power,
 supply-air temperature limits, temperature-dependent energy input ratio, numeric
 heat-recovery effectiveness, infiltration schedule, holiday and design-day slots).
-A 1.0 file is a valid 1.1 file.
+1.2: adds UP-9's optional fields for UMI template libraries (layered glazing,
+window settings, internal partitions, natural-ventilation limits, scheduled
+ventilation, mechanical ventilation schedule, ideal-loads limits, availability
+schedules, daylighting, adiabatic assemblies, archetype metadata, structure,
+life-cycle fields of materials and assemblies, schedule metadata).
+A 1.0 or 1.1 file is a valid 1.2 file.
 """
 
-SUPPORTED_ARCHETYPE_SCHEMA_VERSIONS: tuple[str, ...] = ("1.0", "1.1")
+SUPPORTED_ARCHETYPE_SCHEMA_VERSIONS: tuple[str, ...] = ("1.0", "1.1", "1.2")
 """The archetype file format versions this module reads."""
 
 
