@@ -617,6 +617,8 @@ class SurfaceHandlers(BaseModel):
             doc = self.InternalMass.assign_constructions_to_objs(
                 doc=doc, construction=constructions.InternalMassAssembly
             )
+        for zone in doc["Zone"]:
+            add_partitions(doc, zone.name, constructions)
         return doc
 
 
@@ -1839,6 +1841,45 @@ def assign_zone_envelope(  # noqa: C901
                 * (constructions.InternalMassExposedAreaPerArea or 0)
             ),
         )
+    for zone_name in sorted(zone_names):
+        add_partitions(doc, zone_name, constructions)
+    return doc
+
+
+def add_partitions(
+    doc: EPDocument, zone_name: str, constructions: EnvelopeAssemblyComponent
+) -> EPDocument:
+    """Give a zone its internal partitions as internal mass.
+
+    Writes `<zone>_Partitions`, an `InternalMass` of the partition assembly
+    whose area is `PartitionAreaPerFloorArea` times the zone's floor area, or
+    removes it when the ratio is 0.
+
+    Args:
+        doc (EPDocument): The document.
+        zone_name (str): The zone.
+        constructions (EnvelopeAssemblyComponent): The zone's assemblies.
+
+    Returns:
+        doc (EPDocument): The document.
+    """
+    name = f"{zone_name}_Partitions"
+    if constructions.PartitionAreaPerFloorArea == 0:
+        existing = doc["InternalMass"].get(name)
+        if existing is not None:
+            doc.removeidfobject(existing)
+        return doc
+    constructions.PartitionAssembly.add_to_idf(doc)
+    add_or_replace(
+        doc["InternalMass"].add,
+        name,
+        construction_name=constructions.PartitionAssembly.Name,
+        zone_or_zonelist_name=zone_name,
+        surface_area=float(
+            get_zone_floor_area(doc, zone_name)
+            * constructions.PartitionAreaPerFloorArea
+        ),
+    )
     return doc
 
 

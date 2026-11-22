@@ -358,6 +358,16 @@ class EnvelopeAssemblyComponent(
         ge=0,
     )
 
+    PartitionAreaPerFloorArea: float = Field(
+        default=0.0,
+        title="Internal partition area per floor area [m2/m2]",
+        description=(
+            "Area of the internal partitions inside a zone, exposed to the zone, "
+            "per floor area. Modelled as internal mass of the partition assembly. "
+            "0: none."
+        ),
+        ge=0,
+    )
     IsFacadeAdiabatic: bool = Field(
         default=False,
         title="Facade is adiabatic",

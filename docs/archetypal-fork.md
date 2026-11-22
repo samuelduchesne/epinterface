@@ -24,6 +24,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-9, ideal-loads limits | Heating and cooling limit types, flows and capacities per floor area on `ConditioningSystemsComponent`. |
 | UP-9, availability | Heating and cooling availability schedules on `ConditioningSystemsComponent`. |
 | UP-9, adiabatic assemblies | Adiabatic facade, roof, ground, partition and slab flags on `EnvelopeAssemblyComponent`. |
+| UP-9, internal partitions | Partition area per floor area on `EnvelopeAssemblyComponent`, written as internal mass. |
 
 ## Classes
 
@@ -478,6 +479,22 @@ EnergyPlus allows no window on an adiabatic surface, so before the zone
 definitions are written `Model.remove_adiabatic_facade_windows` removes the
 windows of exterior walls whose zone has an adiabatic facade; such a zone
 then has no solar gains through windows and no natural ventilation.
+
+## Internal partitions (UP-9)
+
+A shoebox zone has partitions only where it meets another zone. UMI's
+`BuildingTemplate.PartitionRatio` describes the partitions inside the zones,
+which store heat. `EnvelopeAssemblyComponent` now holds them.
+
+| Field | Type | Unit | Default | Meaning |
+|---|---|---|---|---|
+| `PartitionAreaPerFloorArea` | `float`, ≥ 0 | m²/m² | `0.0` | Area of internal partitions exposed to the zone per floor area (both faces count, as for EnergyPlus internal mass). 0: none. |
+
+The builder writes, for each zone, an `InternalMass` named
+`<zone>_Partitions` of `PartitionAssembly`, with this ratio times the zone's
+floor area. It does so for the same zones as the internal mass: every zone
+with the reference envelope, and each group's zones with the group's
+envelope. A UMI translator converts its ratio to this area.
 
 ## Example
 
