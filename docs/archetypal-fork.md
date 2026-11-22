@@ -10,6 +10,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-2, zone groups | `epinterface.sbem.archetype`: `Archetype`, `ZoneGroup`, `BuildingGeometry`, save and load. `Model.from_archetype` and `Model.CoreZone` in the builder. |
 | UP-2, unset shares | Floor-area shares may all be `None`: the geometry sets them when the archetype is applied. |
 | UP-2, any number of groups | `Model.from_archetype` places any number of groups: one zone per group on each storey, each with its group's zone definition. |
+| UP-2, week slots | Holiday and design-day slots on `WeekComponent`. |
 | UP-2, infiltration schedule | An hourly schedule on `InfiltrationComponent`. |
 | UP-2, heat recovery | Numeric sensible and latent heat-recovery effectiveness on `VentilationComponent`. |
 | UP-8 | Specific fan power and a fan end use, the ideal loads' supply-air temperature limits, and an energy input ratio linear in outdoor temperature. |
@@ -153,6 +154,26 @@ sides of a partition match. The reference group is the largest perimeter group
 (the largest group without exposures); it also sets the attic and basement zone
 definitions, the ground temperatures and the COPs and fuels of
 `standard_results_postprocess`.
+
+## Holiday and design-day slots (UP-2)
+
+An SBEM week had seven days only. The builder filled the holiday slot of each
+`Schedule:Week:Daily` with Sunday and the design-day slots with Monday (or with a
+day the caller chose, such as the thermostat's constant setpoint). A week can
+now say what those days are.
+
+| Field | Type | Unit | Default | Meaning |
+|---|---|---|---|---|
+| `WeekComponent.Holiday` | `DayComponent \| None` | the week's | `None` | Day used on holidays. `None`: Sunday. |
+| `WeekComponent.SummerDesignDay` | `DayComponent \| None` | the week's | `None` | Day used on summer design days. `None`: the caller's design day, else Monday. |
+| `WeekComponent.WinterDesignDay` | `DayComponent \| None` | the week's | `None` | Day used on winter design days. `None`: the caller's design day, else Monday. |
+
+Each set slot must have the week's type limits. `add_week_to_idf` writes it to
+the matching field of `Schedule:Week:Daily`; a week's own design day wins over
+the one the caller passes. `WeekComponent.Days`, `AverageValue` and `bounds`
+still cover the seven weekdays only. Holidays take effect only on the days the
+run declares as holidays (`RunPeriodControl:SpecialDays`, or the weather file's
+when the run period uses them).
 
 ## Infiltration schedule (UP-2)
 

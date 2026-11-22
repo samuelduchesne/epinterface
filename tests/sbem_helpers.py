@@ -64,8 +64,8 @@ def year(
 
 
 def week(name: str, every_day: DayComponent, **slots: DayComponent) -> WeekComponent:
-    """A week with the same day every weekday, plus optional slots."""
-    return WeekComponent(Name=name, **dict.fromkeys(WEEKDAYS, every_day), **slots)
+    """A week with the same day every weekday, overridden or extended by `slots`."""
+    return WeekComponent(Name=name, **{**dict.fromkeys(WEEKDAYS, every_day), **slots})
 
 
 def small_model(zone: ZoneComponent) -> Model:

@@ -191,12 +191,35 @@ class WeekComponent(NamedObject, extra="forbid"):
     Friday: DayComponent
     Saturday: DayComponent
     Sunday: DayComponent
+    Holiday: DayComponent | None = Field(
+        default=None,
+        description="The day used on holidays. None: Sunday's.",
+    )
+    SummerDesignDay: DayComponent | None = Field(
+        default=None,
+        description=(
+            "The day used on summer design days. None: the design day the caller "
+            "gives, else Monday's."
+        ),
+    )
+    WinterDesignDay: DayComponent | None = Field(
+        default=None,
+        description=(
+            "The day used on winter design days. None: the design day the caller "
+            "gives, else Monday's."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_type_limits_are_consistent(self):
-        """Validate that the type limits are consistent."""
+        """Validate that the type limits are consistent, special days included."""
         lim = self.Monday.Type
-        for day in self.Days:
+        special = [
+            d
+            for d in (self.Holiday, self.SummerDesignDay, self.WinterDesignDay)
+            if d is not None
+        ]
+        for day in [*self.Days, *special]:
             if day.Type != lim:
                 msg = "Type limits are not consistent"
                 raise ValueError(msg)
@@ -238,6 +261,10 @@ class WeekComponent(NamedObject, extra="forbid"):
 
         The name prefix can be used to scope the schedule creation to ensure a unique schedule per object.
 
+        The week's `Holiday`, `SummerDesignDay` and `WinterDesignDay`, when set,
+        fill those slots; the design-day names given here are used only for the
+        design days the week leaves unset.
+
         Args:
             doc (EPDocument): The IDF document to add the week to.
             name_prefix (str | None): The prefix to use for the schedule name.
@@ -262,7 +289,19 @@ class WeekComponent(NamedObject, extra="forbid"):
         doc, friday_name = self.Friday.add_day_to_idf(doc, name_prefix)
         doc, saturday_name = self.Saturday.add_day_to_idf(doc, name_prefix)
         doc, sunday_name = self.Sunday.add_day_to_idf(doc, name_prefix)
-        # Holiday follows Sunday; custom days and unset design days follow Monday.
+        holiday_name = sunday_name
+        if self.Holiday is not None:
+            doc, holiday_name = self.Holiday.add_day_to_idf(doc, name_prefix)
+        if self.SummerDesignDay is not None:
+            doc, summer_design_day_sch_name = self.SummerDesignDay.add_day_to_idf(
+                doc, name_prefix
+            )
+        if self.WinterDesignDay is not None:
+            doc, winter_design_day_sch_name = self.WinterDesignDay.add_day_to_idf(
+                doc, name_prefix
+            )
+        # Holiday follows Sunday unless set; the week's own design days win over
+        # the caller's; custom days and unset design days follow Monday.
         add_or_replace(
             doc["Schedule:Week:Daily"].add,
             desired_name,
@@ -273,7 +312,7 @@ class WeekComponent(NamedObject, extra="forbid"):
             thursday_schedule_day_name=thursday_name,
             friday_schedule_day_name=friday_name,
             saturday_schedule_day_name=saturday_name,
-            holiday_schedule_day_name=sunday_name,
+            holiday_schedule_day_name=holiday_name,
             summerdesignday_schedule_day_name=monday_name
             if summer_design_day_sch_name is None
             else summer_design_day_sch_name,
