@@ -208,9 +208,19 @@ class ZoneOperationsComponent(
         )
 
     def add_conditioning_to_idf_zone(
-        self, doc: EPDocument, target_zone_name: str
+        self, doc: EPDocument, target_zone_name: str, operable_fraction: float = 1.0
     ) -> EPDocument:
-        """Add conditioning to an IDF zone."""
+        """Add conditioning to an IDF zone.
+
+        Args:
+            doc (EPDocument): The IDF document.
+            target_zone_name (str): The zone.
+            operable_fraction (float): The fraction of the window area that opens
+                for natural ventilation.
+
+        Returns:
+            doc (EPDocument): The updated IDF document.
+        """
         thermostat = self.add_thermostat_to_idf_zone(doc, target_zone_name)
         if self.HVAC.Ventilation.DCV != "NoDCV":
             # check the design spec outdoor air for the DCV
@@ -242,7 +252,9 @@ class ZoneOperationsComponent(
         )
 
         if self.HVAC.Ventilation.Provider in ("Natural", "Both"):
-            doc = self.add_natural_ventilation_to_idf_zone(doc, target_zone_name)
+            doc = self.add_natural_ventilation_to_idf_zone(
+                doc, target_zone_name, operable_fraction
+            )
         if self.HVAC.Ventilation.IsScheduledVentilationOn:
             doc = self.add_scheduled_ventilation_to_idf_zone(doc, target_zone_name)
 
@@ -347,18 +359,19 @@ class ZoneOperationsComponent(
         return "DetailedSpecification", name
 
     def add_natural_ventilation_to_idf_zone(
-        self, doc: EPDocument, target_zone_name: str
+        self, doc: EPDocument, target_zone_name: str, operable_fraction: float = 1.0
     ) -> EPDocument:
         """Add natural ventilation through the zone's windows.
 
         Used when the ventilation provider is `Natural` or `Both` (natural and
         mechanical). Writes a `ZoneVentilation:WindandStackOpenArea` whose
-        opening area is the zone's glazed area, opened by the ventilation
-        schedule.
+        opening area is the zone's glazed area times `operable_fraction`,
+        opened by the ventilation schedule.
 
         Args:
             doc (EPDocument): The IDF document to add the ventilation to.
             target_zone_name (str): The name of the zone.
+            operable_fraction (float): The fraction of the window area that opens.
 
         Returns:
             doc (EPDocument): The updated IDF document.
@@ -382,6 +395,8 @@ class ZoneOperationsComponent(
         ventilation = self.HVAC.Ventilation
         if not ventilation.IsWindOn and not ventilation.IsBuoyancyOn:
             return doc
+        if operable_fraction == 0:
+            return doc
         height_difference = (
             0.5 * _tallest_window_height(doc, target_zone_name)
             if ventilation.IsBuoyancyOn
@@ -391,7 +406,7 @@ class ZoneOperationsComponent(
             doc["ZoneVentilation:WindandStackOpenArea"].add,
             vent_wind_stack_name,
             zone_or_space_name=target_zone_name,
-            opening_area=float(total_window_area),
+            opening_area=float(total_window_area * operable_fraction),
             opening_area_fraction_schedule_name=vent_wind_stack_name_sch,
             # an opening effectiveness of 0 removes the wind term
             opening_effectiveness="Autocalculate" if ventilation.IsWindOn else 0.0,

@@ -9,6 +9,7 @@ from epinterface.document import (
     add_construction,
     add_or_replace,
 )
+from epinterface.geometry import get_zone_windows
 from epinterface.interface import (
     InfDesignFlowRateCalculationMethodType,
     add_constant_schedule,
@@ -601,6 +602,128 @@ class EnvelopeAssemblyComponent(
         return self
 
 
+ShadingTypeName = Literal["ExteriorShade", "InteriorShade"]
+
+SHADE_THICKNESS = 0.005
+"""Thickness of a window shade [m]."""
+SHADE_CONDUCTIVITY = 0.1
+"""Conductivity of a window shade [W/mK]."""
+SHADE_TO_GLASS_DISTANCE = 0.05
+"""Distance between a window shade and the glass [m]."""
+SHADE_EMISSIVITY = 0.9
+"""Infrared hemispherical emissivity of a window shade."""
+
+
+class WindowSettingsComponent(NamedObject, MetadataMixin, extra="forbid"):
+    """How a zone's windows open and are shaded (UMI's `WindowSettings`)."""
+
+    OperableArea: float = Field(
+        default=1.0,
+        title="Operable fraction of the window area [0-1]",
+        description="Fraction of the window area that opens for natural ventilation.",
+        ge=0,
+        le=1,
+    )
+    IsShadingSystemOn: bool = Field(
+        default=False, title="Windows have a shading system"
+    )
+    ShadingSystemType: ShadingTypeName = Field(
+        default="ExteriorShade", title="Position of the shade"
+    )
+    ShadingSystemSetpoint: float = Field(
+        default=180.0,
+        title="Shading setpoint [W/m2]",
+        description="The shade is drawn when the solar radiation on the window exceeds it.",
+        ge=0,
+    )
+    ShadingSystemTransmittance: float = Field(
+        default=0.5,
+        title="Solar and visible transmittance of the shade [0-1]",
+        ge=0,
+        lt=1,
+    )
+    ShadingSystemAvailabilitySchedule: YearComponent | None = Field(
+        default=None,
+        title="Shading availability schedule",
+        description=(
+            "When the shade may be drawn (Fraction type limits; 0 is never). None: "
+            "always."
+        ),
+    )
+
+    @field_validator("ShadingSystemAvailabilitySchedule", mode="after")
+    @classmethod
+    def check_schedule_type(cls, v: YearComponent | None) -> YearComponent | None:
+        """The availability schedule is on or off."""
+        if v is not None and v.schedule_type_limits != "Fraction":
+            msg = "ShadingSystemAvailabilitySchedule must be a Fraction schedule."
+            raise ValueError(msg)
+        return v
+
+    @property
+    def shade_reflectance(self) -> float:
+        """The shade's solar and visible reflectance: half of what it does not transmit."""
+        return (1 - self.ShadingSystemTransmittance) / 2
+
+    def add_shading_to_idf_zone(self, doc: EPDocument, zone_name: str) -> EPDocument:
+        """Shade the zone's windows when the sun on them is strong.
+
+        Writes a `WindowMaterial:Shade` and a `WindowShadingControl` covering the
+        zone's windows, drawn when the solar radiation incident on a window
+        exceeds `ShadingSystemSetpoint` (and the availability schedule allows).
+        Nothing is written without a shading system or without windows.
+
+        Args:
+            doc (EPDocument): The IDF document, with the zone's windows.
+            zone_name (str): The zone.
+
+        Returns:
+            doc (EPDocument): The updated IDF document.
+        """
+        if not self.IsShadingSystemOn:
+            return doc
+        windows = get_zone_windows(doc, zone_name)
+        if not windows:
+            return doc
+        shade_name = f"{self.safe_name}_SHADE"
+        add_or_replace(
+            doc["WindowMaterial:Shade"].add,
+            shade_name,
+            solar_transmittance=self.ShadingSystemTransmittance,
+            solar_reflectance=self.shade_reflectance,
+            visible_transmittance=self.ShadingSystemTransmittance,
+            visible_reflectance=self.shade_reflectance,
+            infrared_hemispherical_emissivity=SHADE_EMISSIVITY,
+            infrared_transmittance=0.0,
+            thickness=SHADE_THICKNESS,
+            conductivity=SHADE_CONDUCTIVITY,
+            shade_to_glass_distance=SHADE_TO_GLASS_DISTANCE,
+        )
+        schedule_name = None
+        if self.ShadingSystemAvailabilitySchedule is not None:
+            doc, schedule_name = self.ShadingSystemAvailabilitySchedule.add_year_to_idf(
+                doc, name_prefix=None
+            )
+        add_or_replace(
+            doc["WindowShadingControl"].add,
+            f"{zone_name}_{self.safe_name}_SHADING",
+            zone_name=zone_name,
+            shading_control_sequence_number=1,
+            shading_type=self.ShadingSystemType,
+            shading_control_type="OnIfHighSolarOnWindow",
+            schedule_name=schedule_name,
+            setpoint=self.ShadingSystemSetpoint,
+            shading_control_is_scheduled="No" if schedule_name is None else "Yes",
+            glare_control_is_active="No",
+            shading_device_material_name=shade_name,
+            multiple_surface_control_type="Sequential",
+            fenestration_surfaces=[
+                {"fenestration_surface_name": w.name} for w in windows
+            ],
+        )
+        return doc
+
+
 class ZoneEnvelopeComponent(NamedObject, MetadataMixin, extra="forbid"):
     """Zone envelope object."""
 
@@ -609,6 +732,11 @@ class ZoneEnvelopeComponent(NamedObject, MetadataMixin, extra="forbid"):
     AtticInfiltration: InfiltrationComponent
     BasementInfiltration: InfiltrationComponent
     Window: WindowConstruction | None
+    WindowSettings: WindowSettingsComponent | None = Field(
+        default=None,
+        title="Window settings",
+        description="How the windows open and are shaded. None: fully operable, unshaded.",
+    )
 
     # Foundation: Foundation | None
     # OtherSettings: OtherSettings | None

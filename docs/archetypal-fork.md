@@ -27,6 +27,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-9, internal partitions | Partition area per floor area on `EnvelopeAssemblyComponent`, written as internal mass. |
 | UP-9, daylighting | Daylight dimming of the lights, with the illuminance target, workplane height and illuminance map spacing on `LightingComponent`. |
 | UP-9, layered glazing | Windows of glass and gas layers, `GlazingConstructionLayeredComponent`, as an alternative to simple glazing. |
+| UP-9, window settings | Operable window area and window shading, `WindowSettingsComponent` on the zone envelope. |
 
 ## Classes
 
@@ -583,6 +584,50 @@ Each pane becomes a spectral-average `WindowMaterial:Glazing` and each cavity
 a `WindowMaterial:Gas`, named `<material>_<thickness>m` like opaque layers,
 and the window a `Construction` of them, outside first, named after the
 component. EnergyPlus then computes the window's properties layer by layer.
+
+## Window settings (UP-9)
+
+UMI's `WindowSettings` say how windows open and are shaded. SBEM opened the
+whole window area for natural ventilation and had no shading.
+`ZoneEnvelopeComponent.WindowSettings` (`WindowSettingsComponent | None`,
+default `None`: fully operable, unshaded) now holds these settings next to the
+window construction. It is per zone definition rather than per building, as
+the builder applies everything else; a translator gives every group the same
+settings.
+
+### `WindowSettingsComponent` (`epinterface.sbem.components.envelope`)
+
+| Field | Type | Unit | Default | UMI field | Meaning |
+|---|---|---|---|---|---|
+| `Name` | `str` | – | required | `Name` | Name of the settings. |
+| `OperableArea` | `float`, in [0, 1] | – | `1.0` | `OperableArea` | Fraction of the window area that opens for natural ventilation. |
+| `IsShadingSystemOn` | `bool` | – | `False` | `IsShadingSystemOn` | Whether the windows have a shade. |
+| `ShadingSystemType` | `"ExteriorShade" \| "InteriorShade"` | – | `"ExteriorShade"` | `ShadingSystemType` | Position of the shade. |
+| `ShadingSystemSetpoint` | `float`, ≥ 0 | W/m² | `180.0` | `ShadingSystemSetpoint` | The shade is drawn when the solar radiation on the window exceeds it. |
+| `ShadingSystemTransmittance` | `float`, in [0, 1) | – | `0.5` | `ShadingSystemTransmittance` | Solar and visible transmittance of the shade. |
+| `ShadingSystemAvailabilitySchedule` | `YearComponent \| None`, Fraction type limits | – (0 never, else allowed) | `None` | `ShadingSystemAvailabilitySchedule` | When the shade may be drawn. `None`: always. |
+
+It also has the metadata fields (`Category`, `Comment`, `DataSource`,
+`Version`).
+
+### What the builder writes
+
+- **Operable area.** The natural ventilation's opening area is the zone's
+  window area times `OperableArea`; with 0, no natural ventilation object is
+  written.
+- **Shading.** With a shading system, each zone with windows gets a
+  `WindowMaterial:Shade` (`<settings>_SHADE`) and a `WindowShadingControl`
+  (`<zone>_<settings>_SHADING`) listing all the zone's windows, of control
+  type `OnIfHighSolarOnWindow` at the setpoint, scheduled when an
+  availability schedule is set. The shade's reflectance, solar and visible,
+  is half of what it does not transmit (`shade_reflectance`); its emissivity
+  is 0.9, infrared transmittance 0, thickness 5 mm, conductivity 0.1 W/(m·K)
+  and distance to the glass 50 mm (`SHADE_*` constants).
+
+The other fields of UMI's `WindowSettings` are not added: `Type`,
+`IsVirtualPartition` and the zone-mixing fields describe interior windows,
+which a shoebox does not have, and the `Afn*` fields an airflow network,
+which the builder does not model.
 
 ## Example
 
