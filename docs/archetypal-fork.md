@@ -16,6 +16,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-2, infiltration schedule | An hourly schedule on `InfiltrationComponent`. |
 | UP-2, heat recovery | Numeric sensible and latent heat-recovery effectiveness on `VentilationComponent`. |
 | UP-8 | Specific fan power and a fan end use, the ideal loads' supply-air temperature limits, and an energy input ratio linear in outdoor temperature. |
+| UP-9, fractional year sum | `YearComponent.fractional_year_sum` counts the real weekdays of each month (a defect fix). |
 
 ## Classes
 
@@ -317,6 +318,16 @@ The ratio is clipped at 0 so that no hour consumes negative energy.
 `epinterface.analysis.energy_and_peak.standard_results_postprocess` takes the
 matching optional arguments `heat_eir_hourly`, `cool_eir_hourly` (consumed ÷
 delivered, one value per hour) and `fan_hourly` (kWh/m² per hour).
+
+## Fraction of a year schedule (UP-9)
+
+`YearComponent.fractional_year_sum(year)` returns a schedule's mean value over
+every hour of a calendar year; the builder divides each zone's mean hot-water
+flow by it to get the `WaterUse:Equipment` peak flow. It counted each month's
+weekdays as if every month began on a Tuesday, which skewed the peak flow of
+any schedule whose weekdays differ. It now counts the weekdays of the given
+year's real calendar, so the result equals the hour-by-hour mean of the
+schedule. The builder still evaluates the schedule over 2018.
 
 ## Example
 

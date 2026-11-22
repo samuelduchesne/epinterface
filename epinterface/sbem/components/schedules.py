@@ -645,10 +645,13 @@ class YearComponent(NamedObject, extra="forbid"):
                 "November": 11,
                 "December": 12,
             }
-            _weekday, num_days = calendar.monthrange(year, month_map[month])
+            first_weekday, num_days = calendar.monthrange(year, month_map[month])
 
-            # get the number of days of the week in the month
-            days_of_week = [calendar.day_name[(day + 1) % 7] for day in range(num_days)]
+            # get the number of days of the week in the month, starting from the
+            # weekday of the month's first day (calendar counts Monday as 0)
+            days_of_week = [
+                calendar.day_name[(first_weekday + day) % 7] for day in range(num_days)
+            ]
             return days_of_week.count(day_of_week)
 
         # get the number of Mondays in each month
