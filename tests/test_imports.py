@@ -11,6 +11,7 @@ import pytest
 BLOCKED = ("archetypal", "eppy", "geomeppy", "prisma")
 
 MODULES = (
+    "epinterface.sbem.archetype",
     "epinterface.sbem.components",
     "epinterface.sbem.components.zones",
     "epinterface.sbem.components.composer",

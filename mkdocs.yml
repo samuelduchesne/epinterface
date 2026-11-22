@@ -9,6 +9,7 @@ copyright: Maintained by <a href="https://github.com/szvsw">Sam Wolk</a>.
 
 nav:
   - Home: index.md
+  - Multi-group archetypes: archetypal-fork.md
   - Reference:
       - Modules:
           - SBEM:

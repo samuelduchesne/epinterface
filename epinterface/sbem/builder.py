@@ -49,6 +49,11 @@ from epinterface.interface import (
     add_zone_list,
 )
 from epinterface.results import timeseries_frame
+from epinterface.sbem.archetype import (
+    Archetype,
+    AtticAssumptions,
+    BasementAssumptions,
+)
 from epinterface.sbem.components.composer import (
     construct_composer_model,
     construct_graph,
@@ -595,20 +600,6 @@ class AddedZoneLists:
     main_zone_list: list[str]
 
 
-class AtticAssumptions(BaseModel):
-    """The conditions of the attic."""
-
-    UseFraction: float | None = Field(..., ge=0, le=1)
-    Conditioned: bool
-
-
-class BasementAssumptions(BaseModel):
-    """The conditions of the basement."""
-
-    UseFraction: float | None = Field(..., ge=0, le=1)
-    Conditioned: bool
-
-
 class Model(BaseWeather, validate_assignment=True):
     """A simple model constructor for the IDF model.
 
@@ -620,6 +611,15 @@ class Model(BaseWeather, validate_assignment=True):
     Basement: BasementAssumptions
     # TODO: should we have another field for whether or not the attic is ventilated, i.e. high infiltration?
     Zone: ZoneComponent
+    CoreZone: ZoneComponent | None = Field(
+        default=None,
+        description=(
+            "Zone definition of the core zones of a core/perimeter shoebox. "
+            "None: `Zone` is used for every zone. The envelope assemblies, "
+            "window, ground temperatures and the attic and basement zones "
+            "always follow `Zone`."
+        ),
+    )
 
     @field_validator("geometry", mode="after")
     @classmethod
@@ -637,6 +637,105 @@ class Model(BaseWeather, validate_assignment=True):
             msg = f"Roof Gable height must be less than two and a half times the f2f height (roof_height, f2f_height) = ({v.roof_height}, {v.h})."
             raise ValueError(msg)
         return v
+
+    @model_validator(mode="after")
+    def core_zone_check(self):
+        """A core zone definition needs core zones, i.e. core/perimeter zoning.
+
+        Raises:
+            ValueError
+        """
+        if self.CoreZone is not None and self.geometry.zoning != "core/perim":
+            msg = (
+                "A CoreZone needs a core/perimeter geometry; got zoning "
+                f"{self.geometry.zoning!r}."
+            )
+            raise ValueError(msg)
+        return self
+
+    @classmethod
+    def from_archetype(
+        cls, archetype: Archetype, geometry: ShoeboxGeometry, **kwargs
+    ) -> "Model":
+        """Build a shoebox model of an archetype.
+
+        The archetype's groups are placed on the shoebox's zones:
+
+        - one group: its zone definition is used for every zone;
+        - two groups with exposures `perimeter` and `core`: the perimeter group's
+          zone definition is `Zone`, the core group's is `CoreZone`. The geometry
+          must be core/perimeter. Its perimeter depth is replaced by the depth
+          that gives the perimeter group's floor-area share on the footprint.
+
+        Any other set of groups cannot be placed on a shoebox and raises
+        `ValueError`. The envelope assemblies and window come from the perimeter
+        group, which holds the facade. The archetype's attic and basement
+        assumptions are used as they are; its geometry characteristics are
+        descriptive and do not change `geometry`.
+
+        Args:
+            archetype: The archetype to model.
+            geometry: The shoebox to apply it to.
+            **kwargs: Other `Model` fields, such as `Weather`.
+
+        Returns:
+            model: The model.
+
+        Raises:
+            ValueError: If the groups cannot be placed on the shoebox.
+        """
+        groups = archetype.Groups
+        if len(groups) == 1:
+            return cls(
+                geometry=geometry,
+                Zone=groups[0].Zone,
+                Attic=archetype.Attic,
+                Basement=archetype.Basement,
+                **kwargs,
+            )
+        by_exposure = {g.Exposure: g for g in groups}
+        if len(groups) != 2 or set(by_exposure) != {"core", "perimeter"}:
+            msg = (
+                "A shoebox can place one zone group, or a 'perimeter' and a 'core' "
+                "group; got "
+                f"{[(g.Name, g.Exposure) for g in groups]}. Merge the groups first."
+            )
+            raise ValueError(msg)
+        if geometry.zoning != "core/perim":
+            msg = (
+                "Core and perimeter groups need a core/perimeter geometry; got "
+                f"zoning {geometry.zoning!r}."
+            )
+            raise ValueError(msg)
+        perimeter, core = by_exposure["perimeter"], by_exposure["core"]
+        geometry = geometry.model_copy(
+            update={
+                "perim_depth": perimeter_depth_for_share(
+                    geometry.w, geometry.d, perimeter.FloorAreaShare
+                )
+            }
+        )
+        return cls(
+            geometry=geometry,
+            Zone=perimeter.Zone,
+            CoreZone=core.Zone if core.Zone != perimeter.Zone else None,
+            Attic=archetype.Attic,
+            Basement=archetype.Basement,
+            **kwargs,
+        )
+
+    def zone_definition(self, zone_name: str) -> ZoneComponent:
+        """The zone definition used for one of the shoebox's main zones.
+
+        Args:
+            zone_name: The EnergyPlus zone name.
+
+        Returns:
+            zone: `CoreZone` for a core zone when it is set, else `Zone`.
+        """
+        if self.CoreZone is not None and "core_zone" in zone_name.lower():
+            return self.CoreZone
+        return self.Zone
 
     @property
     def total_conditioned_area(self) -> float:
@@ -908,7 +1007,7 @@ class Model(BaseWeather, validate_assignment=True):
 
         # Handle main zones
         for zone in added_zone_lists.main_zone_list:
-            self.Zone.add_to_idf_zone(doc, zone)
+            self.zone_definition(zone).add_to_idf_zone(doc, zone)
 
         # Handle setting ground temperature
         subtractor = (
@@ -1225,6 +1324,31 @@ class Model(BaseWeather, validate_assignment=True):
             zone_names.append(zone.name)
         zone_weights: NDArray[np.float64] = np.array(zone_weights_)
         return zone_weights, zone_names
+
+
+def perimeter_depth_for_share(w: float, d: float, share: float) -> float:
+    """The perimeter depth that gives a perimeter floor-area share on a footprint.
+
+    A `w` by `d` footprint with perimeter depth `p` has a perimeter area of
+    `w*d - (w - 2p)(d - 2p)`. This solves that area equal to `share * w * d` for
+    the root with `0 < p < min(w, d) / 2`.
+
+    Args:
+        w: Footprint width [m].
+        d: Footprint depth [m].
+        share: Perimeter share of the floor area, in (0, 1).
+
+    Returns:
+        perim_depth: The perimeter depth [m].
+
+    Raises:
+        ValueError: If the share is not strictly between 0 and 1.
+    """
+    if not 0 < share < 1:
+        msg = f"A perimeter share must be strictly between 0 and 1 to leave a core; got {share!r}."
+        raise ValueError(msg)
+    s = w + d
+    return (s - float(np.sqrt(s * s - 4 * share * w * d))) / 4
 
 
 def construct_zone_def(

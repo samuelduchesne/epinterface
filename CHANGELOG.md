@@ -61,6 +61,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `epinterface.sbem.archetype`: an `Archetype` made of several `ZoneGroup`s,
+  each a `ZoneComponent` with its floor-area share and exposure, plus
+  building-level `BuildingGeometry` characteristics (storeys, window-to-wall
+  ratio and facade area by orientation, roof, exposed-floor and ground-contact
+  areas) and attic and basement assumptions. `Archetype.save` and
+  `Archetype.load` write and read it as JSON with a `SchemaVersion`. See
+  `docs/archetypal-fork.md`.
+- `Model.from_archetype` places a one-group or core-and-perimeter archetype on
+  a shoebox; `Model.CoreZone` gives the core zones their own zone definition.
+  `AtticAssumptions` and `BasementAssumptions` now live in
+  `epinterface.sbem.archetype` and are still importable from the builder.
 - PyYAML, which `epinterface.sbem.builder` and `epinterface.sbem.utils`
   import, is now a declared dependency.
 - `epinterface.sbem.components` and `epinterface.sbem.builder` import without
