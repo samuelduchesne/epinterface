@@ -1,17 +1,17 @@
 """Envelope components for the SBEM library."""
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from archetypal.idfclass import IDF
-from archetypal.schedule import Schedule
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from epinterface.document import (
+    EPDocument,
+    add_construction,
+    add_or_replace,
+)
 from epinterface.interface import (
-    Construction,
     InfDesignFlowRateCalculationMethodType,
-    Material,
-    SimpleGlazingMaterial,
-    ZoneInfiltrationDesignFlowRate,
+    add_constant_schedule,
 )
 from epinterface.sbem.common import BoolStr, MetadataMixin, NamedObject, NanStr
 from epinterface.sbem.components.materials import (
@@ -19,6 +19,10 @@ from epinterface.sbem.components.materials import (
     ConstructionMaterialComponent,
     StandardMaterialMetadataMixin,
 )
+
+if TYPE_CHECKING:
+    # The object classes exist only in idfkit's stubs.
+    from idfkit.document import AnyMaterial
 
 WindowType = Literal["Single", "Double", "Triple"]
 
@@ -40,29 +44,24 @@ class GlazingConstructionSimpleComponent(
     TVis: float = Field(..., title="Visible transmittance", ge=0, le=1)
     Type: WindowType = Field(..., title="Type of the glazing construction")
 
-    def add_to_idf(self, idf: IDF) -> IDF:
-        """Adds the glazing construction to an IDF object.
+    def add_to_idf(self, doc: EPDocument) -> EPDocument:
+        """Adds the glazing construction to an IDF document.
 
         Args:
-            idf (IDF): The IDF object to add the construction to.
+            doc (EPDocument): The IDF document to add the construction to.
 
         Returns:
-            IDF: The updated IDF object.
+            EPDocument: The updated IDF document.
         """
-        glazing_mat = SimpleGlazingMaterial(
-            Name=self.Name,
-            UFactor=self.UValue,
-            Solar_Heat_Gain_Coefficient=self.SHGF,
-            Visible_Transmittance=self.TVis,
+        add_or_replace(
+            doc["WindowMaterial:SimpleGlazingSystem"].add,
+            self.Name,
+            u_factor=self.UValue,
+            solar_heat_gain_coefficient=self.SHGF,
+            visible_transmittance=self.TVis,
         )
-
-        construction = Construction(
-            name=self.Name,
-            layers=[glazing_mat],
-        )
-
-        idf = construction.add(idf)
-        return idf
+        add_construction(doc, self.Name, [self.Name])
+        return doc
 
 
 class InfiltrationComponent(
@@ -112,19 +111,19 @@ class InfiltrationComponent(
     )
 
     def add_infiltration_to_idf_zone(
-        self, idf: IDF, target_zone_or_zone_list_name: str
+        self, doc: EPDocument, target_zone_or_zone_list_name: str
     ):
         """Add infiltration to an IDF zone.
 
         Args:
-            idf (IDF): The IDF object to add the infiltration to.
+            doc (EPDocument): The IDF document to add the infiltration to.
             target_zone_or_zone_list_name (str): The name of the zone or zone list to add the infiltration to.
 
         Returns:
-            idf (IDF): The updated IDF object.
+            doc (EPDocument): The updated IDF document.
         """
         if not self.IsOn:
-            return idf
+            return doc
 
         infiltration_schedule_name = (
             f"{target_zone_or_zone_list_name}_{self.safe_name}_INFILTRATION_Schedule"
@@ -132,27 +131,26 @@ class InfiltrationComponent(
         infiltration_name = (
             f"{target_zone_or_zone_list_name}_{self.safe_name}_INFILTRATION"
         )
-        schedule = Schedule.constant_schedule(
-            value=1, Name=infiltration_schedule_name, Type="Fraction"
+        inf_schedule = add_constant_schedule(
+            doc, infiltration_schedule_name, 1, "Fraction"
         )
-        inf_schedule, *_ = schedule.to_year_week_day()
-        inf_schedule.to_epbunch(idf)
-        inf = ZoneInfiltrationDesignFlowRate(
-            Name=infiltration_name,
-            Zone_or_ZoneList_Name=target_zone_or_zone_list_name,
-            Schedule_Name=inf_schedule.Name,
-            Design_Flow_Rate_Calculation_Method=self.CalculationMethod,
-            Flow_Rate_per_Exterior_Surface_Area=self.FlowPerExteriorSurfaceArea,
-            Air_Changes_per_Hour=self.AirChangesPerHour,
-            Flow_Rate_per_Floor_Area=None,
-            Design_Flow_Rate=None,
-            # Constant_Term_Coefficient=self.ConstantCoefficient,
-            # Temperature_Term_Coefficient=self.TemperatureCoefficient,
-            # Velocity_Term_Coefficient=self.WindVelocityCoefficient,
-            # Velocity_Squared_Term_Coefficient=self.WindVelocitySquaredCoefficient,
+        # The coefficients are 1/0/0/0 rather than this component's own: the
+        # infiltration values are taken as actual rates, and no assumption is
+        # made about the wind velocity.
+        add_or_replace(
+            doc["ZoneInfiltration:DesignFlowRate"].add,
+            infiltration_name,
+            zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
+            schedule_name=inf_schedule.name,
+            design_flow_rate_calculation_method=self.CalculationMethod,
+            flow_rate_per_exterior_surface_area=self.FlowPerExteriorSurfaceArea,
+            air_changes_per_hour=self.AirChangesPerHour,
+            constant_term_coefficient=1.0,
+            temperature_term_coefficient=0.0,
+            velocity_term_coefficient=0.0,
+            velocity_squared_term_coefficient=0.0,
         )
-        idf = inf.add(idf)
-        return idf
+        return doc
 
 
 class ConstructionLayerComponent(BaseModel, extra="forbid"):
@@ -177,19 +175,30 @@ class ConstructionLayerComponent(BaseModel, extra="forbid"):
         # return f"{self.LayerOrder}_{self.ConstructionMaterial.Name}_{self.Thickness}m"
         return f"{self.ConstructionMaterial.Name}_{self.Thickness}m"
 
-    @property
-    def ep_material(self):
-        """Return the EP material for the layer."""
-        return Material(
-            Name=self.name,
-            Thickness=self.Thickness,
-            Conductivity=self.ConstructionMaterial.Conductivity,
-            Density=self.ConstructionMaterial.Density,
-            Specific_Heat=self.ConstructionMaterial.SpecificHeat,
-            Thermal_Absorptance=self.ConstructionMaterial.ThermalAbsorptance,
-            Solar_Absorptance=self.ConstructionMaterial.SolarAbsorptance,
-            Roughness=self.ConstructionMaterial.Roughness,
-            Visible_Absorptance=self.ConstructionMaterial.VisibleAbsorptance,
+    def add_to_idf(self, doc: EPDocument) -> "AnyMaterial":
+        """Write the layer as a `Material` object named `self.name`.
+
+        An identical material already in the document (e.g. the same layer of
+        another construction) is reused.
+
+        Args:
+            doc (EPDocument): The IDF document to write to.
+
+        Returns:
+            AnyMaterial: The `Material` object.
+        """
+        material = self.ConstructionMaterial
+        return add_or_replace(
+            doc["Material"].add,
+            self.name,
+            roughness=material.Roughness,
+            thickness=self.Thickness,
+            conductivity=material.Conductivity,
+            density=material.Density,
+            specific_heat=material.SpecificHeat,
+            thermal_absorptance=material.ThermalAbsorptance,
+            solar_absorptance=material.SolarAbsorptance,
+            visible_absorptance=material.VisibleAbsorptance,
         )
 
     @property
@@ -237,25 +246,21 @@ class ConstructionAssemblyComponent(
             raise ValueError(msg)
         return v
 
-    def add_to_idf(self, idf: IDF) -> IDF:
-        """Adds an opaque construction to an IDF object.
+    def add_to_idf(self, doc: EPDocument) -> EPDocument:
+        """Adds an opaque construction to an IDF document.
 
         Note that this will add the individual materials as well.
 
         Args:
-            idf (IDF): The IDF object to add the construction to.
+            doc (EPDocument): The IDF document to add the construction to.
 
         Returns:
-            idf (IDF): The updated IDF object.
+            doc (EPDocument): The updated IDF document.
         """
-        layers = [layer.ep_material for layer in self.Layers]
-
-        construction = Construction(
-            name=self.Name,
-            layers=layers,
-        )
-        idf = construction.add(idf)
-        return idf
+        for layer in self.Layers:
+            layer.add_to_idf(doc)
+        add_construction(doc, self.Name, [layer.name for layer in self.Layers])
+        return doc
 
     @property
     def sorted_layers(self):

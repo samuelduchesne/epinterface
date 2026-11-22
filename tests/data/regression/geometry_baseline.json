@@ -1,0 +1,187 @@
+{
+ "zone_names": {
+  "by_storey-False-None-1": [
+   "Block shoebox Storey 0"
+  ],
+  "by_storey-False-None-3": [
+   "Block shoebox Storey 0",
+   "Block shoebox Storey 1",
+   "Block shoebox Storey 2"
+  ],
+  "by_storey-False-2.5-1": [
+   "Block shoebox Storey 0",
+   "Attic"
+  ],
+  "by_storey-False-2.5-3": [
+   "Block shoebox Storey 0",
+   "Block shoebox Storey 1",
+   "Block shoebox Storey 2",
+   "Attic"
+  ],
+  "by_storey-True-None-1": [
+   "Block shoebox Storey -1",
+   "Block shoebox Storey 0"
+  ],
+  "by_storey-True-None-3": [
+   "Block shoebox Storey -1",
+   "Block shoebox Storey 0",
+   "Block shoebox Storey 1",
+   "Block shoebox Storey 2"
+  ],
+  "by_storey-True-2.5-1": [
+   "Block shoebox Storey -1",
+   "Block shoebox Storey 0",
+   "Attic"
+  ],
+  "by_storey-True-2.5-3": [
+   "Block shoebox Storey -1",
+   "Block shoebox Storey 0",
+   "Block shoebox Storey 1",
+   "Block shoebox Storey 2",
+   "Attic"
+  ],
+  "core/perim-False-None-1": [
+   "Block Perimeter_Zone_1 Storey 0",
+   "Block Perimeter_Zone_2 Storey 0",
+   "Block Perimeter_Zone_3 Storey 0",
+   "Block Perimeter_Zone_4 Storey 0",
+   "Block Core_Zone Storey 0"
+  ],
+  "core/perim-False-None-3": [
+   "Block Perimeter_Zone_1 Storey 0",
+   "Block Perimeter_Zone_1 Storey 1",
+   "Block Perimeter_Zone_1 Storey 2",
+   "Block Perimeter_Zone_2 Storey 0",
+   "Block Perimeter_Zone_2 Storey 1",
+   "Block Perimeter_Zone_2 Storey 2",
+   "Block Perimeter_Zone_3 Storey 0",
+   "Block Perimeter_Zone_3 Storey 1",
+   "Block Perimeter_Zone_3 Storey 2",
+   "Block Perimeter_Zone_4 Storey 0",
+   "Block Perimeter_Zone_4 Storey 1",
+   "Block Perimeter_Zone_4 Storey 2",
+   "Block Core_Zone Storey 0",
+   "Block Core_Zone Storey 1",
+   "Block Core_Zone Storey 2"
+  ],
+  "core/perim-False-2.5-1": [
+   "Block Perimeter_Zone_1 Storey 0",
+   "Block Perimeter_Zone_2 Storey 0",
+   "Block Perimeter_Zone_3 Storey 0",
+   "Block Perimeter_Zone_4 Storey 0",
+   "Block Core_Zone Storey 0",
+   "Attic"
+  ],
+  "core/perim-False-2.5-3": [
+   "Block Perimeter_Zone_1 Storey 0",
+   "Block Perimeter_Zone_1 Storey 1",
+   "Block Perimeter_Zone_1 Storey 2",
+   "Block Perimeter_Zone_2 Storey 0",
+   "Block Perimeter_Zone_2 Storey 1",
+   "Block Perimeter_Zone_2 Storey 2",
+   "Block Perimeter_Zone_3 Storey 0",
+   "Block Perimeter_Zone_3 Storey 1",
+   "Block Perimeter_Zone_3 Storey 2",
+   "Block Perimeter_Zone_4 Storey 0",
+   "Block Perimeter_Zone_4 Storey 1",
+   "Block Perimeter_Zone_4 Storey 2",
+   "Block Core_Zone Storey 0",
+   "Block Core_Zone Storey 1",
+   "Block Core_Zone Storey 2",
+   "Attic"
+  ],
+  "core/perim-True-None-1": [
+   "Block Perimeter_Zone_1 Storey 0",
+   "Block Perimeter_Zone_1 Storey 1",
+   "Block Perimeter_Zone_2 Storey 0",
+   "Block Perimeter_Zone_2 Storey 1",
+   "Block Perimeter_Zone_3 Storey 0",
+   "Block Perimeter_Zone_3 Storey 1",
+   "Block Perimeter_Zone_4 Storey 0",
+   "Block Perimeter_Zone_4 Storey 1",
+   "Block Core_Zone Storey 0",
+   "Block Core_Zone Storey 1"
+  ],
+  "core/perim-True-None-3": [
+   "Block Perimeter_Zone_1 Storey 0",
+   "Block Perimeter_Zone_1 Storey 1",
+   "Block Perimeter_Zone_1 Storey 2",
+   "Block Perimeter_Zone_1 Storey 3",
+   "Block Perimeter_Zone_2 Storey 0",
+   "Block Perimeter_Zone_2 Storey 1",
+   "Block Perimeter_Zone_2 Storey 2",
+   "Block Perimeter_Zone_2 Storey 3",
+   "Block Perimeter_Zone_3 Storey 0",
+   "Block Perimeter_Zone_3 Storey 1",
+   "Block Perimeter_Zone_3 Storey 2",
+   "Block Perimeter_Zone_3 Storey 3",
+   "Block Perimeter_Zone_4 Storey 0",
+   "Block Perimeter_Zone_4 Storey 1",
+   "Block Perimeter_Zone_4 Storey 2",
+   "Block Perimeter_Zone_4 Storey 3",
+   "Block Core_Zone Storey 0",
+   "Block Core_Zone Storey 1",
+   "Block Core_Zone Storey 2",
+   "Block Core_Zone Storey 3"
+  ],
+  "core/perim-True-2.5-1": [
+   "Block Perimeter_Zone_1 Storey 0",
+   "Block Perimeter_Zone_1 Storey 1",
+   "Block Perimeter_Zone_2 Storey 0",
+   "Block Perimeter_Zone_2 Storey 1",
+   "Block Perimeter_Zone_3 Storey 0",
+   "Block Perimeter_Zone_3 Storey 1",
+   "Block Perimeter_Zone_4 Storey 0",
+   "Block Perimeter_Zone_4 Storey 1",
+   "Block Core_Zone Storey 0",
+   "Block Core_Zone Storey 1",
+   "Attic"
+  ],
+  "core/perim-True-2.5-3": [
+   "Block Perimeter_Zone_1 Storey 0",
+   "Block Perimeter_Zone_1 Storey 1",
+   "Block Perimeter_Zone_1 Storey 2",
+   "Block Perimeter_Zone_1 Storey 3",
+   "Block Perimeter_Zone_2 Storey 0",
+   "Block Perimeter_Zone_2 Storey 1",
+   "Block Perimeter_Zone_2 Storey 2",
+   "Block Perimeter_Zone_2 Storey 3",
+   "Block Perimeter_Zone_3 Storey 0",
+   "Block Perimeter_Zone_3 Storey 1",
+   "Block Perimeter_Zone_3 Storey 2",
+   "Block Perimeter_Zone_3 Storey 3",
+   "Block Perimeter_Zone_4 Storey 0",
+   "Block Perimeter_Zone_4 Storey 1",
+   "Block Perimeter_Zone_4 Storey 2",
+   "Block Perimeter_Zone_4 Storey 3",
+   "Block Core_Zone Storey 0",
+   "Block Core_Zone Storey 1",
+   "Block Core_Zone Storey 2",
+   "Block Core_Zone Storey 3",
+   "Attic"
+  ],
+  "by_storey_neighbors": [
+   "Block shoebox Storey 0",
+   "Block shoebox Storey 1"
+  ]
+ },
+ "shading_counts": {
+  "by_storey-False-None-1": 0,
+  "by_storey-False-None-3": 0,
+  "by_storey-False-2.5-1": 0,
+  "by_storey-False-2.5-3": 0,
+  "by_storey-True-None-1": 0,
+  "by_storey-True-None-3": 0,
+  "by_storey-True-2.5-1": 0,
+  "by_storey-True-2.5-3": 0,
+  "core/perim-False-None-1": 0,
+  "core/perim-False-None-3": 0,
+  "core/perim-False-2.5-1": 0,
+  "core/perim-False-2.5-3": 0,
+  "core/perim-True-None-1": 0,
+  "core/perim-True-None-3": 0,
+  "core/perim-True-2.5-1": 0,
+  "core/perim-True-2.5-3": 0,
+  "by_storey_neighbors": 28
+ }
+}

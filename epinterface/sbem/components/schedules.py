@@ -1,42 +1,69 @@
 """This module contains the definitions for the schedules."""
 
 import calendar
-from typing import Literal
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal
 
-from archetypal.idfclass.idf import IDF
 from pydantic import Field, field_validator, model_validator
 
-from epinterface.interface import (
-    PROTECTED_SCHEDULE_NAMES,
-    ScheduleDayHourly,
-    ScheduleTypeLimits,
-    ScheduleWeekDaily,
-    ScheduleYear,
-)
+from epinterface.document import EPDocument, add_or_replace
+from epinterface.interface import PROTECTED_SCHEDULE_NAMES
 from epinterface.sbem.common import NamedObject
+from epinterface.schedules import NON_LEAP_MONTH_LENGTHS, add_day_hourly_schedule
+
+if TYPE_CHECKING:
+    # The object classes exist only in idfkit's stubs.
+    from idfkit.document import AnyScheduleTypeLimits
 
 # TODO: handle schedule type limits in a consistent way once?
 ScheduleTypeLimitType = Literal["Fraction", "Temperature", "AnyNumber"]
 
-TypeLimits: dict[ScheduleTypeLimitType, ScheduleTypeLimits] = {
-    "Fraction": ScheduleTypeLimits(
+
+@dataclass(frozen=True)
+class TypeLimitsSpec:
+    """The bounds of a schedule type, and how to write its `ScheduleTypeLimits`.
+
+    The attribute names are the ones `TypeLimits` entries have always had
+    (GLOBi reads `Lower_Limit_Value` / `Upper_Limit_Value`).
+    """
+
+    Name: str
+    Lower_Limit_Value: float | None = None
+    Upper_Limit_Value: float | None = None
+    Numeric_Type: Literal["Continuous", "Discrete"] | None = None
+    Unit_Type: Literal["Dimensionless", "Temperature"] | None = None
+
+    def add_to_idf(self, doc: EPDocument) -> "AnyScheduleTypeLimits":
+        """Write the `ScheduleTypeLimits` object (an identical one is reused)."""
+        return add_or_replace(
+            doc["ScheduleTypeLimits"].add,
+            self.Name,
+            lower_limit_value=self.Lower_Limit_Value,
+            upper_limit_value=self.Upper_Limit_Value,
+            numeric_type=self.Numeric_Type,
+            unit_type=self.Unit_Type,
+        )
+
+
+TypeLimits: dict[ScheduleTypeLimitType, TypeLimitsSpec] = {
+    "Fraction": TypeLimitsSpec(
         Name="Fraction",
         Unit_Type="Dimensionless",
-        Lower_Limit_Value=0,
-        Upper_Limit_Value=1,
+        Lower_Limit_Value=0.0,
+        Upper_Limit_Value=1.0,
         Numeric_Type="Continuous",
     ),
-    "Temperature": ScheduleTypeLimits(
+    "Temperature": TypeLimitsSpec(
         Name="Temperature",
         Unit_Type="Temperature",
-        Lower_Limit_Value=-270,
-        Upper_Limit_Value=1000,
+        Lower_Limit_Value=-270.0,
+        Upper_Limit_Value=1000.0,
         Numeric_Type="Continuous",
     ),
-    "AnyNumber": ScheduleTypeLimits(
+    "AnyNumber": TypeLimitsSpec(
         Name="AnyNumber",
-        Lower_Limit_Value=-1000,
-        Upper_Limit_Value=1000,
+        Lower_Limit_Value=-1000.0,
+        Upper_Limit_Value=1000.0,
         Numeric_Type="Continuous",
     ),
 }
@@ -128,56 +155,30 @@ class DayComponent(NamedObject, extra="forbid"):
             raise ValueError(msg)
         return self
 
-    def add_day_to_idf(self, idf: IDF, name_prefix: str | None) -> tuple[IDF, str]:
-        """Add the day to the IDF.
+    def add_day_to_idf(
+        self, doc: EPDocument, name_prefix: str | None
+    ) -> tuple[EPDocument, str]:
+        """Add the day to the IDF document.
 
         The name prefix can be used to scope the schedule creation to ensure a unique schedule per object.
 
         Args:
-            idf (IDF): The IDF object to add the day to.
+            doc (EPDocument): The IDF document to add the day to.
             name_prefix (str | None): The prefix to use for the schedule name.
 
         Returns:
-            idf (IDF): The IDF object with the day added.
+            doc (EPDocument): The IDF document with the day added.
             day_name (str): The name of the day schedule.
         """
         desired_name = self.Name
         if name_prefix is not None:
             desired_name = f"{name_prefix}_DAY_{desired_name}"
 
-        if idf.getobject("SCHEDULE:DAY:HOURLY", desired_name):
-            return idf, desired_name
+        if desired_name in doc["Schedule:Day:Hourly"]:
+            return doc, desired_name
 
-        day_sched = ScheduleDayHourly(
-            Name=desired_name,
-            Schedule_Type_Limits_Name=self.Type,
-            Hour_1=self.Hour_00,
-            Hour_2=self.Hour_01,
-            Hour_3=self.Hour_02,
-            Hour_4=self.Hour_03,
-            Hour_5=self.Hour_04,
-            Hour_6=self.Hour_05,
-            Hour_7=self.Hour_06,
-            Hour_8=self.Hour_07,
-            Hour_9=self.Hour_08,
-            Hour_10=self.Hour_09,
-            Hour_11=self.Hour_10,
-            Hour_12=self.Hour_11,
-            Hour_13=self.Hour_12,
-            Hour_14=self.Hour_13,
-            Hour_15=self.Hour_14,
-            Hour_16=self.Hour_15,
-            Hour_17=self.Hour_16,
-            Hour_18=self.Hour_17,
-            Hour_19=self.Hour_18,
-            Hour_20=self.Hour_19,
-            Hour_21=self.Hour_20,
-            Hour_22=self.Hour_21,
-            Hour_23=self.Hour_22,
-            Hour_24=self.Hour_23,
-        )
-        idf = day_sched.add(idf)
-        return idf, day_sched.Name
+        add_day_hourly_schedule(doc, desired_name, self.Type, self.Values)
+        return doc, desired_name
 
 
 class WeekComponent(NamedObject, extra="forbid"):
@@ -228,53 +229,61 @@ class WeekComponent(NamedObject, extra="forbid"):
 
     def add_week_to_idf(
         self,
-        idf: IDF,
+        doc: EPDocument,
         name_prefix: str | None,
         summer_design_day_sch_name: str | None = None,
         winter_design_day_sch_name: str | None = None,
-    ) -> tuple[IDF, str]:
-        """Add the week to the IDF.
+    ) -> tuple[EPDocument, str]:
+        """Add the week to the IDF document.
 
         The name prefix can be used to scope the schedule creation to ensure a unique schedule per object.
 
         Args:
-            idf (IDF): The IDF object to add the week to.
+            doc (EPDocument): The IDF document to add the week to.
             name_prefix (str | None): The prefix to use for the schedule name.
             summer_design_day_sch_name (str | None): The name of the summer design day schedule.
             winter_design_day_sch_name (str | None): The name of the winter design day schedule.
 
         Returns:
-            idf (IDF): The IDF object with the week added.
+            doc (EPDocument): The IDF document with the week added.
             week_name (str): The name of the week schedule.
         """
         desired_name = self.Name
         if name_prefix is not None:
             desired_name = f"{name_prefix}_WEEK_{desired_name}"
 
-        if idf.getobject("SCHEDULE:WEEK:DAILY", desired_name):
-            return idf, desired_name
+        if desired_name in doc["Schedule:Week:Daily"]:
+            return doc, desired_name
 
-        idf, monday_name = self.Monday.add_day_to_idf(idf, name_prefix)
-        idf, tuesday_name = self.Tuesday.add_day_to_idf(idf, name_prefix)
-        idf, wednesday_name = self.Wednesday.add_day_to_idf(idf, name_prefix)
-        idf, thursday_name = self.Thursday.add_day_to_idf(idf, name_prefix)
-        idf, friday_name = self.Friday.add_day_to_idf(idf, name_prefix)
-        idf, saturday_name = self.Saturday.add_day_to_idf(idf, name_prefix)
-        idf, sunday_name = self.Sunday.add_day_to_idf(idf, name_prefix)
-        week_sched = ScheduleWeekDaily(
-            Name=desired_name,
-            Monday_ScheduleDay_Name=monday_name,
-            Tuesday_ScheduleDay_Name=tuesday_name,
-            Wednesday_ScheduleDay_Name=wednesday_name,
-            Thursday_ScheduleDay_Name=thursday_name,
-            Friday_ScheduleDay_Name=friday_name,
-            Saturday_ScheduleDay_Name=saturday_name,
-            Sunday_ScheduleDay_Name=sunday_name,
-            SummerDesignDay_ScheduleDay_Name=summer_design_day_sch_name,
-            WinterDesignDay_ScheduleDay_Name=winter_design_day_sch_name,
+        doc, monday_name = self.Monday.add_day_to_idf(doc, name_prefix)
+        doc, tuesday_name = self.Tuesday.add_day_to_idf(doc, name_prefix)
+        doc, wednesday_name = self.Wednesday.add_day_to_idf(doc, name_prefix)
+        doc, thursday_name = self.Thursday.add_day_to_idf(doc, name_prefix)
+        doc, friday_name = self.Friday.add_day_to_idf(doc, name_prefix)
+        doc, saturday_name = self.Saturday.add_day_to_idf(doc, name_prefix)
+        doc, sunday_name = self.Sunday.add_day_to_idf(doc, name_prefix)
+        # Holiday follows Sunday; custom days and unset design days follow Monday.
+        add_or_replace(
+            doc["Schedule:Week:Daily"].add,
+            desired_name,
+            sunday_schedule_day_name=sunday_name,
+            monday_schedule_day_name=monday_name,
+            tuesday_schedule_day_name=tuesday_name,
+            wednesday_schedule_day_name=wednesday_name,
+            thursday_schedule_day_name=thursday_name,
+            friday_schedule_day_name=friday_name,
+            saturday_schedule_day_name=saturday_name,
+            holiday_schedule_day_name=sunday_name,
+            summerdesignday_schedule_day_name=monday_name
+            if summer_design_day_sch_name is None
+            else summer_design_day_sch_name,
+            winterdesignday_schedule_day_name=monday_name
+            if winter_design_day_sch_name is None
+            else winter_design_day_sch_name,
+            customday1_schedule_day_name=monday_name,
+            customday2_schedule_day_name=monday_name,
         )
-        idf = week_sched.add(idf)
-        return idf, week_sched.Name
+        return doc, desired_name
 
     @property
     def Type(self) -> ScheduleTypeLimitType:
@@ -404,179 +413,142 @@ class YearComponent(NamedObject, extra="forbid"):
 
     def add_year_to_idf(
         self,
-        idf: IDF,
+        doc: EPDocument,
         name_prefix: str | None = None,
         summer_design_day_sch_name: str | None = None,
         winter_design_day_sch_name: str | None = None,
     ):
-        """Add the year to the IDF.
+        """Add the year to the IDF document.
 
         The name prefix can be used to scope the schedule creation to ensure a unique schedule per object.
 
         Args:
-            idf (IDF): The IDF object to add the year to.
+            doc (EPDocument): The IDF document to add the year to.
             name_prefix (str | None): The prefix to use for the schedule name.
             summer_design_day_sch_name (str | None): The name of the summer design day schedule.
             winter_design_day_sch_name (str | None): The name of the winter design day schedule.
 
         Returns:
-            idf (IDF): The IDF object with the year added.
+            doc (EPDocument): The IDF document with the year added.
             year_name (str): The name of the year schedule.
         """
         desired_name = self.Name
         if name_prefix is not None:
             desired_name = f"{name_prefix}_YEAR_{desired_name}"
 
-        if idf.getobject("SCHEDULE:YEAR", desired_name):
-            return idf, desired_name
+        if desired_name in doc["Schedule:Year"]:
+            return doc, desired_name
 
-        idf, jan_name = self.January.add_week_to_idf(
-            idf,
+        doc, jan_name = self.January.add_week_to_idf(
+            doc,
             name_prefix,
             summer_design_day_sch_name=summer_design_day_sch_name,
             winter_design_day_sch_name=winter_design_day_sch_name,
         )
-        idf, feb_name = self.February.add_week_to_idf(
-            idf,
+        doc, feb_name = self.February.add_week_to_idf(
+            doc,
             name_prefix,
             summer_design_day_sch_name=summer_design_day_sch_name,
             winter_design_day_sch_name=winter_design_day_sch_name,
         )
-        idf, mar_name = self.March.add_week_to_idf(
-            idf,
+        doc, mar_name = self.March.add_week_to_idf(
+            doc,
             name_prefix,
             summer_design_day_sch_name=summer_design_day_sch_name,
             winter_design_day_sch_name=winter_design_day_sch_name,
         )
-        idf, apr_name = self.April.add_week_to_idf(
-            idf,
+        doc, apr_name = self.April.add_week_to_idf(
+            doc,
             name_prefix,
             summer_design_day_sch_name=summer_design_day_sch_name,
             winter_design_day_sch_name=winter_design_day_sch_name,
         )
-        idf, may_name = self.May.add_week_to_idf(
-            idf,
+        doc, may_name = self.May.add_week_to_idf(
+            doc,
             name_prefix,
             summer_design_day_sch_name=summer_design_day_sch_name,
             winter_design_day_sch_name=winter_design_day_sch_name,
         )
-        idf, jun_name = self.June.add_week_to_idf(
-            idf,
+        doc, jun_name = self.June.add_week_to_idf(
+            doc,
             name_prefix,
             summer_design_day_sch_name=summer_design_day_sch_name,
             winter_design_day_sch_name=winter_design_day_sch_name,
         )
-        idf, jul_name = self.July.add_week_to_idf(
-            idf,
+        doc, jul_name = self.July.add_week_to_idf(
+            doc,
             name_prefix,
             summer_design_day_sch_name=summer_design_day_sch_name,
             winter_design_day_sch_name=winter_design_day_sch_name,
         )
-        idf, aug_name = self.August.add_week_to_idf(
-            idf,
+        doc, aug_name = self.August.add_week_to_idf(
+            doc,
             name_prefix,
             summer_design_day_sch_name=summer_design_day_sch_name,
             winter_design_day_sch_name=winter_design_day_sch_name,
         )
-        idf, sep_name = self.September.add_week_to_idf(
-            idf,
+        doc, sep_name = self.September.add_week_to_idf(
+            doc,
             name_prefix,
             summer_design_day_sch_name=summer_design_day_sch_name,
             winter_design_day_sch_name=winter_design_day_sch_name,
         )
-        idf, oct_name = self.October.add_week_to_idf(
-            idf,
+        doc, oct_name = self.October.add_week_to_idf(
+            doc,
             name_prefix,
             summer_design_day_sch_name=summer_design_day_sch_name,
             winter_design_day_sch_name=winter_design_day_sch_name,
         )
-        idf, nov_name = self.November.add_week_to_idf(
-            idf,
+        doc, nov_name = self.November.add_week_to_idf(
+            doc,
             name_prefix,
             summer_design_day_sch_name=summer_design_day_sch_name,
             winter_design_day_sch_name=winter_design_day_sch_name,
         )
-        idf, dec_name = self.December.add_week_to_idf(
-            idf,
+        doc, dec_name = self.December.add_week_to_idf(
+            doc,
             name_prefix,
             summer_design_day_sch_name=summer_design_day_sch_name,
             winter_design_day_sch_name=winter_design_day_sch_name,
         )
-        year_sched = ScheduleYear(
-            Name=self.Name,
-            Schedule_Type_Limits_Name=self.schedule_type_limits,
-            ScheduleWeek_Name_1=jan_name,
-            Start_Month_1=1,
-            Start_Day_1=1,
-            End_Month_1=1,
-            End_Day_1=31,
-            ScheduleWeek_Name_2=feb_name,
-            Start_Month_2=2,
-            Start_Day_2=1,
-            End_Month_2=2,
-            End_Day_2=28,
-            ScheduleWeek_Name_3=mar_name,
-            Start_Month_3=3,
-            Start_Day_3=1,
-            End_Month_3=3,
-            End_Day_3=31,
-            ScheduleWeek_Name_4=apr_name,
-            Start_Month_4=4,
-            Start_Day_4=1,
-            End_Month_4=4,
-            End_Day_4=30,
-            ScheduleWeek_Name_5=may_name,
-            Start_Month_5=5,
-            Start_Day_5=1,
-            End_Month_5=5,
-            End_Day_5=31,
-            ScheduleWeek_Name_6=jun_name,
-            Start_Month_6=6,
-            Start_Day_6=1,
-            End_Month_6=6,
-            End_Day_6=30,
-            ScheduleWeek_Name_7=jul_name,
-            Start_Month_7=7,
-            Start_Day_7=1,
-            End_Month_7=7,
-            End_Day_7=31,
-            ScheduleWeek_Name_8=aug_name,
-            Start_Month_8=8,
-            Start_Day_8=1,
-            End_Month_8=8,
-            End_Day_8=31,
-            ScheduleWeek_Name_9=sep_name,
-            Start_Month_9=9,
-            Start_Day_9=1,
-            End_Month_9=9,
-            End_Day_9=30,
-            ScheduleWeek_Name_10=oct_name,
-            Start_Month_10=10,
-            Start_Day_10=1,
-            End_Month_10=10,
-            End_Day_10=31,
-            ScheduleWeek_Name_11=nov_name,
-            Start_Month_11=11,
-            Start_Day_11=1,
-            End_Month_11=11,
-            End_Day_11=30,
-            ScheduleWeek_Name_12=dec_name,
-            Start_Month_12=12,
-            Start_Day_12=1,
-            End_Month_12=12,
-            End_Day_12=31,
+        week_names = [
+            jan_name,
+            feb_name,
+            mar_name,
+            apr_name,
+            may_name,
+            jun_name,
+            jul_name,
+            aug_name,
+            sep_name,
+            oct_name,
+            nov_name,
+            dec_name,
+        ]
+        add_or_replace(
+            doc["Schedule:Year"].add,
+            self.Name,
+            schedule_type_limits_name=self.schedule_type_limits,
+            schedule_weeks=[
+                {
+                    "schedule_week_name": week_name,
+                    "start_month": month,
+                    "start_day": 1,
+                    "end_month": month,
+                    "end_day": NON_LEAP_MONTH_LENGTHS[month - 1],
+                }
+                for month, week_name in enumerate(week_names, start=1)
+            ],
         )
-        idf = year_sched.add(idf)
 
         type_lim = self.schedule_type_limits
-        if not idf.getobject("SCHEDULETYPELIMITS", type_lim):
+        if type_lim not in doc["ScheduleTypeLimits"]:
             if type_lim not in TypeLimits:
                 msg = f"Type {type_lim} not in TypeLimits, unsure how to add to IDF."
                 raise ValueError(msg)
-            lim = TypeLimits[type_lim]
-            lim.add(idf)
+            TypeLimits[type_lim].add_to_idf(doc)
 
-        return idf, year_sched.Name
+        return doc, self.Name
 
     def fractional_year_sum(self, year: int):
         """Compute the sum of the year as a fraction of the year."""

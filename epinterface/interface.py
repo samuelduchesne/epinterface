@@ -1,214 +1,105 @@
-"""Interface for EnergyPlus IDF objects."""
+"""EnergyPlus literal types, a small material library and document helpers.
 
-from collections.abc import Sequence
-from logging import getLogger
-from typing import Annotated, Any, ClassVar, Literal
+Objects are written with idfkit directly, through their typed collection
+(`doc["Zone"].add(...)`, or `epinterface.document.add_or_replace` for shared
+objects), using idfkit's snake_case field names.
+"""
+
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 import numpy as np
-from archetypal.idfclass import IDF
-from archetypal.schedule import Schedule
-from pydantic import (
-    BaseModel,
-    BeforeValidator,
-    Field,
-    ValidationError,
-    computed_field,
-    field_validator,
-    model_validator,
-)
+from idfkit import create_schedule_type_limits
+from pydantic import BaseModel, BeforeValidator, Field
 
-from epinterface.settings import energyplus_settings
+from epinterface.document import EPDocument, add_or_replace
+from epinterface.schedules import HOURS_PER_YEAR, add_values_schedule
 
-try:
-    from typing import Self
-except ImportError:
-    from typing_extensions import Self  # noqa: UP035
+if TYPE_CHECKING:
+    # The object classes exist only in idfkit's stubs.
+    from idfkit.document import (
+        AnyHVACTemplateZoneIdealLoadsAirSystem,
+        AnyMaterial,
+        AnyScheduleTypeLimits,
+        AnyScheduleYear,
+        AnySiteGroundTemperatureBuildingSurface,
+        AnyZoneList,
+    )
 
-logger = getLogger(__name__)
-
-
-class BaseObj(BaseModel):
-    """Base class for EnergyPlus IDF objects.
-
-    The class should be inherited by all EnergyPlus IDF objects. It provides
-    methods to add and extract objects from an IDF object.
-    """
-
-    key: ClassVar[str]
-
-    def add(self, idf: IDF):
-        """Add the object to the IDF object.
-
-        Args:
-            idf (IDF): The IDF object to add the object to.
-
-        Returns:
-            idf (IDF): The updated IDF object.
-        """
-        idf.newidfobject(self.key, **self.model_dump())
-        return idf
-
-    @classmethod
-    def extract(cls, idf: IDF) -> Sequence[Self]:
-        """Extract objects from an IDF object.
-
-        Args:
-            idf (IDF): The IDF object to extract objects from.
-
-        Returns:
-            objs (list[BaseObj]): A list of objects extracted from the IDF object.
-        """
-        objs = idf.idfobjects[cls.key]
-        try:
-            return [cls(**obj) for obj in objs]
-        except ValidationError:
-            return [cls(**obj.to_dict()) for obj in objs]
+IdealLoadsLimitType = Literal[
+    "NoLimit", "LimitFlowRate", "LimitCapacity", "LimitFlowRateAndCapacity"
+]
 
 
-class ScheduleTypeLimits(BaseObj, extra="ignore"):
-    """ScheduleTypeLimits object."""
-
-    key: ClassVar[str] = "SCHEDULETYPELIMITS"
-    Name: str
-    Lower_Limit_Value: float | None = None
-    Upper_Limit_Value: float | None = None
-    Numeric_Type: Literal["Continuous", "Discrete"] | None = None
-    Unit_Type: (
-        Literal[
-            "Dimensionless",
-            "Temperature",
-            "DeltaTemperature",
-            "PrecipitationRate",
-            "Angle",
-            "ConvectionCoefficient",
-            "ActivityLevel",
-            "Velocity",
-            "Capacity",
-            "Power",
-            "Availability",
-            "Percent",
-            "Control",
-            "Mode",
-        ]
-        | None
-    ) = None
+DehumidificationControlTypeType = Literal[
+    "ConstantSensibleHeatRatio", "Humidistat", "None", "ConstantSupplyHumidityRatio"
+]
 
 
-class SimulationControl(BaseObj, extra="ignore"):
-    """SimulationControl object."""
-
-    key: ClassVar[str] = "SIMULATIONCONTROL"
-    Do_Zone_Sizing_Calculation: Literal["Yes", "No"] = "Yes"
-    Do_System_Sizing_Calculation: Literal["Yes", "No"] = "Yes"
-    Do_Plant_Sizing_Calculation: Literal["Yes", "No"] = "Yes"
-    Run_Simulation_for_Sizing_Periods: Literal["Yes", "No"] = "Yes"
-    Run_Simulation_for_Weather_File_Run_Periods: Literal["Yes", "No"] = "Yes"
-    Do_HVAC_Sizing_Simulation_for_Sizing_Periods: Literal["Yes", "No"] = "Yes"
-    Maximum_Number_of_HVAC_Sizing_Simulation_Passes: int = 1
+HumidificationControlTypeType = Literal[
+    "None", "Humidistat", "ConstantSupplyHumidityRatio"
+]
 
 
-class RunPeriod(BaseObj, extra="ignore"):
-    """RunPeriod object."""
-
-    key: ClassVar[str] = "RUNPERIOD"
-    Name: str
-    Begin_Month: int
-    Begin_Day_of_Month: int
-    Begin_Year: int | None = None
-    End_Month: int
-    End_Day_of_Month: int
-    End_Year: int | None = None
-    Day_of_Week_for_Start_Day: Literal[
-        "Sunday",
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday",
-    ] = "Sunday"
-    Use_Weather_File_Daylight_Saving_Period: Literal["Yes", "No"] = "No"
-    Use_Weather_File_Holidays_and_Special_Days: Literal["Yes", "No"] = "No"
-    Apply_Weekend_Holiday_Rule: Literal["Yes", "No"] = "Yes"
-    Use_Weather_File_Rain_Indicators: Literal["Yes", "No"] = "No"
-    Use_Weather_File_Snow_Indicators: Literal["Yes", "No"] = "No"
+OutdoorAirMethodType = Literal[
+    "None",
+    "Flow/Person",
+    "Flow/Area",
+    "Flow/Zone",
+    "Sum",
+    "Maximum",
+    "DetailedSpecification",
+]
 
 
-class Timestep(BaseObj, extra="ignore"):
-    """Timestep object."""
-
-    key: ClassVar[str] = "TIMESTEP"
-    Number_of_Timesteps_per_Hour: int = 6
-
-
-class SizingParameters(BaseObj, extra="ignore"):
-    """SizingParameters object."""
-
-    key: ClassVar[str] = "SIZING:PARAMETERS"
-    Heating_Sizing_Factor: float
-    Cooling_Sizing_Factor: float
+DemandControlledVentilationTypeType = Literal[
+    "None", "OccupancySchedule", "CO2Setpoint"
+]
+OutdoorAirEconomizerTypeType = Literal[
+    "NoEconomizer", "DifferentialDryBulb", "DifferentialEnthalpy"
+]
 
 
-class SiteGroundTemperature(BaseObj, extra="ignore"):
-    """GroundTemperature object."""
-
-    key: ClassVar[str] = "SITE:GROUNDTEMPERATURE:BUILDINGSURFACE"
-    January_Ground_Temperature: float
-    February_Ground_Temperature: float
-    March_Ground_Temperature: float
-    April_Ground_Temperature: float
-    May_Ground_Temperature: float
-    June_Ground_Temperature: float
-    July_Ground_Temperature: float
-    August_Ground_Temperature: float
-    September_Ground_Temperature: float
-    October_Ground_Temperature: float
-    November_Ground_Temperature: float
-    December_Ground_Temperature: float
-
-    @classmethod
-    def FromValues(cls, values: list[float]):
-        """Create a new SiteGroundTemperature object from a list of 12 monthly values.
-
-        Args:
-            values (list[float]): A list of 12 monthly values.
-
-        Returns:
-            ground_temp (SiteGroundTemperature): The new SiteGroundTemperature object.
-        """
-        if len(values) != 12:
-            raise ValueError(f"GROUNDTEMP:EXPECTED_12:RECEIVED_{len(values)}")
-        return cls(
-            January_Ground_Temperature=values[0],
-            February_Ground_Temperature=values[1],
-            March_Ground_Temperature=values[2],
-            April_Ground_Temperature=values[3],
-            May_Ground_Temperature=values[4],
-            June_Ground_Temperature=values[5],
-            July_Ground_Temperature=values[6],
-            August_Ground_Temperature=values[7],
-            September_Ground_Temperature=values[8],
-            October_Ground_Temperature=values[9],
-            November_Ground_Temperature=values[10],
-            December_Ground_Temperature=values[11],
+HeatRecoveryTypeType = Annotated[
+    Literal["None", "Sensible", "Enthalpy"],
+    BeforeValidator(
+        lambda x: (
+            x
+            if isinstance(x, str)
+            else ("None" if x is None else ("None" if np.isnan(x) else x))
         )
+    ),
+]
+
+ThermostatType = Literal[
+    "SingleHeating", "SingleCooling", "SingleHeatingOrCooling", "DualSetpoint"
+]
 
 
-class InternalMass(BaseObj, extra="ignore"):
-    """InternalMass object."""
+DesignLevelCalculationMethodType = Literal["Watts/Area", "Watts/Person", "Watts"]
 
-    key: ClassVar[str] = "INTERNALMASS"
-    Name: str
-    Zone_or_ZoneList_Name: str
-    Construction_Name: str
-    Surface_Area: float
+
+InfDesignFlowRateCalculationMethodType = Literal[
+    "Flow/Zone",
+    "Flow/Area",
+    "Flow/ExteriorArea",
+    "Flow/ExteriorWallArea",
+    "AirChanges/Hour",
+]
+VentDesignFlowRateCalculationMethodType = Literal[
+    "Flow/Zone", "Flow/Area", "Flow/Person", "AirChanges/Hour"
+]
+
+VentilationType = Literal["Natural", "Exhaust", "Intake", "Balanced"]
+
+
+NumberOfPeopleCalculationMethodType = Literal["People", "People/Area", "Area/Person"]
 
 
 class BaseMaterial(BaseModel, extra="ignore", populate_by_name=True):
     """A base material object for storing material definitions.
 
-    Note that this is not an EnergyPlus object, but a base class for creating new
-    material objects which can be turned into EP objects once assigned thicknesses.
+    Note that this is not an EnergyPlus object: it is library data, written as a
+    `Material` object once given a thickness (see `add_layer_to_idf`).
     """
 
     Name: str
@@ -226,18 +117,35 @@ class BaseMaterial(BaseModel, extra="ignore", populate_by_name=True):
         default=None, validation_alias="VisibleAbsorptance [0-1]", ge=0, le=1
     )
 
-    def as_layer(self, thickness: float):
-        """Create a new material object with a given thickness.
+    def layer_name(self, thickness: float) -> str:
+        """The name of this material's `Material` object at `thickness` [m]."""
+        return f"{self.Name}_{thickness}m"
+
+    def add_layer_to_idf(self, doc: EPDocument, thickness: float) -> "AnyMaterial":
+        """Write this material as a `Material` object of the given thickness.
+
+        An identical layer already in the document is reused (see
+        `epinterface.document.add_or_replace`).
 
         Args:
-            thickness (float): The thickness of the material.
+            doc (EPDocument): The IDF document to write to.
+            thickness (float): The thickness of the layer [m].
 
         Returns:
-            mat (Material): The new material object with the given thickness.
+            AnyMaterial: The `Material` object, named `layer_name(thickness)`.
         """
-        name = f"{self.Name}_{thickness}m"
-        return Material(
-            Name=name, Thickness=thickness, **self.model_dump(exclude={"Name"})
+        return add_or_replace(
+            doc["Material"].add,
+            self.layer_name(thickness),
+            # Library data, a plain str: idfkit checks it against the choices.
+            roughness=cast(Any, self.Roughness),
+            thickness=thickness,
+            conductivity=self.Conductivity,
+            density=self.Density,
+            specific_heat=self.Specific_Heat,
+            thermal_absorptance=self.Thermal_Absorptance,
+            solar_absorptance=self.Solar_Absorptance,
+            visible_absorptance=self.Visible_Absorptance,
         )
 
 
@@ -317,777 +225,220 @@ class DefaultMaterialLibrary(BaseModel):
     stucco: BaseMaterial = stucco
 
 
-class Material(BaseObj, BaseMaterial, extra="ignore"):
-    """Material object."""
-
-    key: ClassVar[str] = "MATERIAL"
-    Name: str
-    Thickness: float
-
-    @field_validator("Thermal_Absorptance", mode="before")
-    def str_cast(cls, v):
-        """Cast the value to a float if it is a string or empty.
-
-        Args:
-            v (Any): The value to cast.
-
-        Returns:
-            v (float): The casted value.
-        """
-        if v == "" or v is None:
-            return None
-        return float(v)
-
-    @property
-    def r(self):
-        """Return the R of the material."""
-        return self.Thickness / self.Conductivity
-
-
-class SimpleGlazingMaterial(BaseObj, extra="ignore"):
-    """SimpleGlazingMaterial object."""
-
-    key: ClassVar[str] = "WINDOWMATERIAL:SIMPLEGLAZINGSYSTEM"
-    Name: str
-    UFactor: float
-    Solar_Heat_Gain_Coefficient: float
-    Visible_Transmittance: float
-
-
-class AirGapMaterial(BaseObj, extra="ignore"):
-    """AirGapMaterial object."""
-
-    key: ClassVar[str] = "MATERIAL:AIRGAP"
-    Name: str
-    Thermal_Resistance: float
-
-
-class NoMassMaterial(BaseObj, extra="ignore"):
-    """NoMassMaterial object."""
-
-    key: ClassVar[str] = "MATERIAL:NOMASS"
-    Name: str
-    Roughness: str
-    Thermal_Resistance: float
-
-
-class Construction(BaseObj, extra="ignore"):
-    """Construction object."""
-
-    key: ClassVar[str] = "CONSTRUCTION"
-    name: str
-    layers: Sequence[Material | AirGapMaterial | SimpleGlazingMaterial | NoMassMaterial]
-
-    @property
-    def r_value(self):
-        """Return the R-value of the construction.
-
-        Computed using the formula: R = sum(thickness_i / conductivity_i)
-
-        Returns:
-            r (float): The R-value of the construction (units: m^2.K/W).
-        """
-        return (
-            sum([layer.r for layer in self.layers if isinstance(layer, Material)])
-            + sum([
-                layer.Thermal_Resistance
-                for layer in self.layers
-                if isinstance(layer, AirGapMaterial)
-            ])
-            + sum([
-                layer.Thermal_Resistance
-                for layer in self.layers
-                if isinstance(layer, NoMassMaterial)
-            ])
-            + sum([
-                1 / layer.UFactor
-                for layer in self.layers
-                if isinstance(layer, SimpleGlazingMaterial)
-            ])
-        )
-
-    @classmethod
-    def extract(cls, idf: IDF):
-        """Extract objects from an IDF object.
-
-        Args:
-            idf (IDF): The IDF object to extract objects from.
-
-        Returns:
-            constructions (list[Construction]): A list of objects extracted from the IDF object.
-        """
-        constructions = idf.idfobjects["CONSTRUCTION"]
-        res: list[Construction] = []
-        for construction in constructions:
-            const_dict = construction.to_dict()
-            layer_names = [
-                const_dict[key]
-                for key in [
-                    "Outside_Layer",
-                    "Layer_2",
-                    "Layer_3",
-                    "Layer_4",
-                    "Layer_5",
-                    "Layer_6",
-                    "Layer_7",
-                    "Layer_8",
-                    "Layer_9",
-                    "Layer_10",
-                ]
-                if key in const_dict
-            ]
-
-            layer_names = [n for n in layer_names if n != "" and n]
-            material_defs = [
-                idf.getobject("MATERIAL", name) for name in layer_names
-            ]  # TODO: handle air layers
-            airgap_material_defs = [
-                idf.getobject("MATERIAL:AIRGAP", name) for name in layer_names
-            ]
-            simple_glazing_material_defs = [
-                idf.getobject("WINDOWMATERIAL:SIMPLEGLAZINGSYSTEM", name)
-                for name in layer_names
-            ]
-            no_mass_material_defs = [
-                idf.getobject("MATERIAL:NOMASS", name) for name in layer_names
-            ]
-            materials = [Material(**m.to_dict()) if m else None for m in material_defs]
-            airgap_materials = [
-                AirGapMaterial(**m.to_dict()) if m else None
-                for m in airgap_material_defs
-            ]
-            simple_glazing_materials = [
-                SimpleGlazingMaterial(**m.to_dict()) if m else None
-                for m in simple_glazing_material_defs
-            ]
-            nomass_materials = [
-                NoMassMaterial(**m.to_dict()) if m else None
-                for m in no_mass_material_defs
-            ]
-
-            layers = [
-                m if m else (n if n else (o if o else p))
-                for m, n, o, p in zip(
-                    materials,
-                    airgap_materials,
-                    simple_glazing_materials,
-                    nomass_materials,
-                    strict=False,
-                )
-            ]
-
-            valid_layers = [layer for layer in layers if layer is not None]
-            if len(valid_layers) != len(layers):
-                logger.warning(
-                    f"Construction {construction.Name} has missing layers. "
-                    f"Expected {len(layers)} layers, got {len(valid_layers)}."
-                    f"Skipping construction extraction."
-                )
-                continue
-            construction = cls(name=construction.Name, layers=valid_layers)
-            res.append(construction)
-        return res
-
-    def add(self, idf: IDF):
-        """Add the object to the IDF object.
-
-        Args:
-            idf (IDF): The IDF object to add the object to.
-
-        Returns:
-            idf (IDF): The updated IDF object.
-        """
-        for layer in self.layers:
-            idf = layer.add(idf)
-        idf.newidfobject(
-            self.key,
-            Name=self.name,
-            **{
-                (f"Layer_{i + 1}" if i != 0 else "Outside_Layer"): layer.Name
-                for i, layer in enumerate(self.layers)
-            },
-        )
-        return idf
-
-
-IdealLoadsLimitType = Literal[
-    "NoLimit", "LimitFlowRate", "LimitCapacity", "LimitFlowRateAndCapacity"
-]
-
-
-DehumidificationControlTypeType = Literal[
-    "ConstantSensibleHeatRatio", "Humidistat", "None", "ConstantSupplyHumidityRatio"
-]
-
-
-HumidificationControlTypeType = Literal[
-    "None", "Humidistat", "ConstantSupplyHumidityRatio"
-]
-
-
-OutdoorAirMethodType = Literal[
-    "None",
-    "Flow/Person",
-    "Flow/Area",
-    "Flow/Zone",
-    "Sum",
-    "Maximum",
-    "DetailedSpecification",
-]
-
-
-DemandControlledVentilationTypeType = Literal[
-    "None", "OccupancySchedule", "CO2Setpoint"
-]
-OutdoorAirEconomizerTypeType = Literal[
-    "NoEconomizer", "DifferentialDryBulb", "DifferentialEnthalpy"
-]
-
-
-HeatRecoveryTypeType = Annotated[
-    Literal["None", "Sensible", "Enthalpy"],
-    BeforeValidator(
-        lambda x: (
-            x
-            if isinstance(x, str)
-            else ("None" if x is None else ("None" if np.isnan(x) else x))
-        )
-    ),
-]
-
-# TODO: convert templates into BaseObjs?
-# TODO: Schedule referencing more richly?
-
-ThermostatType = Literal[
-    "SingleHeating", "SingleCooling", "SingleHeatingOrCooling", "DualSetpoint"
-]
-
-
-class HVACTemplateThermostat(BaseModel):
-    """HVACTemplateThermostat object."""
-
-    Name: str
-    Heating_Setpoint_Schedule_Name: str | None = None
-    Constant_Heating_Setpoint: float | None = 21
-    Cooling_Setpoint_Schedule_Name: str | None = None
-    Constant_Cooling_Setpoint: float | None = 24
-
-    def add(self, idf: IDF):
-        """Add the object to the IDF object.
-
-        Args:
-            idf (IDF): The IDF object to add the object to.
-
-        Returns:
-            idf (IDF): The updated IDF object
-        """
-        idf.newidfobject("HVACTEMPLATE:THERMOSTAT", **self.model_dump())
-        return idf
-
-
-class HVACTemplateZoneIdealLoadsAirSystem(BaseModel):
-    """HVACTemplateZoneIdealLoadsAirSystem object."""
-
-    Zone_Name: str
-    Template_Thermostat_Name: str
-    System_Availability_Schedule_Name: str | None = None
-    Heating_Availability_Schedule_Name: str | None = None
-    Cooling_Availability_Schedule_Name: str | None = None
-    Maximum_Heating_Supply_Air_Temperature: float = 30
-    Minimum_Cooling_Supply_Air_Temperature: float = 18
-    Maximum_Heating_Supply_Air_Humidity_Ratio: float = 0.0156
-    Minimum_Cooling_Supply_Air_Humidity_Ratio: float = 0.0077
-    Heating_Limit: IdealLoadsLimitType = "NoLimit"
-    Maximum_Heating_Air_Flow_Rate: float | None | Literal["autosize"] = None
-    Maximum_Sensible_Heating_Capacity: float | None | Literal["autosize"] = None
-    Cooling_Limit: IdealLoadsLimitType = "NoLimit"
-    Maximum_Cooling_Air_Flow_Rate: float | None | Literal["autosize"] = None
-    Maximum_Total_Cooling_Capacity: float | None | Literal["autosize"] = None
-    Dehumidification_Control_Type: DehumidificationControlTypeType = "None"
-    Cooling_Sensible_Heat_Ratio: float = 0.7
-    Dehumidification_Setpoint: float = 60
-    Humidification_Control_Type: HumidificationControlTypeType = "None"
-    Humidification_Setpoint: float = 30
-    Outdoor_Air_Method: OutdoorAirMethodType = "None"
-    Outdoor_Air_Flow_Rate_per_Person: float = 0.00944
-    Outdoor_Air_Flow_Rate_per_Zone_Floor_Area: float = 0.00025
-    Outdoor_Air_Flow_Rate_per_Zone: float = 0.0
-    # Design_Specification_Outdoor_Air_Object_Name: Optional[str] = None
-    Demand_Controlled_Ventilation_Type: DemandControlledVentilationTypeType = "None"
-    Outdoor_Air_Economizer_Type: OutdoorAirEconomizerTypeType = "NoEconomizer"
-    Heat_Recovery_Type: HeatRecoveryTypeType = "None"
-    Sensible_Heat_Recovery_Effectiveness: float = 0.7
-    Latent_Heat_Recovery_Effectiveness: float = 0.65
-
-    def add(self, idf: IDF):
-        """Add the object to the IDF object.
-
-        Args:
-            idf (IDF): The IDF object to add the object to.
-
-        Returns:
-            idf (IDF): The updated IDF object
-        """
-        idf.newidfobject("HVACTEMPLATE:ZONE:IDEALLOADSAIRSYSTEM", **self.model_dump())
-        return idf
-
-
-DesignLevelCalculationMethodType = Literal["Watts/Area", "Watts/Person", "Watts"]
-
-
-def _energyplus_version_gte(major: float) -> bool:
-    """Return True if configured EnergyPlus version is >= major (e.g. 24.0)."""
-    try:
-        return energyplus_settings.archetypal_energyplus_version.major >= major
-    except (ValueError, IndexError):
-        return False
-
-
-# TODO: add water mains?
-class WaterUseEquipment(BaseObj, extra="ignore"):
-    """WaterUseEquipment object."""
-
-    key: ClassVar[str] = "WATERUSE:EQUIPMENT"
-    Name: str
-    EndUse_Subcategory: str | None = None
-    Peak_Flow_Rate: float
-    Flow_Rate_Fraction_Schedule_Name: str | None = None
-    Target_Temperature_Schedule_Name: str | None = None
-    Hot_Water_Supply_Temperature_Schedule_Name: str | None = None
-    Cold_Water_Supply_Temperature_Schedule_Name: str | None = None
-    Zone_Name: str | None = None
-    Sensible_Fraction_Schedule_Name: str | None = None
-    Latent_Fraction_Schedule_Name: str | None = None
-
-
-class ElectricEquipment(BaseObj, extra="ignore"):
-    """ElectricEquipment object."""
-
-    key: ClassVar[str] = "ELECTRICEQUIPMENT"
-    Name: str
-    Zone_or_ZoneList_Name: str
-    Schedule_Name: str
-    Design_Level_Calculation_Method: DesignLevelCalculationMethodType = "Watts/Area"
-    Design_Level: float | None = None
-    Watts_per_Zone_Floor_Area: float | None = None
-    Watts_per_Person: float | None = None
-    Fraction_Latent: float = 0.00
-    Fraction_Radiant: float = 0.2
-    Fraction_Lost: float = 0
-    EndUse_Subcategory: str | None = None
-
-    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
-        """Dump model to dict; use Watts_per_Floor_Area alias when EnergyPlus >= 24.0."""
-        data = super().model_dump(**kwargs)
-        if _energyplus_version_gte(24.0) and "Watts_per_Zone_Floor_Area" in data:
-            data["Watts_per_Floor_Area"] = data.pop("Watts_per_Zone_Floor_Area")
-        return data
-
-
-class Lights(BaseObj, extra="ignore"):
-    """Lights object."""
-
-    key: ClassVar[str] = "LIGHTS"
-    Name: str
-    Zone_or_ZoneList_Name: str
-    Schedule_Name: str
-    Design_Level_Calculation_Method: DesignLevelCalculationMethodType = "Watts/Area"
-    Lighting_Level: float | None = None
-    Watts_per_Zone_Floor_Area: float | None = None
-    Watts_per_Person: float | None = None
-    Return_Air_Fraction: float = 0
-    Fraction_Radiant: float = 0.42
-    Fraction_Visible: float = 0.18
-    Fraction_Replaceable: float | None = 1
-    EndUse_Subcategory: str | None = None
-
-    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
-        """Dump model to dict; use Watts_per_Floor_Area alias when EnergyPlus >= 24.0."""
-        data = super().model_dump(**kwargs)
-        if _energyplus_version_gte(24.0) and "Watts_per_Zone_Floor_Area" in data:
-            data["Watts_per_Floor_Area"] = data.pop("Watts_per_Zone_Floor_Area")
-        return data
-
-
-InfDesignFlowRateCalculationMethodType = Literal[
-    "Flow/Zone",
-    "Flow/Area",
-    "Flow/ExteriorArea",
-    "Flow/ExteriorWallArea",
-    "AirChanges/Hour",
-]
-VentDesignFlowRateCalculationMethodType = Literal[
-    "Flow/Zone", "Flow/Area", "Flow/Person", "AirChanges/Hour"
-]
-
-VentilationType = Literal["Natural", "Exhaust", "Intake", "Balanced"]
-
-
-class ZoneVentilationWindAndStackOpenArea(BaseObj, extra="ignore"):
-    """ZoneVentilationWindAndStackOpenArea object."""
-
-    key: ClassVar[str] = "ZONEVENTILATION:WINDANDSTACKOPENAREA"
-    Name: str
-    Zone_or_Space_Name: str
-    Opening_Area: float
-    Opening_Area_Fraction_Schedule_Name: str
-    Opening_Effectiveness: str = "AutoCalculate"
-    Effective_Angle: float = 0
-    Height_Difference: float
-    Discharge_Coefficient_for_Opening: str = "AutoCalculate"
-    Minimum_Indoor_Temperature: float | None = None
-    Minimum_Indoor_Temperature_Schedule_Name: str | None = None
-    Maximum_Indoor_Temperature: float | None = None
-    Maximum_Indoor_Temperature_Schedule_Name: str | None = None
-    Delta_Temperature: float | None = None
-    Delta_Temperature_Schedule_Name: str | None = None
-    Minimum_Outdoor_Temperature: float | None = None
-    Minimum_Outdoor_Temperature_Schedule_Name: str | None = None
-    Maximum_Outdoor_Temperature: float | None = None
-    Maximum_Outdoor_Temperature_Schedule_Name: str | None = None
-    Maximum_Wind_Speed: float = 40
-
-
-class ZoneInfiltrationDesignFlowRate(BaseObj, extra="ignore"):
-    """ZoneInfiltrationDesignFlowRate object."""
-
-    key: ClassVar[str] = "ZONEINFILTRATION:DESIGNFLOWRATE"
-    Name: str
-    Zone_or_ZoneList_Name: str
-    Schedule_Name: str
-    Design_Flow_Rate_Calculation_Method: InfDesignFlowRateCalculationMethodType
-    Design_Flow_Rate: float | None = None
-    Flow_Rate_per_Floor_Area: float | None = None
-    Flow_Rate_per_Exterior_Surface_Area: float | None = None
-    Air_Changes_per_Hour: float | None = None
-    # Constant_Term_Coefficient: float = 0.606
-    # Temperature_Term_Coefficient: float = 3.6359996e-2
-    # Velocity_Term_Coefficient: float = 0.117765
-    Constant_Term_Coefficient: float = 1  # updated to assume that we have the actual infiltration values - the more detailed coefficient methodology would likely overestimate the infiltration rate, as there are many days where the tmperature deltas exceeds 10 degrees.
-    Temperature_Term_Coefficient: float = 0
-    Velocity_Term_Coefficient: float = 0
-    Velocity_Squared_Term_Coefficient: float = (
-        0  # updated as we don't make assumptions about the wind velocity
-    )
-
-
-NumberOfPeopleCalculationMethodType = Literal["People", "People/Area", "Area/Person"]
-
-
-class People(BaseObj, extra="ignore"):
-    """People object."""
-
-    key: ClassVar[str] = "PEOPLE"
-    Name: str
-    Zone_or_ZoneList_Name: str
-    Number_of_People_Schedule_Name: str
-    Number_of_People_Calculation_Method: NumberOfPeopleCalculationMethodType
-    Number_of_People: float | None = None
-    People_per_Floor_Area: float | None = None
-    Floor_Area_per_Person: float | None = None
-    Fraction_Radiant: float = 0.3
-    Sensible_Heat_Fraction: float | Literal["autocalculate"] = "autocalculate"
-    Activity_Level_Schedule_Name: str
-    # Carbon_Dioxide_Generation_Rate: Optional[float] = None
-    Enable_ASHRAE_55_Comfort_Warnings: Literal["Yes", "No"] = "No"
-    # Cold_Stress_Temperature_Threshold: float = 15.56
-    # Heat_Stress_Temperature_Threshold: float = 30.0
-    # Mean_Radiant_Temperature_Calculation_Type: Literal["ZoneAveraged", "EnclosureAveraged"]
-    # Surface_Name_Angle_Factor_List_Name: str
-    # Work_Efficiency_Schedule_Name: str
-    # Clothing_Insulation_Calculation_Method: str
-    # Clothing_Insulation_Calculation_Method_Schedule_Name: str
-    # Clothing_Insulation_Schedule_Name: str
-    # Air_Velocity_Schedule_Name: str
-    # Thermal_Comfort_Model_Type: str
-
-
-class ScheduleDayHourly(BaseObj, extra="ignore"):
-    """ScheduleDayHourly object."""
-
-    key: ClassVar[str] = "SCHEDULE:DAY:HOURLY"
-    Name: str
-    Schedule_Type_Limits_Name: str
-    Hour_1: float
-    Hour_2: float
-    Hour_3: float
-    Hour_4: float
-    Hour_5: float
-    Hour_6: float
-    Hour_7: float
-    Hour_8: float
-    Hour_9: float
-    Hour_10: float
-    Hour_11: float
-    Hour_12: float
-    Hour_13: float
-    Hour_14: float
-    Hour_15: float
-    Hour_16: float
-    Hour_17: float
-    Hour_18: float
-    Hour_19: float
-    Hour_20: float
-    Hour_21: float
-    Hour_22: float
-    Hour_23: float
-    Hour_24: float
-
-
-class ScheduleWeekDaily(BaseObj, extra="ignore"):
-    """ScheduleWeekDaily object."""
-
-    key: ClassVar[str] = "SCHEDULE:WEEK:DAILY"
-    Name: str
-    Monday_ScheduleDay_Name: str
-    Tuesday_ScheduleDay_Name: str
-    Wednesday_ScheduleDay_Name: str
-    Thursday_ScheduleDay_Name: str
-    Friday_ScheduleDay_Name: str
-    Saturday_ScheduleDay_Name: str
-    Sunday_ScheduleDay_Name: str
-    SummerDesignDay_ScheduleDay_Name: str | None = None
-    WinterDesignDay_ScheduleDay_Name: str | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _validate_design_day_schedules(cls, data):
-        if data.get("SummerDesignDay_ScheduleDay_Name") is None:
-            data["SummerDesignDay_ScheduleDay_Name"] = data["Monday_ScheduleDay_Name"]
-        if data.get("WinterDesignDay_ScheduleDay_Name") is None:
-            data["WinterDesignDay_ScheduleDay_Name"] = data["Monday_ScheduleDay_Name"]
-        return data
-
-    @computed_field
-    @property
-    def CustomDay1_ScheduleDay_Name(self) -> str:
-        """Automatically set additional day schedules."""
-        return self.Monday_ScheduleDay_Name
-
-    @computed_field
-    @property
-    def CustomDay2_ScheduleDay_Name(self) -> str:
-        """Automatically set additional day schedules."""
-        return self.Monday_ScheduleDay_Name
-
-    @computed_field
-    @property
-    def Holiday_ScheduleDay_Name(self) -> str:
-        """Automatically set additional day schedules."""
-        return self.Sunday_ScheduleDay_Name
-
-
-class ScheduleYear(BaseObj, extra="ignore"):
-    """ScheduleYear object."""
-
-    key: ClassVar[str] = "SCHEDULE:YEAR"
-    Name: str
-    Schedule_Type_Limits_Name: str
-
-    ScheduleWeek_Name_1: str
-    Start_Month_1: int
-    Start_Day_1: int
-    End_Month_1: int
-    End_Day_1: int
-
-    ScheduleWeek_Name_2: str | None = None
-    Start_Month_2: int | None = None
-    Start_Day_2: int | None = None
-    End_Month_2: int | None = None
-    End_Day_2: int | None = None
-
-    ScheduleWeek_Name_3: str | None = None
-    Start_Month_3: int | None = None
-    Start_Day_3: int | None = None
-    End_Month_3: int | None = None
-    End_Day_3: int | None = None
-
-    ScheduleWeek_Name_4: str | None = None
-    Start_Month_4: int | None = None
-    Start_Day_4: int | None = None
-    End_Month_4: int | None = None
-    End_Day_4: int | None = None
-
-    ScheduleWeek_Name_5: str | None = None
-    Start_Month_5: int | None = None
-    Start_Day_5: int | None = None
-    End_Month_5: int | None = None
-    End_Day_5: int | None = None
-
-    ScheduleWeek_Name_6: str | None = None
-    Start_Month_6: int | None = None
-    Start_Day_6: int | None = None
-    End_Month_6: int | None = None
-    End_Day_6: int | None = None
-
-    ScheduleWeek_Name_7: str | None = None
-    Start_Month_7: int | None = None
-    Start_Day_7: int | None = None
-    End_Month_7: int | None = None
-    End_Day_7: int | None = None
-
-    ScheduleWeek_Name_8: str | None = None
-    Start_Month_8: int | None = None
-    Start_Day_8: int | None = None
-    End_Month_8: int | None = None
-    End_Day_8: int | None = None
-
-    ScheduleWeek_Name_9: str | None = None
-    Start_Month_9: int | None = None
-    Start_Day_9: int | None = None
-    End_Month_9: int | None = None
-    End_Day_9: int | None = None
-
-    ScheduleWeek_Name_10: str | None = None
-    Start_Month_10: int | None = None
-    Start_Day_10: int | None = None
-    End_Month_10: int | None = None
-    End_Day_10: int | None = None
-
-    ScheduleWeek_Name_11: str | None = None
-    Start_Month_11: int | None = None
-    Start_Day_11: int | None = None
-    End_Month_11: int | None = None
-    End_Day_11: int | None = None
-
-    ScheduleWeek_Name_12: str | None = None
-    Start_Month_12: int | None = None
-    Start_Day_12: int | None = None
-    End_Month_12: int | None = None
-    End_Day_12: int | None = None
-
-
-class ZoneList(BaseModel, extra="ignore"):
-    """ZoneList object."""
-
-    Name: str
-    Names: list[str]
-
-    def add(self, idf: IDF):
-        """Add the object to the IDF object.
-
-        Args:
-            idf (IDF): The IDF object to add the object to.
-
-        Returns:
-            idf (IDF): The updated IDF object.
-        """
-        names = {
-            f"Zone_{i + 1}_Name": zone for i, zone in enumerate(self.Names) if zone
-        }
-        idf.newidfobject("ZONELIST", Name=self.Name, **names)
-        return idf
-
-
-def add_default_sim_controls(idf: IDF) -> IDF:
-    """Helper to add default simulation controls to the IDF model.
+# The defaults epinterface writes for `HVACTemplate:Zone:IdealLoadsAirSystem`
+# (those of the former `HVACTemplateZoneIdealLoadsAirSystem` model).
+_IDEAL_LOADS_TEMPLATE_DEFAULTS: dict[str, float | str] = {
+    "maximum_heating_supply_air_temperature": 30.0,
+    "minimum_cooling_supply_air_temperature": 18.0,
+    "maximum_heating_supply_air_humidity_ratio": 0.0156,
+    "minimum_cooling_supply_air_humidity_ratio": 0.0077,
+    "heating_limit": "NoLimit",
+    "cooling_limit": "NoLimit",
+    "dehumidification_control_type": "None",
+    "cooling_sensible_heat_ratio": 0.7,
+    "dehumidification_setpoint": 60.0,
+    "humidification_control_type": "None",
+    "humidification_setpoint": 30.0,
+    "outdoor_air_method": "None",
+    "outdoor_air_flow_rate_per_person": 0.00944,
+    "outdoor_air_flow_rate_per_zone_floor_area": 0.00025,
+    "outdoor_air_flow_rate_per_zone": 0.0,
+    "demand_controlled_ventilation_type": "None",
+    "outdoor_air_economizer_type": "NoEconomizer",
+    "heat_recovery_type": "None",
+    "sensible_heat_recovery_effectiveness": 0.7,
+    "latent_heat_recovery_effectiveness": 0.65,
+}
+
+
+def add_ideal_loads_template(
+    doc: EPDocument, zone_name: str, thermostat_name: str, **fields: Any
+) -> "AnyHVACTemplateZoneIdealLoadsAirSystem":
+    """Write a `HVACTemplate:Zone:IdealLoadsAirSystem` for a zone.
+
+    Fields not given take epinterface's defaults; a field given as None is left
+    blank. The template has no name, so it is always added (never reused).
 
     Args:
-        idf (IDF): The IDF model to add the simulation controls to.
+        doc (EPDocument): The IDF document to write to.
+        zone_name (str): The zone the template conditions.
+        thermostat_name (str): The `HVACTemplate:Thermostat` it uses.
+        **fields (Any): Fields that override the defaults, by idfkit name.
 
     Returns:
-        IDF: The IDF model with the added simulation controls.
+        AnyHVACTemplateZoneIdealLoadsAirSystem: The template object.
     """
-    # Configure simulation
-    sim_control = SimulationControl(
-        Do_Zone_Sizing_Calculation="Yes",
-        Do_System_Sizing_Calculation="Yes",
-        Do_Plant_Sizing_Calculation="No",
-        Run_Simulation_for_Sizing_Periods="Yes",
-        Run_Simulation_for_Weather_File_Run_Periods="Yes",
-        Do_HVAC_Sizing_Simulation_for_Sizing_Periods="Yes",
-        Maximum_Number_of_HVAC_Sizing_Simulation_Passes=2,
+    # Built at run time, so checked by idfkit when added rather than by pyright.
+    overrides: dict[str, Any] = _IDEAL_LOADS_TEMPLATE_DEFAULTS | fields
+    return add_or_replace(
+        doc["HVACTemplate:Zone:IdealLoadsAirSystem"].add,
+        zone_name=zone_name,
+        template_thermostat_name=thermostat_name,
+        **overrides,
     )
-    sim_control.add(idf)
 
-    # Configure run period
-    run_period = RunPeriod(
-        Name="Year",
-        Use_Weather_File_Daylight_Saving_Period="No",
-        Use_Weather_File_Rain_Indicators="No",
-        Use_Weather_File_Snow_Indicators="No",
-        Use_Weather_File_Holidays_and_Special_Days="No",
-        Begin_Month=1,
-        Begin_Day_of_Month=1,
-        End_Month=12,
-        End_Day_of_Month=31,
-        Day_of_Week_for_Start_Day="Sunday",
+
+def add_default_sim_controls(doc: EPDocument) -> EPDocument:
+    """Helper to add default simulation controls to the IDF model.
+
+    Writes (replacing any existing ones) `SimulationControl`, a `RunPeriod`
+    named "Year" over the whole year starting on a Sunday, a 6 per hour
+    `Timestep` and 1.15 heating/cooling `Sizing:Parameters`.
+
+    Args:
+        doc (EPDocument): The IDF model to add the simulation controls to.
+
+    Returns:
+        EPDocument: The IDF model with the added simulation controls.
+    """
+    add_or_replace(
+        doc["SimulationControl"].add,
+        do_zone_sizing_calculation="Yes",
+        do_system_sizing_calculation="Yes",
+        do_plant_sizing_calculation="No",
+        run_simulation_for_sizing_periods="Yes",
+        run_simulation_for_weather_file_run_periods="Yes",
+        do_hvac_sizing_simulation_for_sizing_periods="Yes",
+        maximum_number_of_hvac_sizing_simulation_passes=2,
     )
-    run_period.add(idf)
-
-    # configure timestep
-    timestep = Timestep(
-        Number_of_Timesteps_per_Hour=6,
+    add_or_replace(
+        doc["RunPeriod"].add,
+        "Year",
+        begin_month=1,
+        begin_day_of_month=1,
+        end_month=12,
+        end_day_of_month=31,
+        day_of_week_for_start_day="Sunday",
+        use_weather_file_holidays_and_special_days="No",
+        use_weather_file_daylight_saving_period="No",
+        apply_weekend_holiday_rule="Yes",
+        use_weather_file_rain_indicators="No",
+        use_weather_file_snow_indicators="No",
     )
-    timestep.add(idf)
-
-    sizing = SizingParameters(
-        Heating_Sizing_Factor=1.15,
-        Cooling_Sizing_Factor=1.15,
+    add_or_replace(doc["Timestep"].add, number_of_timesteps_per_hour=6)
+    add_or_replace(
+        doc["Sizing:Parameters"].add,
+        heating_sizing_factor=1.15,
+        cooling_sizing_factor=1.15,
     )
-    sizing.add(idf)
-
-    return idf
+    return doc
 
 
-def add_default_schedules(idf: IDF) -> tuple[IDF, dict[str, Schedule]]:
+def add_site_ground_temperature(
+    doc: EPDocument, values: list[float]
+) -> "AnySiteGroundTemperatureBuildingSurface":
+    """Write `Site:GroundTemperature:BuildingSurface` from 12 monthly values.
+
+    The document holds one such object; an existing one is replaced.
+
+    Args:
+        doc (EPDocument): The IDF document to write to.
+        values (list[float]): The ground temperatures [degC], January first.
+
+    Returns:
+        AnySiteGroundTemperatureBuildingSurface: The ground temperature object.
+
+    Raises:
+        ValueError: If `values` does not hold exactly 12 values.
+    """
+    if len(values) != 12:
+        raise ValueError(f"GROUNDTEMP:EXPECTED_12:RECEIVED_{len(values)}")
+    t = [float(value) for value in values]
+    return add_or_replace(
+        doc["Site:GroundTemperature:BuildingSurface"].add,
+        january_ground_temperature=t[0],
+        february_ground_temperature=t[1],
+        march_ground_temperature=t[2],
+        april_ground_temperature=t[3],
+        may_ground_temperature=t[4],
+        june_ground_temperature=t[5],
+        july_ground_temperature=t[6],
+        august_ground_temperature=t[7],
+        september_ground_temperature=t[8],
+        october_ground_temperature=t[9],
+        november_ground_temperature=t[10],
+        december_ground_temperature=t[11],
+    )
+
+
+def add_zone_list(doc: EPDocument, name: str, zone_names: list[str]) -> "AnyZoneList":
+    """Write a `ZoneList` of the (non-empty) `zone_names`.
+
+    Args:
+        doc (EPDocument): The IDF document to write to.
+        name (str): The name of the zone list.
+        zone_names (list[str]): The zones in the list; empty names are skipped.
+
+    Returns:
+        AnyZoneList: The `ZoneList` object.
+    """
+    return add_or_replace(
+        doc["ZoneList"].add, name, zones=[{"zone_name": z} for z in zone_names if z]
+    )
+
+
+def zone_list_names(zone_list: "AnyZoneList") -> list[str]:
+    """The zone names of a `ZoneList` object, in order."""
+    return [group.zone_name for group in zone_list.zones]
+
+
+def ensure_fraction_type_limits(doc: EPDocument) -> "AnyScheduleTypeLimits":
+    """Return the `Fraction` ScheduleTypeLimits, creating it (0 to 1) if missing.
+
+    archetypal wrote this object together with every schedule that used it.
+    """
+    if "Fraction" not in doc["ScheduleTypeLimits"]:
+        create_schedule_type_limits(
+            doc, "Fraction", 0, 1, "Continuous", "Dimensionless"
+        )
+    return doc["ScheduleTypeLimits"]["Fraction"]
+
+
+def add_constant_schedule(
+    doc: EPDocument, name: str, value: float, type_limits: str = "Fraction"
+) -> "AnyScheduleYear":
+    """Add a constant schedule as `Schedule:Year`/`Week:Daily`/`Day:Hourly` objects.
+
+    Args:
+        doc (EPDocument): The IDF document to add the schedule to.
+        name (str): The name of the `Schedule:Year`.
+        value (float): The value held all year.
+        type_limits (str): The name of an existing `ScheduleTypeLimits`.
+
+    Returns:
+        AnyScheduleYear: The `Schedule:Year` object.
+    """
+    if type_limits == "Fraction":
+        ensure_fraction_type_limits(doc)
+    return add_values_schedule(doc, name, [value] * HOURS_PER_YEAR, type_limits)
+
+
+DEFAULT_CONSTANT_SCHEDULE_PAIRS = (
+    ("Always_On", "Always_Off"),
+    ("Always On", "Always Off"),
+    ("On", "Off"),
+    ("AllOn", "AllOff"),
+    ("AlwaysOn", "AlwaysOff"),
+)
+
+
+def add_default_schedules(
+    doc: EPDocument,
+) -> tuple[EPDocument, dict[str, "AnyScheduleYear"]]:
     """Helper to add default schedules to the IDF model.
 
     Args:
-        idf (IDF): The IDF model to add the schedules to.
+        doc (EPDocument): The IDF model to add the schedules to.
 
     Returns:
-        idf (IDF): The IDF model with the added schedules.
-        scheds (dict[str, Schedule]): A dictionary of the added schedules.
+        doc (EPDocument): The IDF model with the added schedules.
+        scheds (dict[str, AnyScheduleYear]): The added `Schedule:Year` objects by name.
     """
-    # create constant scheds
-    all_scheds: dict[str, Schedule] = {}
-    always_on_schedule = Schedule.constant_schedule(Name="Always_On", value=1)
-    always_off_schedule = Schedule.constant_schedule(Name="Always_Off", value=0)
-    all_scheds["Always_On"] = always_on_schedule
-    all_scheds["Always_Off"] = always_off_schedule
-    year, *_ = always_on_schedule.to_year_week_day()
-    year.to_epbunch(idf)
-    year, *_ = always_off_schedule.to_year_week_day()
-    year.to_epbunch(idf)
-
-    always_on_schedule = Schedule.constant_schedule(Name="Always On", value=1)
-    always_off_schedule = Schedule.constant_schedule(Name="Always Off", value=0)
-    all_scheds["Always On"] = always_on_schedule
-    all_scheds["Always Off"] = always_off_schedule
-    year, *_ = always_on_schedule.to_year_week_day()
-    year.to_epbunch(idf)
-    year, *_ = always_off_schedule.to_year_week_day()
-    year.to_epbunch(idf)
-
-    always_on_schedule = Schedule.constant_schedule(Name="On", value=1)
-    always_off_schedule = Schedule.constant_schedule(Name="Off", value=0)
-    all_scheds["On"] = always_on_schedule
-    all_scheds["Off"] = always_off_schedule
-    year, *_ = always_on_schedule.to_year_week_day()
-    year.to_epbunch(idf)
-    year, *_ = always_off_schedule.to_year_week_day()
-    year.to_epbunch(idf)
-
-    always_on_schedule = Schedule.constant_schedule(Name="AllOn", value=1)
-    always_off_schedule = Schedule.constant_schedule(Name="AllOff", value=0)
-    all_scheds["AllOn"] = always_on_schedule
-    all_scheds["AllOff"] = always_off_schedule
-    year, *_ = always_on_schedule.to_year_week_day()
-    year.to_epbunch(idf)
-    year, *_ = always_off_schedule.to_year_week_day()
-    year.to_epbunch(idf)
-
-    always_on_schedule = Schedule.constant_schedule(Name="AlwaysOn", value=1)
-    always_off_schedule = Schedule.constant_schedule(Name="AlwaysOff", value=0)
-    all_scheds["AlwaysOn"] = always_on_schedule
-    all_scheds["AlwaysOff"] = always_off_schedule
-    year, *_ = always_on_schedule.to_year_week_day()
-    year.to_epbunch(idf)
-    year, *_ = always_off_schedule.to_year_week_day()
-    year.to_epbunch(idf)
-
-    return idf, all_scheds
+    all_scheds: dict[str, AnyScheduleYear] = {}
+    for on_name, off_name in DEFAULT_CONSTANT_SCHEDULE_PAIRS:
+        all_scheds[on_name] = add_constant_schedule(doc, on_name, 1)
+        all_scheds[off_name] = add_constant_schedule(doc, off_name, 0)
+    return doc, all_scheds
 
 
 PROTECTED_SCHEDULE_NAMES = {

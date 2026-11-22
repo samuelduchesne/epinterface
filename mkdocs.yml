@@ -1,7 +1,7 @@
 site_name: epinterface
 repo_url: https://github.com/szvsw/epinterface
 site_url: https://szvsw.github.io/epinterface
-site_description: This is a repository for dynamically generating energy models within Python, relying on Archetypal and Eppy for most of its functionality.
+site_description: Dynamically generate EnergyPlus models in Python with idfkit.
 site_author: Sam Wolk
 edit_uri: edit/main/docs/
 repo_name: szvsw/epinterface

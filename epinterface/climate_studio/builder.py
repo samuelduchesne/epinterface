@@ -1,19 +1,23 @@
 """A module for building the energy model using the Climate Studio API."""
 
 import gc
-import shutil
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 import pandas as pd
-from archetypal.idfclass import IDF
-from archetypal.idfclass.sql import Sql
+from idfkit.simulation.parsers.sql import SQLResult
 from pydantic import BaseModel, Field
-from shapely import Polygon
 
+from epinterface.analysis.energy_and_peak import (
+    ANNUAL_SUMMARY_REPORT,
+    DESIRED_METERS_FOR_VERSION,
+    END_USES_TABLE,
+    TABULAR_DATA_COLUMNS_FOR_VERSION,
+    kWh_per_GJ,
+)
 from epinterface.climate_studio.interface import (
     ClimateStudioLibraryV2,
     SurfaceHandlers,
@@ -25,15 +29,24 @@ from epinterface.climate_studio.interface import (
 )
 from epinterface.data import EnergyPlusArtifactDir
 from epinterface.ddy_injector_bayes import DDYSizingSpec
-from epinterface.geometry import ShoeboxGeometry
+from epinterface.document import EPDocument, load_document, minimal_document
+from epinterface.geometry import ShoeboxGeometry, get_zone_floor_area
 from epinterface.interface import (
-    SiteGroundTemperature,
-    ZoneList,
+    PROTECTED_SCHEDULE_NAMES,
     add_default_schedules,
     add_default_sim_controls,
+    add_site_ground_temperature,
+    add_zone_list,
+    zone_list_names,
 )
-from epinterface.settings import energyplus_settings
+from epinterface.results import tabular_frame
+from epinterface.settings import energyplus_settings, require_supported_major
+from epinterface.simulation import add_output_objects, read_warnings, run_energyplus
 from epinterface.weather import BaseWeather
+
+if TYPE_CHECKING:
+    # The object classes exist only in idfkit's stubs.
+    from idfkit.document import AnyZoneList
 
 
 class ClimateStudioBuilderNotImplementedError(NotImplementedError):
@@ -144,14 +157,14 @@ class Model(BaseWeather, validate_assignment=True):
         )  # kWh/m2 / yr
         return total_energy_kWh_per_m2
 
-    def build(self, config: SimulationPathConfig) -> IDF:
+    def build(self, config: SimulationPathConfig) -> EPDocument:
         """Build the energy model using the Climate Studio API.
 
         Args:
             config (SimulationConfig): The configuration for the simulation.
 
         Returns:
-            IDF: The built energy model.
+            EPDocument: The built energy model.
         """
         if (not self.geometry.basement) and self.conditioned_basement:
             raise ValueError("CONDITIONEDBASEMENT:TRUE:BASEMENT:FALSE")
@@ -159,158 +172,143 @@ class Model(BaseWeather, validate_assignment=True):
         if self.geometry.roof_height:
             raise ClimateStudioBuilderNotImplementedError("roof_height")
         config.output_dir.mkdir(parents=True, exist_ok=True)
-        base_filepath = EnergyPlusArtifactDir / "Minimal.idf"
-        target_base_filepath = config.output_dir / "Minimal.idf"
-        shutil.copy(base_filepath, target_base_filepath)
-        epw_path, ddy_path = self.fetch_weather(config.weather_dir)
-        idf = IDF(
-            target_base_filepath.as_posix(),
-            as_version=energyplus_settings.energyplus_version,  # pyright: ignore [reportArgumentType]
-            prep_outputs=True,
-            epw=epw_path.as_posix(),
-            output_directory=config.output_dir.as_posix(),
+        _epw_path, ddy_path = self.fetch_weather(config.weather_dir)
+        ep_version = energyplus_settings.version_tuple
+        doc = minimal_document(ep_version)
+        add_output_objects(
+            doc, DESIRED_METERS_FOR_VERSION[energyplus_settings.supported_major]
         )
-        ddy = IDF(
-            ddy_path.as_posix(),
-            as_version=energyplus_settings.energyplus_version,
-            file_version=energyplus_settings.energyplus_version,
-            prep_outputs=False,
-        )
+        ddy = load_document(ddy_path, ep_version)
+        # Sizing periods run in this order; winter first, as on the sbem path.
         ddy_spec = DDYSizingSpec(
-            match=False, conditions_types=["Summer Extreme", "Winter Extreme"]
+            match=False, conditions_types=["Winter Extreme", "Summer Extreme"]
         )
-        ddy_spec.inject_ddy(idf, ddy)
+        ddy_spec.inject_ddy(doc, ddy)
 
-        idf = add_default_sim_controls(idf)
-        idf, scheds = add_default_schedules(idf)
-        self.lib.Schedules.update(scheds)
+        doc = add_default_sim_controls(doc)
+        # The default schedules (AlwaysOn, AllOff, ...) are written here and
+        # take precedence over library schedules of the same name.
+        doc, _scheds = add_default_schedules(doc)
 
-        idf = SiteGroundTemperature.FromValues([
-            18.3,
-            18.2,
-            18.3,
-            18.4,
-            20.1,
-            22.0,
-            22.3,
-            22.5,
-            22.5,
-            20.7,
-            18.9,
-            18.5,
-            # 18,
-            # 18,
-            # 18,
-            # 18,
-            # 18,
-            # 18,
-            # 18,
-            # 18,
-            # 18,
-            # 18,
-            # 18,
-            # 18,
-            # 7.9,
-            # 6.05,
-            # 5.65,
-            # 6.21,
-            # 8.98,
-            # 11.97,
-            # 14.71,
-            # 16.62,
-            # 17.06,
-            # 15.98,
-            # 13.61,
-            # 10.71,
-            # 1.11,
-            # 0.1,
-            # 1.89,
-            # 4.69,
-            # 12.02,
-            # 17.68,
-            # 21.5,
-            # 22.66,
-            # 20.68,
-            # 16.29,
-            # 10.42,
-            # 4.97,
-        ]).add(idf)
+        add_site_ground_temperature(
+            doc,
+            [
+                18.3,
+                18.2,
+                18.3,
+                18.4,
+                20.1,
+                22.0,
+                22.3,
+                22.5,
+                22.5,
+                20.7,
+                18.9,
+                18.5,
+                # 18,
+                # 18,
+                # 18,
+                # 18,
+                # 18,
+                # 18,
+                # 18,
+                # 18,
+                # 18,
+                # 18,
+                # 18,
+                # 18,
+                # 7.9,
+                # 6.05,
+                # 5.65,
+                # 6.21,
+                # 8.98,
+                # 11.97,
+                # 14.71,
+                # 16.62,
+                # 17.06,
+                # 15.98,
+                # 13.61,
+                # 10.71,
+                # 1.11,
+                # 0.1,
+                # 1.89,
+                # 4.69,
+                # 12.02,
+                # 17.68,
+                # 21.5,
+                # 22.66,
+                # 20.68,
+                # 16.29,
+                # 10.42,
+                # 4.97,
+            ],
+        )
 
-        idf = self.geometry.add(idf)
+        doc = self.geometry.add(doc)
 
         # construct zone lists
-        idf, conditioned_zone_list, all_zones_list = self.add_zone_lists(idf)
+        doc, conditioned_zone_list, all_zones_list = self.add_zone_lists(doc)
 
         # TODO: Handle separately ventilated attic/basement?
-        idf = self.add_space_use(idf, self.space_use, conditioned_zone_list)
-        idf = self.add_envelope(idf, self.envelope, all_zones_list)
+        doc = self.add_space_use(doc, self.space_use, conditioned_zone_list)
+        doc = self.add_envelope(doc, self.envelope, all_zones_list)
 
-        return idf
+        return doc
 
     def add_hot_water_to_zone_list(
-        self, idf: IDF, space_use: ZoneUse, zone_list: ZoneList
-    ) -> IDF:
+        self, doc: EPDocument, space_use: ZoneUse, zone_list: "AnyZoneList"
+    ) -> EPDocument:
         """Add the hot water to the zone list.
 
         Args:
-            idf (IDF): The IDF model to add the hot water to.
+            doc (EPDocument): The IDF model to add the hot water to.
             space_use (ZoneUse): The zone use template.
-            zone_list (ZoneList): The list of zones to add the hot water to.
+            zone_list (AnyZoneList): The `ZoneList` of the zones to add the hot water to.
 
         Returns:
-            idf (IDF): The IDF model with the added hot water.
+            doc (EPDocument): The IDF model with the added hot water.
         """
-        for zone_name in zone_list.Names:
-            idf = self.add_hot_water_to_zone(idf, space_use, zone_name)
-        return idf
+        for zone_name in zone_list_names(zone_list):
+            doc = self.add_hot_water_to_zone(doc, space_use, zone_name)
+        return doc
 
     def add_hot_water_to_zone(
-        self, idf: IDF, space_use: ZoneUse, zone_name: str
-    ) -> IDF:
+        self, doc: EPDocument, space_use: ZoneUse, zone_name: str
+    ) -> EPDocument:
         """Add the hot water to the zone.
 
         Args:
-            idf (IDF): The IDF model to add the hot water to.
+            doc (EPDocument): The IDF model to add the hot water to.
             space_use (ZoneUse): The zone use template.
             zone_name (str): The name of the zone to add the hot water to.
 
         Returns:
-            idf (IDF): The IDF model with the added hot water.
+            doc (EPDocument): The IDF model with the added hot water.
         """
-        zone = next(filter(lambda x: x.Name == zone_name, idf.idfobjects["ZONE"]), None)
+        zone = doc["Zone"].get(zone_name)
         if zone is None:
             raise ValueError(f"NO_ZONE:{zone_name}")
-        area = 0
-        area_ct = 0
-        for srf in idf.idfobjects["BUILDINGSURFACE:DETAILED"]:
-            if srf.Zone_Name == zone.Name and srf.Surface_Type.lower() == "floor":
-                poly = Polygon(srf.coords)
-                area += poly.area
-                area_ct += 1
-        if area_ct > 1:
-            raise ValueError(f"TOO_MANY_FLOORS:{zone.Name}")
-        if area == 0 or area_ct == 0:
-            raise ValueError(f"NO_AREA:{zone.Name}")
+        area = get_zone_floor_area(doc, zone.name)
         ppl_density = space_use.Loads.PeopleDensity
         total_ppl = ppl_density * area
-        idf = space_use.HotWater.add_water_to_idf_zone(idf, zone.Name, total_ppl)
-        return idf
+        doc = space_use.HotWater.add_water_to_idf_zone(doc, zone.name, total_ppl)
+        return doc
 
     def add_envelope(
-        self, idf: IDF, envelope: ZoneEnvelope, inf_zone_list: ZoneList
-    ) -> IDF:
+        self, doc: EPDocument, envelope: ZoneEnvelope, inf_zone_list: "AnyZoneList"
+    ) -> EPDocument:
         """Add the envelope to the IDF model.
 
         Takes care of both the constructions and infiltration and windows.
 
         Args:
-            idf (IDF): The IDF model to add the envelope to.
+            doc (EPDocument): The IDF model to add the envelope to.
             envelope (ZoneEnvelope): The envelope template.
-            inf_zone_list (ZoneList): The list of zones to add the infiltration to.
+            inf_zone_list (AnyZoneList): The `ZoneList` of the zones to add the infiltration to.
 
 
         Returns:
-            IDF: The IDF model with the added envelope.
+            EPDocument: The IDF model with the added envelope.
         """
         constructions = envelope.Constructions
         infiltration = envelope.Infiltration
@@ -319,29 +317,29 @@ class Model(BaseWeather, validate_assignment=True):
         _foundation_settings = envelope.Foundation
         # TODO: other settings
 
-        self.add_srf_constructions(idf, constructions, window_def)
-        self.add_infiltration(idf, infiltration, inf_zone_list)
+        self.add_srf_constructions(doc, constructions, window_def)
+        self.add_infiltration(doc, infiltration, inf_zone_list)
 
         sch_names = self.envelope.schedule_names
-        idf = self.add_schedules_by_name(idf, sch_names)
+        doc = self.add_schedules_by_name(doc, sch_names)
 
-        return idf
+        return doc
 
     def add_srf_constructions(
         self,
-        idf: IDF,
+        doc: EPDocument,
         constructions: ZoneConstruction,
         window_def: WindowDefinition | None,
-    ) -> IDF:
+    ) -> EPDocument:
         """Assigns the constructions to the surfaces in the model.
 
         Args:
-            idf (IDF): The IDF model to select the surfaces from.
+            doc (EPDocument): The IDF model to select the surfaces from.
             constructions (ZoneConstruction): The construction template.
             window_def (WindowDefinition): The window definition template.
 
         Returns:
-            IDF: The IDF model with the selected surfaces.
+            EPDocument: The IDF model with the selected surfaces.
         """
         if self.geometry.roof_height:
             raise ClimateStudioBuilderNotImplementedError("roof_height")
@@ -359,14 +357,14 @@ class Model(BaseWeather, validate_assignment=True):
             raise ClimateStudioBuilderNotImplementedError("InternalMassIsOn")
 
         handlers = SurfaceHandlers.Default()
-        idf = handlers.handle_envelope(idf, self.lib, constructions, window_def)
+        doc = handlers.handle_envelope(doc, self.lib, constructions, window_def)
 
-        return idf
+        return doc
 
     def add_zone_lists(
         self,
-        idf: IDF,
-    ):
+        doc: EPDocument,
+    ) -> tuple[EPDocument, "AnyZoneList", "AnyZoneList"]:
         """Add the zone lists to the IDF model.
 
         Note that this attempts to automatically determine
@@ -374,21 +372,20 @@ class Model(BaseWeather, validate_assignment=True):
         as well as a separate list for all zones.
 
         Args:
-            idf (IDF): The IDF model to add the zone lists to.
+            doc (EPDocument): The IDF model to add the zone lists to.
 
         Returns:
-            idf (IDF): The IDF model with the added zone lists
-            conditioned_zone_list (ZoneList): The list of conditioned zones
-            all_zones_list (ZoneList): The list of all zones
+            doc (EPDocument): The IDF model with the added zone lists
+            conditioned_zone_list (AnyZoneList): The `ZoneList` of conditioned zones
+            all_zones_list (AnyZoneList): The `ZoneList` of all zones
         """
-        all_zone_names = [zone.Name for zone in idf.idfobjects["ZONE"]]
-        all_zones_list = ZoneList(Name="All_Zones", Names=all_zone_names)
+        all_zone_names = [zone.name for zone in doc["Zone"]]
         conditioned_zone_names = [
-            zone.Name
-            for zone in idf.idfobjects["ZONE"]
-            if "attic" not in zone.Name.lower()
+            zone.name
+            for zone in doc["Zone"]
+            if "attic" not in zone.name.lower()
             and (
-                not zone.Name.lower().endswith(self.geometry.basement_suffix.lower())
+                not zone.name.lower().endswith(self.geometry.basement_suffix.lower())
                 if ((not self.conditioned_basement) and self.geometry.basement)
                 else True
             )
@@ -403,122 +400,125 @@ class Model(BaseWeather, validate_assignment=True):
             msg = f"Expected {expected_zone_count} zones, but found {len(conditioned_zone_names)}."
             raise ValueError(msg)
 
-        conditioned_zone_list = ZoneList(
-            Name="Conditioned_Zones", Names=conditioned_zone_names
+        conditioned_zone_list = add_zone_list(
+            doc, "Conditioned_Zones", conditioned_zone_names
         )
-        idf = conditioned_zone_list.add(idf)
-        idf = all_zones_list.add(idf)
-        return idf, conditioned_zone_list, all_zones_list
+        all_zones_list = add_zone_list(doc, "All_Zones", all_zone_names)
+        return doc, conditioned_zone_list, all_zones_list
 
     def add_infiltration(
-        self, idf: IDF, infiltration: ZoneInfiltration, zone_list: ZoneList
+        self, doc: EPDocument, infiltration: ZoneInfiltration, zone_list: "AnyZoneList"
     ):
         """Add the infiltration to the IDF model.
 
         Args:
-            idf (IDF): The IDF model to add the infiltration to.
+            doc (EPDocument): The IDF model to add the infiltration to.
             infiltration: The infiltration object.
-            zone_list (ZoneList): The list of zones to add the infiltration to.
+            zone_list (AnyZoneList): The `ZoneList` of the zones to add the infiltration to.
 
         Returns:
-            idf (IDF): The IDF model with the added infiltration.
+            doc (EPDocument): The IDF model with the added infiltration.
         """
-        idf = infiltration.add_infiltration_to_idf_zone(idf, zone_list.Name)
-        # idf = self.add_schedules_by_name(idf, infiltration.schedule_names)
-        return idf
+        doc = infiltration.add_infiltration_to_idf_zone(doc, zone_list.name)
+        # doc = self.add_schedules_by_name(doc, infiltration.schedule_names)
+        return doc
 
-    def add_space_use(self, idf: IDF, space_use: ZoneUse, zone_list: ZoneList) -> IDF:
+    def add_space_use(
+        self, doc: EPDocument, space_use: ZoneUse, zone_list: "AnyZoneList"
+    ) -> EPDocument:
         """Add the space use to the IDF model.
 
         Args:
-            idf (IDF): The IDF model to add the space use to.
+            doc (EPDocument): The IDF model to add the space use to.
             space_use (ZoneUse): The zone use template.
-            zone_list (ZoneList): The list of zones to add the space use to.
+            zone_list (AnyZoneList): The `ZoneList` of the zones to add the space use to.
 
         Returns:
-            IDF: The IDF model with the added space use.
+            EPDocument: The IDF model with the added space use.
         """
-        idf = space_use.add_space_use_to_idf_zone(idf, zone_list)
-        idf = self.add_hot_water_to_zone_list(idf, space_use, zone_list)
-        idf = self.add_schedules_by_name(idf, space_use.schedule_names)
-        return idf
+        doc = space_use.add_space_use_to_idf_zone(doc, zone_list)
+        doc = self.add_hot_water_to_zone_list(doc, space_use, zone_list)
+        doc = self.add_schedules_by_name(doc, space_use.schedule_names)
+        return doc
 
-    def add_schedules_by_name(self, idf: IDF, schedule_names: set[str]) -> IDF:
-        """Add schedules to the IDF model by name.
+    def add_schedules_by_name(
+        self, doc: EPDocument, schedule_names: set[str]
+    ) -> EPDocument:
+        """Add library schedules to the IDF model by name.
+
+        The default schedules (see `add_default_schedules`) are already in the
+        model and are not looked up in the library.
 
         Args:
-            idf (IDF): The IDF model to add the schedules to.
+            doc (EPDocument): The IDF model to add the schedules to.
             schedule_names (set[str]): The names of the schedules to add.
 
         Returns:
-            IDF: The IDF model with the added schedules.
+            EPDocument: The IDF model with the added schedules.
         """
-        schedules = [self.lib.Schedules[s] for s in schedule_names]
-        for schedule in schedules:
-            yr_sch, *_ = schedule.to_year_week_day()
-            yr_sch.to_epbunch(idf)
-        return idf
+        for name in sorted(schedule_names - PROTECTED_SCHEDULE_NAMES):
+            self.lib.Schedules[name].add_to_idf(doc)
+        return doc
 
     def simulate(
         self,
         config: SimulationPathConfig,
-        post_build_callback: Callable[[IDF], IDF] | None = None,
-    ) -> tuple[IDF, Sql]:
-        """Build and simualte the idf model.
+        post_build_callback: Callable[[EPDocument], EPDocument] | None = None,
+    ) -> tuple[EPDocument, SQLResult]:
+        """Build and simulate the idf model.
 
         Args:
             config (SimulationConfig): The configuration for the simulation.
-            post_build_callback (Callable[[IDF],IDF] | None): A callback to run after the model is built.
+            post_build_callback (Callable[[EPDocument], EPDocument] | None): A callback to run after the model is built.
 
         Returns:
-            tuple[IDF, Sql]: The built energy model and the sql file.
-        """
-        idf = self.build(config)
-        if post_build_callback is not None:
-            idf = post_build_callback(idf)
-        idf.simulate()
-        sql = Sql(idf.sql_file)
-        return idf, sql
+            doc (EPDocument): The built energy model.
+            sql (SQLResult): The sql results file with simulation data.
 
-    def get_warnings(self, idf: IDF) -> str:
-        """Get the warning text from the idf model.
+        Raises:
+            SimulationError: If EnergyPlus fails.
+            FileNotFoundError: If the simulation produced no SQLite file.
+        """
+        doc = self.build(config)
+        if post_build_callback is not None:
+            doc = post_build_callback(doc)
+        epw_path, _ = self.fetch_weather(config.weather_dir)
+        sql = run_energyplus(doc, epw_path, config.output_dir)
+        return doc, sql
+
+    def get_warnings(self, output_dir: Path) -> str:
+        """Get the EnergyPlus warning text written to a simulation directory.
 
         Args:
-            idf (IDF): The IDF model to get the warning text from.
+            output_dir (Path): The simulation's output directory.
 
         Returns:
-            str: The warning text.
+            str: The concatenated text of every `*.err` file under `output_dir`.
         """
-        err_files = filter(
-            lambda x: x.suffix == ".err",
-            [idf.output_directory / Path(f) for f in idf.simulation_files],
-        )
-        err_text = "\n".join([f.read_text() for f in err_files])
-        return err_text
+        return read_warnings(output_dir)
 
-    def standard_results_postprocess(self, sql: Sql, move_energy: bool) -> pd.Series:
+    def standard_results_postprocess(
+        self, sql: SQLResult, move_energy: bool, ep_version_major: int
+    ) -> pd.Series:
         """Postprocess the sql file to get the standard results.
 
         Args:
-            sql (Sql): The sql file to postprocess.
+            sql (SQLResult): The sql file to postprocess.
             move_energy (bool): Whether to move the energy to fuels based off of the CoP/Fuel Types.
+            ep_version_major (int): The major version of EnergyPlus.
 
         Returns:
-            pd.DataFrame: The postprocessed results.
+            pd.Series: The postprocessed results [kWh/m2], with district heating
+                labelled "District Heating" whatever the EnergyPlus version.
         """
-        res_df = sql.tabular_data_by_name(
-            "AnnualBuildingUtilityPerformanceSummary", "End Uses"
-        )
+        require_supported_major(ep_version_major)
+        columns = TABULAR_DATA_COLUMNS_FOR_VERSION[ep_version_major]
+        res_df = tabular_frame(sql, ANNUAL_SUMMARY_REPORT, END_USES_TABLE)
         gc.collect()
-        kWh_per_GJ = 277.778
         res_df = (
-            res_df[
-                [
-                    "Electricity",
-                    "District Cooling",
-                    "District Heating",
-                ]
-            ].droplevel(-1, axis=1)
+            res_df[columns]
+            .droplevel(-1, axis=1)
+            .rename(columns={columns[2]: "District Heating"})
             * kWh_per_GJ
         ) / self.total_conditioned_area
         res_series_hot_water = res_df.loc["Water Systems"]
@@ -557,18 +557,18 @@ class Model(BaseWeather, validate_assignment=True):
     def run(
         self,
         weather_dir: Path | None = None,
-        post_build_callback: Callable[[IDF], IDF] | None = None,
+        post_build_callback: Callable[[EPDocument], EPDocument] | None = None,
         move_energy: bool = False,
-    ) -> tuple[IDF, pd.Series, str]:
+    ) -> tuple[EPDocument, pd.Series, str]:
         """Build and simualte the idf model.
 
         Args:
             weather_dir (Path): The directory to store the weather files.
-            post_build_callback (Callable[[IDF],IDF] | None): A callback to run after the model is built.
+            post_build_callback (Callable[[EPDocument], EPDocument] | None): A callback to run after the model is built.
             move_energy (bool): Whether to move the energy to fuels based off of the CoP/Fuel Types.
 
         Returns:
-            idf (IDF): The built energy model.
+            doc (EPDocument): The built energy model.
             results (pd.Series): The postprocessed results.
             err_text (str): The warning text.
         """
@@ -583,13 +583,20 @@ class Model(BaseWeather, validate_assignment=True):
                 else SimulationPathConfig(output_dir=output_dir)
             )
 
-            idf, sql = self.simulate(
+            doc, sql = self.simulate(
                 config,
                 post_build_callback=post_build_callback,
             )
-            results = self.standard_results_postprocess(sql, move_energy=move_energy)
-            err_text = self.get_warnings(idf)
-            return idf, results, err_text
+            try:
+                results = self.standard_results_postprocess(
+                    sql, move_energy=move_energy, ep_version_major=doc.version[0]
+                )
+            finally:
+                # release the results .sql file before the temporary directory is deleted
+                # (Windows refuses to delete an open file)
+                sql.close()
+            err_text = self.get_warnings(output_dir)
+            return doc, results, err_text
 
 
 # TODO: move to interface?
@@ -629,5 +636,5 @@ if __name__ == "__main__":
         ),
     )
 
-    idf, results, err_text = model.run(move_energy=False)
+    _doc, results, err_text = model.run(move_energy=False)
     print(results)

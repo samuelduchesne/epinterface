@@ -3,10 +3,11 @@
 from collections.abc import Callable
 from pathlib import Path
 
-from archetypal import IDF
+from idfkit import Vector3D, bounding_box, rotate_building
 from pydantic import BaseModel, Field
 
 from epinterface.analysis.overheating import OverheatingAnalysisConfig
+from epinterface.document import EPDocument
 from epinterface.geometry import ShoeboxGeometry
 from epinterface.sbem.builder import AtticAssumptions, BasementAssumptions, Model
 from epinterface.sbem.components.envelope import (
@@ -2084,7 +2085,7 @@ class FlatModel(BaseModel):
 
         return zone
 
-    def to_model(self) -> tuple[Model, Callable[[IDF], IDF]]:
+    def to_model(self) -> tuple[Model, Callable[[EPDocument], EPDocument]]:
         """Returns a tuple of a Model and a post-geometry callback."""
         zone = self.to_zone()
         # TODO: add in a shading mask
@@ -2102,9 +2103,9 @@ class FlatModel(BaseModel):
             basement=False,
         )
 
-        def post_geometry_callback(idf: IDF) -> IDF:
-            idf.rotate(self.Rotation)
-            return idf
+        def post_geometry_callback(doc: EPDocument) -> EPDocument:
+            rotate_building(doc, self.Rotation, anchor=_floor_plan_centre(doc))
+            return doc
 
         return (
             Model(
@@ -2138,6 +2139,20 @@ class FlatModel(BaseModel):
         )
 
         return r
+
+
+def _floor_plan_centre(doc: EPDocument) -> Vector3D:
+    """The centre of the building's x-y bounding box (geomeppy's rotation anchor).
+
+    geomeppy boxed the floors; for the shoebox every surface lies within the
+    footprint, so idfkit's box of all building surfaces is the same.
+    """
+    bbox = bounding_box(doc)
+    if bbox is None:
+        msg = "The document has no building surfaces to rotate."
+        raise ValueError(msg)
+    (x_min, y_min), (x_max, y_max) = bbox
+    return Vector3D((x_min + x_max) / 2, (y_min + y_max) / 2, 0)
 
 
 if __name__ == "__main__":

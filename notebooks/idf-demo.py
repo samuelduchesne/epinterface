@@ -1,5 +1,6 @@
 """A simple testing script for the epinterface.sbem library."""
 
+from idfkit import save_idf
 from pydantic import BaseModel
 
 from epinterface.geometry import ShoeboxGeometry
@@ -922,8 +923,8 @@ if __name__ == "__main__":
     model = params.to_model()
 
     result = model.run()
-    idf, results, err_text = (result.idf, result.energy_and_peak, result.err_text)
-    idf.saveas("model.idf")
+    doc, results, err_text = (result.doc, result.energy_and_peak, result.err_text)
+    save_idf(doc, "model.idf")
     results.to_csv("results.csv")
     agg_results = results.groupby(["Meter", "Aggregation"]).sum()
     # summarize the results by meter column across all timesteps

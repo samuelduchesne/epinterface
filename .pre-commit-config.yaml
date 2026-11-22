@@ -12,12 +12,18 @@ repos:
       #   exclude: ^.devcontainer/devcontainer.json
       #   args: [--autofix, --no-sort-keys]
       - id: end-of-file-fixer
+        # Regression fixtures and design docs are kept byte-for-byte as written.
+        exclude: ^(tests/data/|docs/superpowers/)
       - id: trailing-whitespace
+        # Regression fixtures and design docs are kept byte-for-byte as written.
+        exclude: ^(tests/data/|docs/superpowers/)
 
   - repo: https://github.com/RobertCraigie/pyright-python
     rev: v1.1.382
     hooks:
       - id: pyright
+        # The capture scripts import archetypal, which is not a dependency.
+        exclude: ^scripts/capture_.*\.py$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: "v0.11.5"
@@ -26,7 +32,21 @@ repos:
         args: [--exit-non-zero-on-fix, --show-fixes]
       - id: ruff-format
 
+  - repo: local
+    hooks:
+      - id: idfkit-check
+        name: idfkit check (EnergyPlus 22.2 to 25.2)
+        # Lints object types and choice values in string-keyed idfkit calls,
+        # such as doc.add("Lights", ...), against every supported release.
+        # Keep the targets in step with epinterface.document.SUPPORTED_DOCUMENT_TYPES.
+        entry: uv run idfkit check --targets 22.2,23.1,23.2,24.1,24.2,25.1,25.2
+        language: system
+        types: [python]
+        files: ^epinterface/
+
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: "v3.0.3"
     hooks:
       - id: prettier
+        # Regression fixtures and design docs are kept byte-for-byte as written.
+        exclude: ^(tests/data/|docs/superpowers/)

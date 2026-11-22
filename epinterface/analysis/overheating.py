@@ -5,9 +5,11 @@ from typing import Literal, cast
 
 import numpy as np
 import pandas as pd
-from archetypal.idfclass.sql import Sql
+from idfkit.simulation.parsers.sql import SQLResult
 from numpy.typing import NDArray
 from pydantic import BaseModel, Field
+
+from epinterface.results import timeseries_frame
 
 # ---------------------------------------------------------------------------
 # Configuration models
@@ -1104,7 +1106,7 @@ def compute_zone_at_risk(
 
 
 def overheating_results_postprocess(
-    sql: Sql,
+    sql: SQLResult,
     zone_weights: NDArray[np.float64],
     zone_names: list[str],
     config: OverheatingAnalysisConfig | None = None,
@@ -1122,7 +1124,8 @@ def overheating_results_postprocess(
     """
     _config = config if config is not None else OverheatingAnalysisConfig()
     # TODO: compare the single request flamegraph to splitting it out as multiple requests
-    hourly = sql.timeseries_by_name(
+    hourly = timeseries_frame(
+        sql,
         [
             "Zone Mean Air Temperature",
             "Zone Air Relative Humidity",

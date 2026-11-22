@@ -3,14 +3,15 @@
 import logging
 from typing import Literal
 
-from archetypal.idfclass import IDF
-from archetypal.schedule import Schedule, ScheduleTypeLimits
 from pydantic import Field
 
 from epinterface.constants import assumed_constants, physical_constants
-from epinterface.interface import ElectricEquipment, Lights, People
+from epinterface.document import EPDocument, add_or_replace, watts_per_area
+from epinterface.interface import add_constant_schedule
 from epinterface.sbem.common import BoolStr, MetadataMixin, NamedObject
-from epinterface.sbem.components.schedules import YearComponent
+from epinterface.sbem.components.schedules import (
+    YearComponent,
+)
 from epinterface.sbem.exceptions import NotImplementedParameter
 
 logger = logging.getLogger(__name__)
@@ -41,60 +42,55 @@ class OccupancyComponent(NamedObject, MetadataMixin, extra="forbid"):
         return self.MetabolicRate * avg_human_weight_kg * conversion_factor
 
     def add_people_to_idf_zone(
-        self, idf: IDF, target_zone_or_zone_list_name: str
-    ) -> IDF:
+        self, doc: EPDocument, target_zone_or_zone_list_name: str
+    ) -> EPDocument:
         """Add people to an IDF zone.
 
         Args:
-            idf (IDF): The IDF object to add the people to.
+            doc (EPDocument): The IDF document to add the people to.
             target_zone_or_zone_list_name (str): The name of the zone or zone list to add the people to.
 
         Returns:
-            IDF: The updated IDF object.
+            EPDocument: The updated IDF document.
         """
         if not self.IsOn:
-            return idf
+            return doc
 
         activity_sch_name = (
             f"{target_zone_or_zone_list_name}_{self.safe_name}_PEOPLE_Activity_Schedule"
         )
-        lim = ScheduleTypeLimits(
-            Name="AnyNumber",
-            LowerLimit=None,
-            UpperLimit=None,
+        if "AnyNumber" not in doc["ScheduleTypeLimits"]:
+            add_or_replace(
+                doc["ScheduleTypeLimits"].add,
+                "AnyNumber",
+                numeric_type="Continuous",
+                unit_type="Dimensionless",
+            )
+        activity_sch_year = add_constant_schedule(
+            doc, activity_sch_name, self.MetabolicRate_met_to_W, "AnyNumber"
         )
-        if not idf.getobject("SCHEDULETYPELIMITS", lim.Name):
-            lim.to_epbunch(idf)
-        activity_sch = Schedule.from_values(
-            Values=[self.MetabolicRate_met_to_W] * 8760,
-            Name=activity_sch_name,
-            Type=lim,  # pyright: ignore [reportArgumentType]
-        )
-        activity_sch_year, *_ = activity_sch.to_year_week_day()
-        activity_sch_year.to_epbunch(idf)
 
         name_prefix = f"{target_zone_or_zone_list_name}_{self.safe_name}_PEOPLE"
-        idf, year_name = self.Schedule.add_year_to_idf(
-            idf,
+        doc, year_name = self.Schedule.add_year_to_idf(
+            doc,
             name_prefix=None,
             summer_design_day_sch_name="d_AllOn_00",
             winter_design_day_sch_name="d_AllOn_00",
         )
-        people = People(
-            Name=name_prefix,
-            Zone_or_ZoneList_Name=target_zone_or_zone_list_name,
-            Number_of_People_Schedule_Name=year_name,
-            Number_of_People_Calculation_Method="People/Area",
-            Number_of_People=None,
-            Floor_Area_per_Person=None,
-            People_per_Floor_Area=self.PeopleDensity,
-            Fraction_Radiant=assumed_constants.FractionRadiantPeople,
-            Sensible_Heat_Fraction="autocalculate",
-            Activity_Level_Schedule_Name=activity_sch_year.Name,
+        add_or_replace(
+            # Untyped: 24.1 renamed a mean radiant temperature choice.
+            doc.get_collection("People").add,
+            name_prefix,
+            zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
+            number_of_people_schedule_name=year_name,
+            number_of_people_calculation_method="People/Area",
+            people_per_floor_area=self.PeopleDensity,
+            fraction_radiant=assumed_constants.FractionRadiantPeople,
+            sensible_heat_fraction="Autocalculate",
+            activity_level_schedule_name=activity_sch_year.name,
+            enable_ashrae_55_comfort_warnings="No",
         )
-
-        idf = people.add(idf)
-        return idf
+        return doc
 
 
 DimmingTypeType = Literal["Off", "Stepped", "Continuous"]
@@ -117,48 +113,46 @@ class LightingComponent(NamedObject, MetadataMixin, extra="forbid"):
     IsOn: BoolStr = Field(..., title="Lights are on")
 
     def add_lights_to_idf_zone(
-        self, idf: IDF, target_zone_or_zone_list_name: str
-    ) -> IDF:
+        self, doc: EPDocument, target_zone_or_zone_list_name: str
+    ) -> EPDocument:
         """Add lights to an IDF zone.
 
         Note that this makes some assumptions about the fraction visible/radiant/replaceable.
 
         Args:
-            idf (IDF): The IDF object to add the lights to.
+            doc (EPDocument): The IDF document to add the lights to.
             target_zone_or_zone_list_name (str): The name of the zone or zone list to add the lights to.
 
         Returns:
-            IDF: The updated IDF object.
+            EPDocument: The updated IDF document.
         """
         if not self.IsOn:
-            return idf
+            return doc
 
         if self.DimmingType != "Off":
             raise NotImplementedParameter("DimmingType:On", self.Name, "Lights")
 
         name_prefix = f"{target_zone_or_zone_list_name}_{self.safe_name}_LIGHTS"
-        idf, year_name = self.Schedule.add_year_to_idf(
-            idf,
+        doc, year_name = self.Schedule.add_year_to_idf(
+            doc,
             name_prefix=None,
             summer_design_day_sch_name="d_AllOn_00",
             winter_design_day_sch_name="d_AllOn_00",
         )
-        lights = Lights(
-            Name=name_prefix,
-            Zone_or_ZoneList_Name=target_zone_or_zone_list_name,
-            Schedule_Name=year_name,
-            Design_Level_Calculation_Method="Watts/Area",
-            Watts_per_Zone_Floor_Area=self.PowerDensity,
-            Watts_per_Person=None,
-            Lighting_Level=None,
-            Return_Air_Fraction=assumed_constants.ReturnAirFractionLights,
-            Fraction_Radiant=assumed_constants.FractionRadiantLights,
-            Fraction_Visible=assumed_constants.FractionVisibleLights,
-            Fraction_Replaceable=assumed_constants.FractionReplaceableLights,
-            EndUse_Subcategory=None,
+        add_or_replace(
+            # Untyped: the Watts/Area field was renamed in 24.1 (see watts_per_area).
+            doc.get_collection("Lights").add,
+            name_prefix,
+            zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
+            schedule_name=year_name,
+            design_level_calculation_method="Watts/Area",
+            **watts_per_area(doc, self.PowerDensity),
+            return_air_fraction=assumed_constants.ReturnAirFractionLights,
+            fraction_radiant=assumed_constants.FractionRadiantLights,
+            fraction_visible=assumed_constants.FractionVisibleLights,
+            fraction_replaceable=assumed_constants.FractionReplaceableLights,
         )
-        idf = lights.add(idf)
-        return idf
+        return doc
 
 
 class EquipmentComponent(NamedObject, MetadataMixin, extra="forbid"):
@@ -171,44 +165,42 @@ class EquipmentComponent(NamedObject, MetadataMixin, extra="forbid"):
     IsOn: BoolStr = Field(..., title="Equipment is on")
 
     def add_equipment_to_idf_zone(
-        self, idf: IDF, target_zone_or_zone_list_name: str
-    ) -> IDF:
+        self, doc: EPDocument, target_zone_or_zone_list_name: str
+    ) -> EPDocument:
         """Add equipment to an IDF zone.
 
         Args:
-            idf (IDF): The IDF object to add the equipment to.
+            doc (EPDocument): The IDF document to add the equipment to.
             target_zone_or_zone_list_name (str): The name of the zone or zone list to add the equipment to.
 
         Returns:
-            IDF: The updated IDF object.
+            EPDocument: The updated IDF document.
         """
         if not self.IsOn:
-            return idf
+            return doc
 
         name_prefix = f"{target_zone_or_zone_list_name}_{self.safe_name}_EQUIPMENT"
-        idf, year_name = self.Schedule.add_year_to_idf(
-            idf,
+        doc, year_name = self.Schedule.add_year_to_idf(
+            doc,
             name_prefix=None,
             summer_design_day_sch_name="d_AllOn_00",
             winter_design_day_sch_name="d_AllOn_00",
         )
-        equipment = ElectricEquipment(
-            Name=name_prefix,
-            Zone_or_ZoneList_Name=target_zone_or_zone_list_name,
-            Schedule_Name=year_name,
-            Design_Level_Calculation_Method="Watts/Area",
-            Watts_per_Zone_Floor_Area=self.PowerDensity,
-            Watts_per_Person=None,
-            Fraction_Latent=assumed_constants.FractionLatentEquipment,
-            Fraction_Radiant=assumed_constants.FractionRadiantEquipment,
-            Fraction_Lost=assumed_constants.FractionLostEquipment,
-            EndUse_Subcategory=None,
+        add_or_replace(
+            # Untyped: the Watts/Area field was renamed in 24.1 (see watts_per_area).
+            doc.get_collection("ElectricEquipment").add,
+            name_prefix,
+            zone_or_zonelist_or_space_or_spacelist_name=target_zone_or_zone_list_name,
+            schedule_name=year_name,
+            design_level_calculation_method="Watts/Area",
+            **watts_per_area(doc, self.PowerDensity),
+            fraction_latent=assumed_constants.FractionLatentEquipment,
+            fraction_radiant=assumed_constants.FractionRadiantEquipment,
+            fraction_lost=assumed_constants.FractionLostEquipment,
         )
-        idf = equipment.add(idf)
-        return idf
+        return doc
 
 
-# TODO: Potentially duplicative with HVACTempelateThermostat in epinterface > interface
 class ThermostatComponent(NamedObject, MetadataMixin, extra="forbid"):
     """A thermostat object in the SBEM library."""
 
@@ -250,21 +242,23 @@ class ZoneSpaceUseComponent(NamedObject, MetadataMixin, extra="forbid"):
 
     # TODO: Is this really necessary, or should it be lifted up to the ZoneComponent?
     # it currently is acting as a very bare bones passthrough.
-    def add_loads_to_idf_zone(self, idf: IDF, target_zone_name: str) -> IDF:
+    def add_loads_to_idf_zone(
+        self, doc: EPDocument, target_zone_name: str
+    ) -> EPDocument:
         """Add the loads to an IDF zone.
 
         This will add the people, equipment, and lights to the zone.
 
         Args:
-            idf (IDF): The IDF object to add the loads to.
+            doc (EPDocument): The IDF document to add the loads to.
             target_zone_name (str): The name of the zone to add the loads to.
 
         Returns:
-            IDF: The updated IDF object.
+            EPDocument: The updated IDF document.
         """
-        idf = self.Lighting.add_lights_to_idf_zone(idf, target_zone_name)
-        idf = self.Occupancy.add_people_to_idf_zone(idf, target_zone_name)
-        idf = self.Equipment.add_equipment_to_idf_zone(idf, target_zone_name)
-        # idf = self.Thermostat.add_thermostat_to_idf_zone(idf, target_zone_name)
+        doc = self.Lighting.add_lights_to_idf_zone(doc, target_zone_name)
+        doc = self.Occupancy.add_people_to_idf_zone(doc, target_zone_name)
+        doc = self.Equipment.add_equipment_to_idf_zone(doc, target_zone_name)
+        # doc = self.Thermostat.add_thermostat_to_idf_zone(doc, target_zone_name)
         # raise NotImplementedError
-        return idf
+        return doc

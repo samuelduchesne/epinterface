@@ -1,0 +1,147 @@
+{
+ "Building": [
+  {
+   "loads_convergence_tolerance_value": 0.04,
+   "maximum_number_of_warmup_days": 25,
+   "minimum_number_of_warmup_days": 6,
+   "name": "None",
+   "north_axis": 0.0,
+   "solar_distribution": "FullInteriorAndExterior",
+   "temperature_convergence_tolerance_value": 0.4,
+   "terrain": "Suburbs"
+  }
+ ],
+ "GlobalGeometryRules": [
+  {
+   "coordinate_system": "World",
+   "name": "",
+   "starting_vertex_position": "UpperLeftCorner",
+   "vertex_entry_direction": "CounterClockWise"
+  }
+ ],
+ "HeatBalanceAlgorithm": [
+  {
+   "algorithm": "ConductionTransferFunction",
+   "maximum_surface_convection_heat_transfer_coefficient_value": 1000.0,
+   "minimum_surface_convection_heat_transfer_coefficient_value": 0.1,
+   "name": "",
+   "surface_temperature_upper_limit": 200.0
+  }
+ ],
+ "Output:SQLite": [
+  {
+   "name": "",
+   "option_type": "SimpleAndTabular",
+   "unit_conversion_for_tabular_data": "UseOutputControlTableStyle"
+  }
+ ],
+ "Output:Table:SummaryReports": [
+  {
+   "name": "",
+   "reports": [
+    {
+     "report_name": "AllSummary"
+    }
+   ]
+  }
+ ],
+ "Output:VariableDictionary": [
+  {
+   "key_field": "Regular",
+   "name": ""
+  }
+ ],
+ "OutputControl:Table:Style": [
+  {
+   "column_separator": "HTML",
+   "name": ""
+  }
+ ],
+ "Site:GroundTemperature:BuildingSurface": [
+  {
+   "april_ground_temperature": 18.4,
+   "august_ground_temperature": 22.5,
+   "december_ground_temperature": 18.5,
+   "february_ground_temperature": 18.2,
+   "january_ground_temperature": 18.3,
+   "july_ground_temperature": 22.3,
+   "june_ground_temperature": 22.0,
+   "march_ground_temperature": 18.3,
+   "may_ground_temperature": 20.1,
+   "name": "",
+   "november_ground_temperature": 18.9,
+   "october_ground_temperature": 20.7,
+   "september_ground_temperature": 22.5
+  }
+ ],
+ "Site:Location": [
+  {
+   "elevation": 1611.0,
+   "latitude": 39.77,
+   "longitude": -104.87,
+   "name": "DENVER_STAPLETON_CO_USA_WMO_724690",
+   "time_zone": -7.0
+  }
+ ],
+ "Sizing:Parameters": [
+  {
+   "cooling_sizing_factor": 1.15,
+   "heating_sizing_factor": 1.15,
+   "name": ""
+  }
+ ],
+ "SizingPeriod:DesignDay": [
+  {
+   "barometric_pressure": 101281.0,
+   "daily_dry_bulb_temperature_range": 0.0,
+   "day_of_month": 21,
+   "day_type": "WinterDesignDay",
+   "daylight_saving_time_indicator": "No",
+   "dry_bulb_temperature_range_modifier_type": "DefaultMultipliers",
+   "humidity_condition_type": "Wetbulb",
+   "maximum_dry_bulb_temperature": -13.5,
+   "month": 1,
+   "name": "Boston-Logan.Intl.AP Ann Htg 99.6% Condns DB",
+   "rain_indicator": "No",
+   "sky_clearness": 0.0,
+   "snow_indicator": "No",
+   "solar_model_indicator": "ASHRAEClearSky",
+   "wetbulb_or_dewpoint_at_maximum_dry_bulb": -13.5,
+   "wind_direction": 300.0,
+   "wind_speed": 7.2
+  },
+  {
+   "ashrae_clear_sky_optical_depth_for_beam_irradiance_taub_": 0.472,
+   "ashrae_clear_sky_optical_depth_for_diffuse_irradiance_taud_": 2.185,
+   "barometric_pressure": 101281.0,
+   "daily_dry_bulb_temperature_range": 10.7,
+   "daily_wet_bulb_temperature_range": 4.4,
+   "day_of_month": 21,
+   "day_type": "SummerDesignDay",
+   "daylight_saving_time_indicator": "No",
+   "dry_bulb_temperature_range_modifier_type": "DefaultMultipliers",
+   "humidity_condition_type": "Wetbulb",
+   "maximum_dry_bulb_temperature": 32.7,
+   "month": 7,
+   "name": "Boston-Logan.Intl.AP Ann Clg .4% Condns DB=>MWB",
+   "rain_indicator": "No",
+   "snow_indicator": "No",
+   "solar_model_indicator": "ASHRAETau2017",
+   "wetbulb_or_dewpoint_at_maximum_dry_bulb": 22.8,
+   "wind_direction": 240.0,
+   "wind_speed": 6.1
+  }
+ ],
+ "SurfaceConvectionAlgorithm:Inside": [
+  {
+   "algorithm": "TARP",
+   "name": ""
+  }
+ ],
+ "SurfaceConvectionAlgorithm:Outside": [
+  {
+   "algorithm": "DOE-2",
+   "name": ""
+  }
+ ]
+}

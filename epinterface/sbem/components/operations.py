@@ -1,22 +1,20 @@
 """Operations components for the SBEM library."""
 
 from logging import getLogger
-
-from archetypal.idfclass import IDF
-from archetypal.schedule import Schedule, ScheduleTypeLimits
+from typing import TYPE_CHECKING
 
 from epinterface.constants import assumed_constants
+from epinterface.document import EPDocument, add_or_replace
 from epinterface.geometry import get_zone_floor_area, get_zone_glazed_area
-from epinterface.interface import (
-    HVACTemplateThermostat,
-    HVACTemplateZoneIdealLoadsAirSystem,
-    ScheduleDayHourly,
-    WaterUseEquipment,
-    ZoneVentilationWindAndStackOpenArea,
-)
+from epinterface.interface import add_constant_schedule, add_ideal_loads_template
 from epinterface.sbem.common import MetadataMixin, NamedObject
 from epinterface.sbem.components.space_use import ZoneSpaceUseComponent
 from epinterface.sbem.components.systems import DHWComponent, ZoneHVACComponent
+from epinterface.schedules import add_day_hourly_schedule
+
+if TYPE_CHECKING:
+    # The object classes exist only in idfkit's stubs.
+    from idfkit.document import AnyHVACTemplateThermostat
 
 logger = getLogger(__name__)
 
@@ -32,7 +30,9 @@ class ZoneOperationsComponent(
     HVAC: ZoneHVACComponent
     DHW: DHWComponent
 
-    def add_water_use_to_idf_zone(self, idf: IDF, target_zone_name: str) -> IDF:
+    def add_water_use_to_idf_zone(
+        self, doc: EPDocument, target_zone_name: str
+    ) -> EPDocument:
         """Handle adding water use to the zone based on both DHW and Operations.SpaceUse.WaterUse.
 
         We choose to execute this from the zone component interface because it requires context from both
@@ -56,16 +56,16 @@ class ZoneOperationsComponent(
         # that hook should probably be moved up.
 
         Args:
-            idf (IDF): The IDF object to add the operations to.
+            doc (EPDocument): The IDF document to add the operations to.
             target_zone_name (str): The name of the zone to add the operations to.
 
         Returns:
-            idf (IDF): The updated IDF object.
+            doc (EPDocument): The updated IDF document.
         """
         # TODO: should IsOn definitely live in DHW? should dhw be nullable?
         # should it live in spaceuse.wateruse for consistency?
         if not self.DHW.IsOn:
-            return idf
+            return doc
 
         # Acquire the relevant data fields
         flow_rate_per_person_per_day = (
@@ -79,12 +79,10 @@ class ZoneOperationsComponent(
 
         # determine zone area to then compute total people
         # we will do this by finding all matching surfaces and computing their areas.
-        zone = next(
-            (x for x in idf.idfobjects["ZONE"] if x.Name == target_zone_name), None
-        )
+        zone = doc["Zone"].get(target_zone_name)
         if zone is None:
             raise ValueError(f"NO_ZONE:{target_zone_name}")
-        area = get_zone_floor_area(idf, zone.Name)
+        area = get_zone_floor_area(doc, zone.name)
         total_ppl = occupant_density * area
 
         # Compute final flow rates.
@@ -92,45 +90,38 @@ class ZoneOperationsComponent(
         avg_flow_per_s = total_flow_per_day / (3600 * 24)  # m3/s
         # TODO: Update this rather than being constant rate
 
-        lim = "Temperature"
-        if not idf.getobject("SCHEDULETYPELIMITS", lim):
-            lim = ScheduleTypeLimits(
-                Name="Temperature",
-                LowerLimit=-60,
-                UpperLimit=200,
+        if "Temperature" not in doc["ScheduleTypeLimits"]:
+            add_or_replace(
+                doc["ScheduleTypeLimits"].add,
+                "Temperature",
+                lower_limit_value=-100.0,
+                upper_limit_value=100.0,
+                numeric_type="Continuous",
+                unit_type="Dimensionless",
             )
-            lim.to_epbunch(idf)
 
         # TODO: should we be using time-varying temperatures?
-        target_temperature_schedule = Schedule.constant_schedule(
-            value=water_supply_temperature,  # pyright: ignore [reportArgumentType]
-            Name=f"{water_use_name}_TargetWaterTemperatureSch",
-            Type="Temperature",
+        target_temperature_yr_schedule = add_constant_schedule(
+            doc,
+            f"{water_use_name}_TargetWaterTemperatureSch",
+            water_supply_temperature,
+            "Temperature",
         )
-        inlet_temperature_schedule = Schedule.constant_schedule(
-            value=water_temperature_inlet,  # pyright: ignore [reportArgumentType]
-            Name=f"{water_use_name}_InletWaterTemperatureSch",
-            Type="Temperature",
+        inlet_temperature_yr_schedule = add_constant_schedule(
+            doc,
+            f"{water_use_name}_InletWaterTemperatureSch",
+            water_temperature_inlet,
+            "Temperature",
         )
-
-        target_temperature_yr_schedule, *_ = (
-            target_temperature_schedule.to_year_week_day()
-        )
-        inlet_temperature_yr_schedule, *_ = (
-            inlet_temperature_schedule.to_year_week_day()
-        )
-
-        target_temperature_yr_schedule.to_epbunch(idf)
-        inlet_temperature_yr_schedule.to_epbunch(idf)
 
         if water_use_frac_sched.schedule_type_limits != "Fraction":
             msg = f"WATER_USE_FRACTION_SCHEDULE_TYPE_NOT_FRACTION:{water_use_name}"
             raise ValueError(msg)
 
-        idf, water_use_frac_sch_name = water_use_frac_sched.add_year_to_idf(
-            idf, name_prefix=None
+        doc, water_use_frac_sch_name = water_use_frac_sched.add_year_to_idf(
+            doc, name_prefix=None
         )
-        # sch_obj = idf.getobject("SCHEDULE:YEAR", water_use_frac_sch_name)
+        # sch_obj = doc["Schedule:Year"][water_use_frac_sch_name]
         # arch_sch = Schedule.from_epbunch(sch_obj)
         # values = np.array(arch_sch.Values)
         # avg_fractional_value = np.sum(values) / 8760
@@ -139,32 +130,30 @@ class ZoneOperationsComponent(
         # total_fractional_value * peak_flow_rate_per_s = avg_float_per_s
         peak_flow_rate_per_s = avg_flow_per_s / avg_fractional_value
 
-        hot_water = WaterUseEquipment(
-            Name=water_use_name,
-            EndUse_Subcategory="Domestic Hot Water",
-            Peak_Flow_Rate=peak_flow_rate_per_s,
-            Flow_Rate_Fraction_Schedule_Name=water_use_frac_sch_name,
-            Zone_Name=target_zone_name,
-            Target_Temperature_Schedule_Name=target_temperature_yr_schedule.Name,
-            Hot_Water_Supply_Temperature_Schedule_Name=target_temperature_schedule.Name,
-            Cold_Water_Supply_Temperature_Schedule_Name=inlet_temperature_schedule.Name,
-            Sensible_Fraction_Schedule_Name=None,
-            Latent_Fraction_Schedule_Name=None,
+        add_or_replace(
+            doc["WaterUse:Equipment"].add,
+            water_use_name,
+            end_use_subcategory="Domestic Hot Water",
+            peak_flow_rate=float(peak_flow_rate_per_s),
+            flow_rate_fraction_schedule_name=water_use_frac_sch_name,
+            target_temperature_schedule_name=target_temperature_yr_schedule.name,
+            hot_water_supply_temperature_schedule_name=target_temperature_yr_schedule.name,
+            cold_water_supply_temperature_schedule_name=inlet_temperature_yr_schedule.name,
+            zone_name=target_zone_name,
         )
-        idf = hot_water.add(idf)
-        return idf
+        return doc
 
     def add_thermostat_to_idf_zone(
-        self, idf: IDF, target_zone_name: str
-    ) -> HVACTemplateThermostat:
+        self, doc: EPDocument, target_zone_name: str
+    ) -> "AnyHVACTemplateThermostat":
         """Add a thermostat to the zone.
 
         Args:
-            idf (IDF): The IDF object to add the thermostat to.
+            doc (EPDocument): The IDF document to add the thermostat to.
             target_zone_name (str): The name of the zone to add the thermostat to.
 
         Returns:
-            idf (IDF): The updated IDF object.
+            thermostat (AnyHVACTemplateThermostat): The `HVACTemplate:Thermostat` object.
         """
         thermostat_name = (
             f"{target_zone_name}_{self.SpaceUse.Thermostat.safe_name}_THERMOSTAT"
@@ -176,167 +165,117 @@ class ZoneOperationsComponent(
         cooling_schedule_name = None
         if heating_schedule is not None:
             _, heat_high = self.SpaceUse.Thermostat.HeatingSchedule.bounds
-            heating_design_day = ScheduleDayHourly(
-                Name=f"{thermostat_name}_HeatingDesignDay",
-                Schedule_Type_Limits_Name="Temperature",
-                Hour_1=heat_high,
-                Hour_2=heat_high,
-                Hour_3=heat_high,
-                Hour_4=heat_high,
-                Hour_5=heat_high,
-                Hour_6=heat_high,
-                Hour_7=heat_high,
-                Hour_8=heat_high,
-                Hour_9=heat_high,
-                Hour_10=heat_high,
-                Hour_11=heat_high,
-                Hour_12=heat_high,
-                Hour_13=heat_high,
-                Hour_14=heat_high,
-                Hour_15=heat_high,
-                Hour_16=heat_high,
-                Hour_17=heat_high,
-                Hour_18=heat_high,
-                Hour_19=heat_high,
-                Hour_20=heat_high,
-                Hour_21=heat_high,
-                Hour_22=heat_high,
-                Hour_23=heat_high,
-                Hour_24=heat_high,
+            heating_design_day_name = f"{thermostat_name}_HeatingDesignDay"
+            add_day_hourly_schedule(
+                doc, heating_design_day_name, "Temperature", [heat_high] * 24
             )
-            idf = heating_design_day.add(idf)
-            idf, heating_schedule_name = heating_schedule.add_year_to_idf(
-                idf,
+            doc, heating_schedule_name = heating_schedule.add_year_to_idf(
+                doc,
                 name_prefix=None,
-                winter_design_day_sch_name=heating_design_day.Name,
-                summer_design_day_sch_name=heating_design_day.Name,
+                winter_design_day_sch_name=heating_design_day_name,
+                summer_design_day_sch_name=heating_design_day_name,
             )
         if cooling_schedule is not None:
             cool_low, _ = self.SpaceUse.Thermostat.CoolingSchedule.bounds
-            cooling_design_day = ScheduleDayHourly(
-                Name=f"{thermostat_name}_CoolingDesignDay",
-                Schedule_Type_Limits_Name="Temperature",
-                Hour_1=cool_low,
-                Hour_2=cool_low,
-                Hour_3=cool_low,
-                Hour_4=cool_low,
-                Hour_5=cool_low,
-                Hour_6=cool_low,
-                Hour_7=cool_low,
-                Hour_8=cool_low,
-                Hour_9=cool_low,
-                Hour_10=cool_low,
-                Hour_11=cool_low,
-                Hour_12=cool_low,
-                Hour_13=cool_low,
-                Hour_14=cool_low,
-                Hour_15=cool_low,
-                Hour_16=cool_low,
-                Hour_17=cool_low,
-                Hour_18=cool_low,
-                Hour_19=cool_low,
-                Hour_20=cool_low,
-                Hour_21=cool_low,
-                Hour_22=cool_low,
-                Hour_23=cool_low,
-                Hour_24=cool_low,
+            cooling_design_day_name = f"{thermostat_name}_CoolingDesignDay"
+            add_day_hourly_schedule(
+                doc, cooling_design_day_name, "Temperature", [cool_low] * 24
             )
-
-            idf = cooling_design_day.add(idf)
-            idf, cooling_schedule_name = cooling_schedule.add_year_to_idf(
-                idf,
+            doc, cooling_schedule_name = cooling_schedule.add_year_to_idf(
+                doc,
                 name_prefix=None,
-                winter_design_day_sch_name=cooling_design_day.Name,
-                summer_design_day_sch_name=cooling_design_day.Name,
+                winter_design_day_sch_name=cooling_design_day_name,
+                summer_design_day_sch_name=cooling_design_day_name,
             )
 
-        thermostat = HVACTemplateThermostat(
-            Name=thermostat_name,
-            Heating_Setpoint_Schedule_Name=heating_schedule_name,
-            Constant_Heating_Setpoint=self.SpaceUse.Thermostat.HeatingSetpoint
+        return add_or_replace(
+            doc["HVACTemplate:Thermostat"].add,
+            thermostat_name,
+            heating_setpoint_schedule_name=heating_schedule_name,
+            constant_heating_setpoint=self.SpaceUse.Thermostat.HeatingSetpoint
             if self.SpaceUse.Thermostat.HeatingSchedule is None
             else None,
-            Cooling_Setpoint_Schedule_Name=cooling_schedule_name,
-            Constant_Cooling_Setpoint=self.SpaceUse.Thermostat.CoolingSetpoint
+            cooling_setpoint_schedule_name=cooling_schedule_name,
+            constant_cooling_setpoint=self.SpaceUse.Thermostat.CoolingSetpoint
             if self.SpaceUse.Thermostat.CoolingSchedule is None
             else None,
         )
 
-        idf = thermostat.add(idf)
-
-        return thermostat
-
-    def add_conditioning_to_idf_zone(self, idf: IDF, target_zone_name: str) -> IDF:
+    def add_conditioning_to_idf_zone(
+        self, doc: EPDocument, target_zone_name: str
+    ) -> EPDocument:
         """Add conditioning to an IDF zone."""
-        thermostat = self.add_thermostat_to_idf_zone(idf, target_zone_name)
+        thermostat = self.add_thermostat_to_idf_zone(doc, target_zone_name)
         if self.HVAC.Ventilation.DCV != "NoDCV":
             # check the design spec outdoor air for the DCV
             raise NotImplementedError("DCV not implemented.")
-        hvac_template = HVACTemplateZoneIdealLoadsAirSystem(
-            Zone_Name=target_zone_name,
-            Template_Thermostat_Name=thermostat.Name,
-            Heating_Availability_Schedule_Name=None
+        add_ideal_loads_template(
+            doc,
+            target_zone_name,
+            thermostat.name,
+            minimum_cooling_supply_air_temperature=13.0,
+            heating_limit="LimitFlowRateAndCapacity",
+            maximum_heating_air_flow_rate="autosize",
+            maximum_sensible_heating_capacity="autosize",
+            cooling_limit="LimitFlowRateAndCapacity",
+            maximum_cooling_air_flow_rate="autosize",
+            maximum_total_cooling_capacity="autosize",
+            heating_availability_schedule_name=None
             if self.HVAC.ConditioningSystems.Heating
             else "AlwaysOff",
-            Cooling_Availability_Schedule_Name=None
+            cooling_availability_schedule_name=None
             if self.HVAC.ConditioningSystems.Cooling
             else "AlwaysOff",
-            Heating_Limit="LimitFlowRateAndCapacity",
-            Maximum_Heating_Air_Flow_Rate="autosize",
-            Maximum_Sensible_Heating_Capacity="autosize",
-            Cooling_Limit="LimitFlowRateAndCapacity",
-            Maximum_Cooling_Air_Flow_Rate="autosize",
-            Maximum_Total_Cooling_Capacity="autosize",
-            Minimum_Cooling_Supply_Air_Temperature=13,
-            Humidification_Control_Type="None",
-            Outdoor_Air_Flow_Rate_per_Person=self.HVAC.Ventilation.FreshAirPerPerson,
-            Outdoor_Air_Flow_Rate_per_Zone_Floor_Area=self.HVAC.Ventilation.FreshAirPerFloorArea,
-            Outdoor_Air_Flow_Rate_per_Zone=0,
-            Demand_Controlled_Ventilation_Type="None"
-            if self.HVAC.Ventilation.DCV == "NoDCV"
-            else self.HVAC.Ventilation.DCV,
-            Outdoor_Air_Economizer_Type=self.HVAC.Ventilation.Economizer,
-            Heat_Recovery_Type="None"
-            if self.HVAC.Ventilation.HRV == "NoHRV"
-            else self.HVAC.Ventilation.HRV,
-            Sensible_Heat_Recovery_Effectiveness=assumed_constants.Sensible_Heat_Recovery_Effectiveness,
-            Latent_Heat_Recovery_Effectiveness=assumed_constants.Latent_Heat_Recovery_Effectiveness,
-            Outdoor_Air_Method="Sum"
+            outdoor_air_method="Sum"
             if self.HVAC.Ventilation.Provider == "Mechanical"
             or self.HVAC.Ventilation.Provider == "Both"
             else "None",
+            outdoor_air_flow_rate_per_person=self.HVAC.Ventilation.FreshAirPerPerson,
+            outdoor_air_flow_rate_per_zone_floor_area=self.HVAC.Ventilation.FreshAirPerFloorArea,
+            demand_controlled_ventilation_type="None"
+            if self.HVAC.Ventilation.DCV == "NoDCV"
+            else self.HVAC.Ventilation.DCV,
+            outdoor_air_economizer_type=self.HVAC.Ventilation.Economizer,
+            heat_recovery_type="None"
+            if self.HVAC.Ventilation.HRV == "NoHRV"
+            else self.HVAC.Ventilation.HRV,
+            sensible_heat_recovery_effectiveness=assumed_constants.Sensible_Heat_Recovery_Effectiveness,
+            latent_heat_recovery_effectiveness=assumed_constants.Latent_Heat_Recovery_Effectiveness,
         )
-        idf = hvac_template.add(idf)
 
         if self.HVAC.Ventilation.Provider == "Natural":
-            # total_window_area = calculate_window_area_for_zone(idf, target_zone_name)
-            total_window_area = get_zone_glazed_area(idf, target_zone_name)
+            # total_window_area = calculate_window_area_for_zone(doc, target_zone_name)
+            total_window_area = get_zone_glazed_area(doc, target_zone_name)
 
             if total_window_area == 0:
                 logger.warning(
                     f"No windows found for natural ventilation in zone {target_zone_name}"
                 )
-                return idf
+                return doc
             vent_wind_stack_name = f"{target_zone_name}_{self.SpaceUse.Thermostat.safe_name}_{self.HVAC.Ventilation.safe_name}_VENTILATION_WIND_AND_STACK_OPEN_AREA"
 
-            idf, vent_wind_stack_name_sch = (
+            doc, vent_wind_stack_name_sch = (
                 self.HVAC.Ventilation.Schedule.add_year_to_idf(
-                    idf,
+                    doc,
                     name_prefix=None,
                     summer_design_day_sch_name="d_AllOff_00",
                     winter_design_day_sch_name="d_AllOff_00",
                 )
             )
-            ventilation_wind_and_stack_open_area = ZoneVentilationWindAndStackOpenArea(
-                Name=vent_wind_stack_name,
-                Zone_or_Space_Name=target_zone_name,
-                Minimum_Outdoor_Temperature=12,
-                Height_Difference=0,
-                Delta_Temperature=2,
-                Maximum_Outdoor_Temperature=25,
-                Opening_Area=total_window_area,
-                Opening_Area_Fraction_Schedule_Name=vent_wind_stack_name_sch,
+            add_or_replace(
+                doc["ZoneVentilation:WindandStackOpenArea"].add,
+                vent_wind_stack_name,
+                zone_or_space_name=target_zone_name,
+                opening_area=float(total_window_area),
+                opening_area_fraction_schedule_name=vent_wind_stack_name_sch,
+                opening_effectiveness="Autocalculate",
+                effective_angle=0.0,
+                height_difference=0.0,
+                discharge_coefficient_for_opening="Autocalculate",
+                delta_temperature=2.0,
+                minimum_outdoor_temperature=12.0,
+                maximum_outdoor_temperature=25.0,
+                maximum_wind_speed=40.0,
             )
-            idf = ventilation_wind_and_stack_open_area.add(idf)
 
-        return idf
+        return doc

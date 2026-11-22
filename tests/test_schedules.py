@@ -1,0 +1,213 @@
+"""Tests for idfkit value schedules."""
+
+from itertools import chain
+from pathlib import Path
+
+import idfkit
+import idfkit.schedules
+import numpy as np
+import pytest
+
+from epinterface.interface import add_constant_schedule, add_default_schedules
+from epinterface.schedules import add_values_schedule
+
+REGRESSION = Path(__file__).parent / "data" / "regression"
+
+
+def _values(doc, name):
+    return idfkit.schedules.values(doc["Schedule:Year"][name], year=2018, document=doc)
+
+
+def test_add_values_schedule_round_trips(doc):
+    """A daily-repeating profile reproduces exactly and needs one day object."""
+    vals = np.tile(np.r_[np.zeros(8), np.ones(10), np.zeros(6)], 365)
+    result = add_values_schedule(doc, "occ", vals, type_limits="Fraction")
+    assert result.name == "occ"
+    assert np.allclose(_values(doc, "occ"), vals)
+    assert len(doc["Schedule:Day:Hourly"]) == 1
+    assert len(doc["Schedule:Week:Daily"]) == 1
+    assert doc["Schedule:Day:Hourly"]["d_occ_00"] is not None
+    assert doc["Schedule:Week:Daily"]["w_occ_00"] is not None
+
+
+def _weekday_varying(rng, last_day_distinct=True):
+    week = rng.random((7, 24))
+    week[5:] = 0.0
+    days = np.tile(week, (53, 1))[:365]
+    if last_day_distinct:
+        days[-1] = rng.random(24)
+    return days.reshape(-1)
+
+
+def test_add_values_schedule_drops_day_365_like_archetypal(doc):
+    """Weekday variation survives; the 365th day is not in any week."""
+    vals = _weekday_varying(np.random.default_rng(0))
+    result = add_values_schedule(doc, "var", vals, type_limits="Fraction")
+    evaluated = _values(doc, "var")
+    assert np.allclose(evaluated[: 364 * 24], vals[: 364 * 24])
+    # Dec 31 (a Monday in 2018) reuses the last week's Monday profile.
+    assert np.allclose(evaluated[364 * 24 :], vals[357 * 24 : 358 * 24])
+    # Identical weeks collapse into one block stretched to Dec 31.
+    weeks = result.to_dict()["schedule_weeks"]
+    assert len(weeks) == 1
+    assert weeks[0]["end_month"] == 12
+    assert weeks[0]["end_day"] == 31
+
+
+def test_add_values_schedule_default_puts_jan_1_in_monday_field(doc):
+    """Default (archetypal) mapping: the series' first day fills the Monday field."""
+    vals = np.zeros((365, 24))
+    vals[0] = 1.0
+    add_values_schedule(doc, "mon", vals.reshape(-1), "Fraction")
+    week = doc["Schedule:Week:Daily"]["w_mon_01"]
+    assert week.monday_schedule_day_name == "d_mon_01"
+    assert week.sunday_schedule_day_name == "d_mon_00"
+
+
+def test_add_values_schedule_sunday_start_weekday_mapping(doc):
+    """With Jan 1 = Sunday, a profile set on the first Monday lands on Monday."""
+    vals = np.zeros((365, 24))
+    vals[1::7] = 1.0  # series day 1 = Monday Jan 2 2017, and every Monday after
+    add_values_schedule(
+        doc, "sun", vals.reshape(-1), "Fraction", first_weekday="sunday"
+    )
+    week = doc["Schedule:Week:Daily"]["w_sun_00"]
+    assert week.monday_schedule_day_name == "d_sun_01"
+    assert week.sunday_schedule_day_name == "d_sun_00"
+    evaluated = np.array(
+        idfkit.schedules.values(doc["Schedule:Year"]["sun"], year=2017, document=doc)
+    ).reshape(365, 24)
+    assert (evaluated[1] == 1.0).all()  # Monday Jan 2 2017
+    assert (evaluated[0] == 0.0).all()  # Sunday Jan 1
+    assert (evaluated[2] == 0.0).all()  # Tuesday Jan 3
+    assert np.allclose(evaluated[:364], vals[:364])
+
+
+def _normalize(values):
+    """Strings, with numerics as floats and trailing blanks dropped."""
+    out = []
+    for v in values:
+        try:
+            out.append(float(v))
+        except (TypeError, ValueError):
+            out.append(str(v))
+    while out and out[-1] == "":
+        out.pop()
+    return out
+
+
+def _field_values(obj):
+    """Name and field values of an idfkit object."""
+    return _normalize(obj.fieldvalues)
+
+
+def _year_field_values(obj):
+    """Name, limits and flattened (week, start, end) blocks of a Schedule:Year."""
+    blocks = [
+        [
+            b["schedule_week_name"],
+            b["start_month"],
+            b["start_day"],
+            b["end_month"],
+            b["end_day"],
+        ]
+        for b in obj.schedule_weeks
+    ]
+    return _normalize([
+        obj.name,
+        obj.schedule_type_limits_name,
+        *chain.from_iterable(blocks),
+    ])
+
+
+def test_add_values_schedule_constant_matches_baseline_structure(doc):
+    """A constant series yields the one day / week / block seen in built.idf."""
+    baseline = idfkit.load_idf(
+        str(REGRESSION / "by_storey_plain" / "built.idf"),
+        strict_parsing=False,
+        strict=False,
+    )
+    add_values_schedule(doc, "Always_On", np.ones(8760), "Fraction")
+    for kind, name in (
+        ("Schedule:Day:Hourly", "d_Always_On_00"),
+        ("Schedule:Week:Daily", "w_Always_On_00"),
+    ):
+        assert _field_values(doc.get_collection(kind)[name]) == _field_values(
+            baseline.get_collection(kind)[name]
+        )
+    assert _year_field_values(doc["Schedule:Year"]["Always_On"]) == _year_field_values(
+        baseline["Schedule:Year"]["Always_On"]
+    )
+    assert len(doc["Schedule:Day:Hourly"]) == 1
+    assert len(doc["Schedule:Week:Daily"]) == 1
+
+
+def test_add_values_schedule_rejects_wrong_length(doc):
+    """Only 8760 values are accepted."""
+    with pytest.raises(ValueError, match="8760"):
+        add_values_schedule(doc, "x", [1.0] * 24, "Fraction")
+
+
+def _schedule_names(doc):
+    """Names of every schedule object, in collection order."""
+    return {
+        t: [o.name for o in doc[t]]
+        for t in ("Schedule:Year", "Schedule:Week:Daily", "Schedule:Day:Hourly")
+    }
+
+
+def test_identical_repeat_leaves_schedule_untouched(doc):
+    """Writing the same schedule again reuses it, without reordering."""
+    first = add_constant_schedule(doc, "A", 1)
+    add_constant_schedule(doc, "B", 0)
+    before = _schedule_names(doc)
+
+    again = add_constant_schedule(doc, "A", 1)
+
+    assert again.name == first.name
+    assert _schedule_names(doc) == before
+
+
+def test_different_repeat_replaces_schedule(doc):
+    """A different schedule under the same name replaces the old one."""
+    add_constant_schedule(doc, "A", 1)
+    add_constant_schedule(doc, "A", 0.5)
+
+    assert [o.name for o in doc["Schedule:Year"]] == ["A"]
+    assert len(doc["Schedule:Day:Hourly"]) == 1
+    day = doc["Schedule:Day:Hourly"]["d_A_00"]
+    assert day.hour_1 == 0.5
+    assert day.hour_24 == 0.5
+
+
+def test_orphan_generated_objects_do_not_raise(doc):
+    """A leftover day object with no year of that name is replaced, not an error."""
+    doc["Schedule:Day:Hourly"].add("d_A_00", schedule_type_limits_name="Fraction")
+
+    add_constant_schedule(doc, "A", 1)
+
+    assert doc["Schedule:Day:Hourly"]["d_A_00"].hour_1 == 1
+    assert len(doc["Schedule:Day:Hourly"]) == 1
+
+
+def test_default_schedules_twice(doc):
+    """Adding the default schedules repeatedly is a no-op."""
+    add_default_schedules(doc)
+    before = _schedule_names(doc)
+    add_default_schedules(doc)
+    assert _schedule_names(doc) == before
+
+
+def test_rewrite_with_over_100_distinct_days(doc):
+    """Schedules with three-digit day names (d_S_100...) can be replaced."""
+    rng = np.random.default_rng(1)
+    first = rng.random(8760)
+    second = rng.random(8760)
+    add_values_schedule(doc, "S", first, "Fraction")
+    assert "d_S_100" in doc["Schedule:Day:Hourly"]
+
+    add_values_schedule(doc, "S", second, "Fraction")
+
+    names = [o.name for o in doc["Schedule:Day:Hourly"]]
+    assert len(names) == len(set(names)) == 364
+    assert np.allclose(_values(doc, "S")[: 364 * 24], second[: 364 * 24])
