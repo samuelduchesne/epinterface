@@ -22,8 +22,10 @@ from epinterface.sbem.common import (
     NanStr,
 )
 from epinterface.sbem.components.materials import (
+    AssemblyLifeCycleMixin,
     ConstructionComponentSurfaceType,
     ConstructionMaterialComponent,
+    MaterialLifeCycleMixin,
     StandardMaterialMetadataMixin,
 )
 from epinterface.sbem.components.schedules import YearComponent
@@ -77,6 +79,7 @@ GasTypeName = Literal["Air", "Argon", "Krypton", "Xenon"]
 
 class GlazingMaterialComponent(
     NamedObject,
+    MaterialLifeCycleMixin,
     StandardMaterialMetadataMixin,
     MetadataMixin,
     extra="forbid",
@@ -118,6 +121,7 @@ class GlazingMaterialComponent(
 
 class GasMaterialComponent(
     NamedObject,
+    MaterialLifeCycleMixin,
     StandardMaterialMetadataMixin,
     MetadataMixin,
     extra="forbid",
@@ -189,6 +193,7 @@ MAX_GLAZING_LAYERS = 4
 
 class GlazingConstructionLayeredComponent(
     NamedObject,
+    AssemblyLifeCycleMixin,
     StandardMaterialMetadataMixin,
     MetadataMixin,
     extra="forbid",
@@ -428,6 +433,7 @@ class ConstructionLayerComponent(BaseModel, extra="forbid"):
 
 class ConstructionAssemblyComponent(
     NamedObject,
+    AssemblyLifeCycleMixin,
     MetadataMixin,
     extra="forbid",
 ):

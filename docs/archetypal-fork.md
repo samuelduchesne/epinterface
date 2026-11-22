@@ -30,6 +30,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-9, window settings | Operable window area and window shading, `WindowSettingsComponent` on the zone envelope. |
 | UP-9, composer | The composer leaves out the component fields of UP-9, which the database does not store. |
 | UP-9, archetype metadata | Construction years, countries, climate zones, authors, version, lifespan and descriptive fields on `Archetype`. |
+| UP-9, life-cycle fields | Embodied energy, transport, substitution and structural properties of materials; assembly and disassembly carbon, cost and energy of assemblies. |
 
 ## Classes
 
@@ -662,6 +663,55 @@ life-cycle assessment): the builder does not read them.
 | `Version` | `Version` |
 | `Lifespan` | `Lifespan` |
 | `Category`, `Comment`, `DataSource` | `Category`, `Comments`, `DataSource` |
+
+## Life-cycle fields of materials and assemblies (UP-9)
+
+SBEM materials had a cost, a rate unit, a life and an embodied carbon
+(`EnvironmentalMixin`). UMI's life-cycle module needs more, so two mixins of
+`epinterface.sbem.components.materials` add it. All fields are optional
+(`None`: not known) and are not simulated.
+
+### `MaterialLifeCycleMixin`
+
+On `ConstructionMaterialComponent`, `GlazingMaterialComponent` and
+`GasMaterialComponent` (UMI `MaterialBase`). Quantities are per `RateUnit`,
+like `EmbodiedCarbon`; a UMI translator sets `RateUnit="kg"`.
+
+| Field | Type | Unit | Default | UMI field |
+|---|---|---|---|---|
+| `EmbodiedEnergy` | `float \| None`, ≥ 0 | MJ/unit | `None` | `EmbodiedEnergy` |
+| `TransportCarbon` | `float \| None`, ≥ 0 | kgCO₂e/(unit·km) | `None` | `TransportCarbon` |
+| `TransportDistance` | `float \| None`, ≥ 0 | km | `None` | `TransportDistance` |
+| `TransportEnergy` | `float \| None`, ≥ 0 | MJ/(unit·km) | `None` | `TransportEnergy` |
+| `SubstitutionRatePattern` | `list[float] \| None` | – | `None` | `SubstitutionRatePattern` |
+| `SubstitutionTimestep` | `float \| None`, ≥ 0 | years | `None` | `SubstitutionTimestep` |
+
+### Opaque material properties
+
+On `ConstructionMaterialComponent` only (UMI `OpaqueMaterial`).
+
+| Field | Type | Unit | Default | UMI field |
+|---|---|---|---|---|
+| `MoistureDiffusionResistance` | `float \| None`, ≥ 0 | – | `None` | `MoistureDiffusionResistance` |
+| `DesignStrength` | `float \| None`, ≥ 0 | Pa | `None` | `DesignStrength` |
+| `ModulusOfElasticity` | `float \| None`, ≥ 0 | Pa | `None` | `ModulusOfElasticity` |
+
+### `AssemblyLifeCycleMixin`
+
+On `ConstructionAssemblyComponent`, `GlazingConstructionLayeredComponent` and
+`StructureComponent` (UMI `ConstructionBase`). Quantities are per square
+metre of assembly.
+
+| Field | Type | Unit | Default | UMI field |
+|---|---|---|---|---|
+| `AssemblyCarbon` | `float \| None`, ≥ 0 | kgCO₂e/m² | `None` | `AssemblyCarbon` |
+| `AssemblyCost` | `float \| None`, ≥ 0 | currency/m² | `None` | `AssemblyCost` |
+| `AssemblyEnergy` | `float \| None`, ≥ 0 | MJ/m² | `None` | `AssemblyEnergy` |
+| `DisassemblyCarbon` | `float \| None`, ≥ 0 | kgCO₂e/m² | `None` | `DisassemblyCarbon` |
+| `DisassemblyEnergy` | `float \| None`, ≥ 0 | MJ/m² | `None` | `DisassemblyEnergy` |
+
+The SBEM database does not store these fields: components read from it have
+them unset.
 
 ## Example
 

@@ -26,6 +26,58 @@ class EnvironmentalMixin(BaseModel):
     )
 
 
+class MaterialLifeCycleMixin(BaseModel):
+    """Life-cycle data of a material, beyond its cost and embodied carbon.
+
+    Quantities are per `RateUnit` of the material, like `EmbodiedCarbon`.
+    """
+
+    EmbodiedEnergy: float | None = Field(
+        default=None, title="Embodied energy [MJ/unit]", ge=0
+    )
+    TransportCarbon: float | None = Field(
+        default=None, title="Transport carbon [kgCO2e/unit/km]", ge=0
+    )
+    TransportDistance: float | None = Field(
+        default=None, title="Transport distance [km]", ge=0
+    )
+    TransportEnergy: float | None = Field(
+        default=None, title="Transport energy [MJ/unit/km]", ge=0
+    )
+    SubstitutionRatePattern: list[float] | None = Field(
+        default=None,
+        title="Substitution rate pattern",
+        description=(
+            "Fraction of the material replaced at each substitution, one value per "
+            "substitution, repeated."
+        ),
+    )
+    SubstitutionTimestep: float | None = Field(
+        default=None, title="Substitution timestep [years]", ge=0
+    )
+
+
+class AssemblyLifeCycleMixin(BaseModel):
+    """Life-cycle data of an assembly: putting it together and taking it apart.
+
+    Quantities are per square metre of assembly.
+    """
+
+    AssemblyCarbon: float | None = Field(
+        default=None, title="Assembly carbon [kgCO2e/m2]", ge=0
+    )
+    AssemblyCost: float | None = Field(default=None, title="Assembly cost [$/m2]", ge=0)
+    AssemblyEnergy: float | None = Field(
+        default=None, title="Assembly energy [MJ/m2]", ge=0
+    )
+    DisassemblyCarbon: float | None = Field(
+        default=None, title="Disassembly carbon [kgCO2e/m2]", ge=0
+    )
+    DisassemblyEnergy: float | None = Field(
+        default=None, title="Disassembly energy [MJ/m2]", ge=0
+    )
+
+
 class StandardMaterialMetadataMixin(EnvironmentalMixin, MetadataMixin):
     """Standard metadata for a SBEM data."""
 
@@ -134,6 +186,7 @@ class ConstructionMaterialProperties(
 
 class ConstructionMaterialComponent(
     ConstructionMaterialProperties,
+    MaterialLifeCycleMixin,
     StandardMaterialMetadataMixin,
     NamedObject,
     MetadataMixin,
@@ -141,4 +194,18 @@ class ConstructionMaterialComponent(
 ):
     """Construction material object."""
 
-    pass
+    MoistureDiffusionResistance: float | None = Field(
+        default=None,
+        title="Moisture diffusion resistance factor [-]",
+        description="Not simulated.",
+        ge=0,
+    )
+    DesignStrength: float | None = Field(
+        default=None, title="Design strength [Pa]", description="Not simulated.", ge=0
+    )
+    ModulusOfElasticity: float | None = Field(
+        default=None,
+        title="Modulus of elasticity [Pa]",
+        description="Not simulated.",
+        ge=0,
+    )
