@@ -257,6 +257,35 @@ class Archetype(NamedObject):
     Basement: BasementAssumptions = Field(
         default_factory=lambda: BasementAssumptions(UseFraction=None, Conditioned=False)
     )
+    YearFrom: int | None = Field(
+        default=None, description="First construction year the archetype covers."
+    )
+    YearTo: int | None = Field(
+        default=None, description="Last construction year the archetype covers."
+    )
+    Country: list[str] = Field(
+        default_factory=list, description="Countries the archetype applies to."
+    )
+    ClimateZone: list[str] = Field(
+        default_factory=list, description="Climate zones the archetype applies to."
+    )
+    Authors: list[str] = Field(
+        default_factory=list, description="Authors of the archetype."
+    )
+    AuthorEmails: list[str] = Field(
+        default_factory=list, description="E-mail addresses of the authors."
+    )
+    Version: str | None = Field(
+        default=None, description="Version of the archetype's content."
+    )
+    Lifespan: int | None = Field(
+        default=None, ge=0, description="Lifespan of the building [years]."
+    )
+    Category: str | None = Field(default=None, description="Category of the archetype.")
+    Comment: str | None = Field(default=None, description="Comment on the archetype.")
+    DataSource: str | None = Field(
+        default=None, description="Source of the archetype's data."
+    )
 
     @field_validator("SchemaVersion", mode="after")
     @classmethod
@@ -269,6 +298,19 @@ class Archetype(NamedObject):
         if v not in SUPPORTED_ARCHETYPE_SCHEMA_VERSIONS:
             raise ArchetypeSchemaVersionError(v)
         return ARCHETYPE_SCHEMA_VERSION
+
+    @model_validator(mode="after")
+    def _check_years(self) -> "Archetype":
+        if (
+            self.YearFrom is not None
+            and self.YearTo is not None
+            and self.YearFrom > self.YearTo
+        ):
+            msg = (
+                f"YearFrom ({self.YearFrom}) must not be after YearTo ({self.YearTo})."
+            )
+            raise ValueError(msg)
+        return self
 
     @model_validator(mode="after")
     def _check_groups(self) -> "Archetype":

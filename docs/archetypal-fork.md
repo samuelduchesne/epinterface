@@ -29,6 +29,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-9, layered glazing | Windows of glass and gas layers, `GlazingConstructionLayeredComponent`, as an alternative to simple glazing. |
 | UP-9, window settings | Operable window area and window shading, `WindowSettingsComponent` on the zone envelope. |
 | UP-9, composer | The composer leaves out the component fields of UP-9, which the database does not store. |
+| UP-9, archetype metadata | Construction years, countries, climate zones, authors, version, lifespan and descriptive fields on `Archetype`. |
 
 ## Classes
 
@@ -48,6 +49,12 @@ A building described by its zone groups and building-level characteristics.
 | `Geometry` | `BuildingGeometry` | all fields `None` | Geometry characteristics of the building. |
 | `Attic` | `AtticAssumptions` | unused, unconditioned | Attic assumptions. |
 | `Basement` | `BasementAssumptions` | unused, unconditioned | Basement assumptions. |
+| `YearFrom`, `YearTo` | `int \| None` | `None` | First and last construction year covered (UP-9). `YearFrom` must not be after `YearTo`. |
+| `Country`, `ClimateZone` | `list[str]` | `[]` | Countries and climate zones the archetype applies to (UP-9). |
+| `Authors`, `AuthorEmails` | `list[str]` | `[]` | Its authors and their e-mail addresses (UP-9). |
+| `Version` | `str \| None` | `None` | Version of the archetype's content, not of the file format (UP-9). |
+| `Lifespan` | `int \| None`, ≥ 0 | `None` | Lifespan of the building, years, for life-cycle assessment (UP-9). |
+| `Category`, `Comment`, `DataSource` | `str \| None` | `None` | Descriptive fields, as on SBEM components (UP-9). |
 
 Validation:
 
@@ -638,6 +645,23 @@ component field this fork adds whose type is a component (the window settings
 and the schedules of UP-9) carries `json_schema_extra=NOT_COMPOSED`
 (`epinterface.sbem.common`); `construct_graph` leaves it out, so a composed
 zone keeps its default (`None`) and a composer tree need not select it.
+
+## Archetype metadata (UP-9)
+
+A UMI building template describes itself: construction period, countries,
+climate zones, authors, version and lifespan, plus the category, comments and
+data source of every library component. `Archetype` now holds them (see the
+`Archetype` table above). They are descriptive (and `Lifespan` is used by
+life-cycle assessment): the builder does not read them.
+
+| `Archetype` field | UMI `BuildingTemplate` field |
+|---|---|
+| `YearFrom`, `YearTo` | `YearFrom`, `YearTo` |
+| `Country`, `ClimateZone` | `Country`, `ClimateZone` |
+| `Authors`, `AuthorEmails` | `Authors`, `AuthorEmails` |
+| `Version` | `Version` |
+| `Lifespan` | `Lifespan` |
+| `Category`, `Comment`, `DataSource` | `Category`, `Comments`, `DataSource` |
 
 ## Example
 
