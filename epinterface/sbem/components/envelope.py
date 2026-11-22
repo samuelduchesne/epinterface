@@ -14,7 +14,13 @@ from epinterface.interface import (
     InfDesignFlowRateCalculationMethodType,
     add_constant_schedule,
 )
-from epinterface.sbem.common import BoolStr, MetadataMixin, NamedObject, NanStr
+from epinterface.sbem.common import (
+    NOT_COMPOSED,
+    BoolStr,
+    MetadataMixin,
+    NamedObject,
+    NanStr,
+)
 from epinterface.sbem.components.materials import (
     ConstructionComponentSurfaceType,
     ConstructionMaterialComponent,
@@ -643,6 +649,7 @@ class WindowSettingsComponent(NamedObject, MetadataMixin, extra="forbid"):
         lt=1,
     )
     ShadingSystemAvailabilitySchedule: YearComponent | None = Field(
+        json_schema_extra=NOT_COMPOSED,
         default=None,
         title="Shading availability schedule",
         description=(
@@ -733,6 +740,7 @@ class ZoneEnvelopeComponent(NamedObject, MetadataMixin, extra="forbid"):
     BasementInfiltration: InfiltrationComponent
     Window: WindowConstruction | None
     WindowSettings: WindowSettingsComponent | None = Field(
+        json_schema_extra=NOT_COMPOSED,
         default=None,
         title="Window settings",
         description="How the windows open and are shaded. None: fully operable, unshaded.",

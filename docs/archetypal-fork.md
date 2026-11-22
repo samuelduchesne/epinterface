@@ -28,6 +28,7 @@ on a shoebox by the SBEM builder. Every change here is also offered upstream.
 | UP-9, daylighting | Daylight dimming of the lights, with the illuminance target, workplane height and illuminance map spacing on `LightingComponent`. |
 | UP-9, layered glazing | Windows of glass and gas layers, `GlazingConstructionLayeredComponent`, as an alternative to simple glazing. |
 | UP-9, window settings | Operable window area and window shading, `WindowSettingsComponent` on the zone envelope. |
+| UP-9, composer | The composer leaves out the component fields of UP-9, which the database does not store. |
 
 ## Classes
 
@@ -628,6 +629,15 @@ The other fields of UMI's `WindowSettings` are not added: `Type`,
 `IsVirtualPartition` and the zone-mixing fields describe interior windows,
 which a shoebox does not have, and the `Afn*` fields an airflow network,
 which the builder does not model.
+
+## Fields the composer does not select (UP-9)
+
+The SBEM database and its composer
+(`epinterface.sbem.components.composer`) know only upstream's fields. A
+component field this fork adds whose type is a component (the window settings
+and the schedules of UP-9) carries `json_schema_extra=NOT_COMPOSED`
+(`epinterface.sbem.common`); `construct_graph` leaves it out, so a composed
+zone keeps its default (`None`) and a composer tree need not select it.
 
 ## Example
 

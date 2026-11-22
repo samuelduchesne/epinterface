@@ -23,6 +23,16 @@ class NamedObject(BaseModel):
         return self.Name.replace(" ", "_").replace(",", "_")
 
 
+NOT_COMPOSED: dict[str, bool] = {"sbem_composed": False}
+"""`json_schema_extra` of a component field the composer does not select.
+
+The SBEM database and its composer know only the upstream fields; a field
+added by this fork and marked so is left out of the composer's graph
+(`epinterface.sbem.components.composer.construct_graph`) and keeps its default
+when a component is composed.
+"""
+
+
 NanStr = Annotated[str | None, BeforeValidator(nan_to_none_or_str)]
 BoolStr = Annotated[bool, BeforeValidator(str_to_bool)]
 FloatListStr = Annotated[list[float], BeforeValidator(str_to_float_list)]

@@ -75,6 +75,10 @@ def construct_graph(root_node: type[NamedObject]):
 
     def handle_obj_class(g: nx.DiGraph, field_name: str, obj_class: type[NamedObject]):
         for child_field_name, child_annotation in obj_class.__annotations__.items():
+            info = obj_class.model_fields.get(child_field_name)
+            extra = info.json_schema_extra if info is not None else None
+            if isinstance(extra, dict) and extra.get("sbem_composed") is False:
+                continue
             if isinstance(child_annotation, NamedObject.__class__) and issubclass(
                 child_annotation, NamedObject
             ):

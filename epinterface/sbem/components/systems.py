@@ -7,7 +7,7 @@ from pydantic import Field, model_validator
 
 from epinterface.constants import assumed_constants
 from epinterface.document import EPDocument
-from epinterface.sbem.common import BoolStr, MetadataMixin, NamedObject
+from epinterface.sbem.common import NOT_COMPOSED, BoolStr, MetadataMixin, NamedObject
 from epinterface.sbem.components.schedules import YearComponent
 
 FuelType = Literal[
@@ -223,6 +223,7 @@ class ConditioningSystemsComponent(NamedObject, MetadataMixin, extra="forbid"):
     )
 
     HeatingAvailabilitySchedule: YearComponent | None = Field(
+        json_schema_extra=NOT_COMPOSED,
         default=None,
         title="Heating availability schedule",
         description=(
@@ -231,6 +232,7 @@ class ConditioningSystemsComponent(NamedObject, MetadataMixin, extra="forbid"):
         ),
     )
     CoolingAvailabilitySchedule: YearComponent | None = Field(
+        json_schema_extra=NOT_COMPOSED,
         default=None,
         title="Cooling availability schedule",
         description=(
@@ -372,6 +374,7 @@ class VentilationComponent(NamedObject, MetadataMixin, extra="forbid"):
     )
 
     MechVentSchedule: YearComponent | None = Field(
+        json_schema_extra=NOT_COMPOSED,
         default=None,
         title="Mechanical ventilation schedule",
         description=(
@@ -393,6 +396,7 @@ class VentilationComponent(NamedObject, MetadataMixin, extra="forbid"):
         ge=0,
     )
     ScheduledVentilationSchedule: YearComponent | None = Field(
+        json_schema_extra=NOT_COMPOSED,
         default=None,
         title="Scheduled ventilation schedule",
         description=(
